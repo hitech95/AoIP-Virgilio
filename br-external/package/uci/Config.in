@@ -1,0 +1,8 @@
+config BR2_PACKAGE_UCI
+	bool "uci"
+	depends on BR2_USE_MMU # fork
+	select BR2_PACKAGE_LIBUBOX
+	help
+	  OpenWrt Unified Configuration Interface.
+
+	  https://git.openwrt.org/?p=project/uci.git

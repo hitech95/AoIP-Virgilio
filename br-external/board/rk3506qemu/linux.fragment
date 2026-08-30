@@ -1,0 +1,10 @@
+# Audio
+CONFIG_SND_ALOOP=y
+CONFIG_SND_VIRTIO=y
+
+# PTP (software timestamping)
+CONFIG_PTP_1588_CLOCK=y
+CONFIG_NETWORK_PHY_TIMESTAMPING=y
+
+# Preemption (optional: PREEMPT_RT in M6)
+CONFIG_PREEMPT=y

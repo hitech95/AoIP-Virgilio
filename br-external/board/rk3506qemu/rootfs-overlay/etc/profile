@@ -1,0 +1,17 @@
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+if [ "$PS1" ]; then
+	export PS1='\u@\h:\w\$ '
+fi
+
+export EDITOR='/usr/bin/nano'
+
+[ -f /etc/motd ] && cat /etc/motd
+
+# Source configuration files from /etc/profile.d
+for i in /etc/profile.d/*.sh ; do
+	if [ -r "$i" ]; then
+		. $i
+	fi
+done
+unset i

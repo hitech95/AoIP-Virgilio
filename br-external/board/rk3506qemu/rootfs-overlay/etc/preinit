@@ -1,0 +1,22 @@
+#!/bin/sh
+# Minimal preinit: procd's initd execs this before spawning /sbin/procd.
+# OpenWrt's real preinit (failsafe, initramfs hooks) is not needed here.
+
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+# Board identity, OpenWrt style (/tmp/sysinfo/{board_name,model}).
+# functions.sh:board_name() consumes it; scripts get "generic" without it.
+# On the real RK3506 the vendor DTS provides rockchip,rk3506… here for free.
+if [ -d /proc/device-tree ]; then
+	mkdir -p /tmp/sysinfo
+	[ -e /tmp/sysinfo/board_name ] || \
+		echo "$(strings /proc/device-tree/compatible | head -1)" > /tmp/sysinfo/board_name
+	if [ ! -e /tmp/sysinfo/model ] && [ -e /proc/device-tree/model ]; then
+		echo "$(cat /proc/device-tree/model)" > /tmp/sysinfo/model
+	fi
+fi
+
+# /run/lock (= /tmp/lock via /var -> tmp) is created by procd's early setup
+# before any rc script runs; nothing to do here anymore.
+
+exit 0

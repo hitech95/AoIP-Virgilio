@@ -1,0 +1,3 @@
+::sysinit:/etc/init.d/rcS S boot
+::askconsole:/usr/libexec/login.sh
+::shutdown:/etc/init.d/rcS K shutdown

@@ -1,0 +1,11 @@
+config BR2_PACKAGE_UDEBUG
+	bool "udebug"
+	depends on BR2_USE_MMU # fork
+	select BR2_PACKAGE_LIBUBOX
+	select BR2_PACKAGE_UBUS
+	select BR2_PACKAGE_UCODE
+	help
+	  OpenWrt debug library (libudebug) used by procd and netifd
+	  for tracing. Pinned to OpenWrt 25.12.5 (875e1a7).
+
+	  https://git.openwrt.org/project/udebug.git

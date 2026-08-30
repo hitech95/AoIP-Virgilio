@@ -1,0 +1,2 @@
+# procd scans /etc/hotplug.d: only *directories* are treated as subsystems,
+# so this placeholder file is ignored. Needed to keep the empty dir in git.

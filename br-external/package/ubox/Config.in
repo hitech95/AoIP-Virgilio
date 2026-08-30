@@ -1,0 +1,15 @@
+config BR2_PACKAGE_UBOX
+	bool "ubox"
+	depends on BR2_USE_MMU # fork
+	select BR2_PACKAGE_LIBUBOX
+	select BR2_PACKAGE_UCI
+	help
+	  OpenWrt small system toolbox. This build ships:
+	   - kmodloader: the kernel module loader procd's init invokes on
+	     /etc/modules-boot.d before preinit (dependency-aware, supports
+	     'm:' deferred and 'b:' blocklist entries)
+	   - validate_data + libvalidate: config validation helper used by
+	     uci_validate_section() in lib/functions/procd.sh
+	  Extra tools (logd/logread/lsbloader/getrandom) are disabled.
+
+	  https://github.com/openwrt/ubox

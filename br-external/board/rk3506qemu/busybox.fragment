@@ -1,0 +1,7 @@
+# Enable busybox ntpd for /etc/init.d/sysntpd
+CONFIG_NTPD=y
+CONFIG_FEATURE_NTPD_SERVER=y
+# ipcalc.sh (awk script) needs awk math functions (and/or/rshift/compl)
+CONFIG_FEATURE_AWK_LIBM=y
+# file exfil from guest (M3 DoD: pipeline output to host for verification)
+CONFIG_NC=y

@@ -1,0 +1,11 @@
+config BR2_PACKAGE_JSONFILTER
+	bool "jsonfilter"
+	depends on BR2_USE_MMU # json-c
+	select BR2_PACKAGE_JSON_C
+	select BR2_PACKAGE_LIBUBOX
+	help
+	  OpenWrt JSON filter utility (jsonpath). Required by rc.common
+	  (service status), lib/functions/procd.sh and lib/functions/network.sh
+	  (network_get_* helpers used by ifup/ifstatus).
+
+	  https://github.com/openwrt/jsonpath

@@ -1,0 +1,11 @@
+config BR2_PACKAGE_PROCD
+	bool "procd"
+	depends on BR2_USE_MMU # fork
+	select BR2_PACKAGE_LIBUBOX
+	select BR2_PACKAGE_UBUS
+	select BR2_PACKAGE_UCI
+	select BR2_PACKAGE_UDEBUG
+	help
+	  OpenWrt init daemon (PID 1) with service supervision and hotplug.
+
+	  https://git.openwrt.org/?p=project/procd.git

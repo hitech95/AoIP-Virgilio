@@ -1,0 +1,55 @@
+Description: add UBOX_BUILD_EXTRA_TOOLS / UBOX_BUILD_LOGGING options
+ Disable getrandom/lsbloader (not needed); keep logd/logread switchable
+ (logd links udebug in 25.12.5).
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -19,12 +19,15 @@
+ INCLUDE (CheckSymbolExists)
+ CHECK_SYMBOL_EXISTS(SYS_getrandom syscall.h getrandom)
+ 
+-IF(getrandom)
++OPTION(UBOX_BUILD_EXTRA_TOOLS "build getrandom/lsbloader" OFF)
++OPTION(UBOX_BUILD_LOGGING "build logd and logread" ON)
++
++IF(getrandom AND UBOX_BUILD_EXTRA_TOOLS)
+   ADD_EXECUTABLE(getrandom getrandom.c)
+   INSTALL(TARGETS getrandom
+           RUNTIME DESTINATION bin
+   )
+-ELSE()
++ELSEIF(UBOX_BUILD_EXTRA_TOOLS)
+   message( FATAL_ERROR "Kernel too old, missing SYS_getrandom system call")
+ ENDIF()
+ 
+@@ -35,12 +38,14 @@
+ 	RUNTIME DESTINATION sbin
+ )
+ 
++IF(UBOX_BUILD_EXTRA_TOOLS)
+ ADD_EXECUTABLE(lsbloader lsbloader.c)
+ TARGET_LINK_LIBRARIES(lsbloader ubox ubus)
+ 
+ INSTALL(TARGETS lsbloader
+ 	RUNTIME DESTINATION sbin
+ )
++ENDIF()
+ 
+ ADD_LIBRARY(validate SHARED validate/validate.c)
+ INSTALL(TARGETS validate
+@@ -56,14 +61,16 @@
+ 	RUNTIME DESTINATION sbin
+ )
+ 
++IF(UBOX_BUILD_LOGGING)
+ ADD_EXECUTABLE(logd log/logd.c log/syslog.c)
+ TARGET_LINK_LIBRARIES(logd ubox ubus udebug)
+ INSTALL(TARGETS logd
+ 	RUNTIME DESTINATION sbin
+ )
+ 
+ ADD_EXECUTABLE(logread log/logread.c)
+ TARGET_LINK_LIBRARIES(logread ubox ubus ${json} blobmsg_json)
+ INSTALL(TARGETS logread
+ 	RUNTIME DESTINATION sbin
+ )
++ENDIF()

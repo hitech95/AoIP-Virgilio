@@ -1,0 +1,3 @@
+# Boot-critical modules (loaded by /sbin/kmodloader before preinit, invoked by
+# procd's init). Only directories' *files* are scanned; audio modules live in
+# /etc/modules.d (loaded by S00sysv-compat) as they are not boot-critical.

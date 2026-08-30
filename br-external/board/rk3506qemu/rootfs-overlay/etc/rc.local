@@ -1,0 +1,5 @@
+# Put your custom commands here that should be executed once
+# the system init finished (called by /etc/init.d/done).
+# Executed with the "boot" action, before S98 services.
+
+exit 0

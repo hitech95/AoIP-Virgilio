@@ -1,0 +1,33 @@
+Description: disable libnl udebug callbacks
+ OpenWrt patches libnl with nl_socket_set_{tx,rx}_debug_cb() hooks; upstream
+ (Buildroot) libnl lacks them. Compile the callback out.
+
+--- a/system-linux.c
++++ b/system-linux.c
+@@ -199,6 +199,7 @@
+ 	return;
+ }
+ 
++#ifdef HAS_LIBNL_UDEBUG
+ static void
+ nl_udebug_cb(void *priv, struct nl_msg *msg)
+ {
+@@ -206,6 +207,7 @@
+ 
+ 	udebug_netlink_msg(priv, nlmsg_get_proto(msg), nlh, nlh->nlmsg_len);
+ }
++#endif
+ 
+ static struct nl_sock *
+ create_socket(int protocol, int groups)
+@@ -224,8 +226,10 @@
+ 		return NULL;
+ 	}
+ 
++#ifdef HAS_LIBNL_UDEBUG
+ 	nl_socket_set_tx_debug_cb(sock, nl_udebug_cb, &udb_nl);
+ 	nl_socket_set_rx_debug_cb(sock, nl_udebug_cb, &udb_nl);
++#endif
+ 
+ 	return sock;
+ }

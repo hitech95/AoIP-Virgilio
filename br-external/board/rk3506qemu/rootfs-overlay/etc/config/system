@@ -1,0 +1,10 @@
+config system
+	option hostname 'rk3506qemu'
+	option timezone 'UTC'
+	option zonename 'UTC'
+	# KiB; default 64 rotated away in seconds under statime/camilladsp
+	# chatter (e.g. the inferno short-read warnings)
+	option log_buffer_size '256'
+
+config timeserver 'ntp'
+	list server 'pool.ntp.org'

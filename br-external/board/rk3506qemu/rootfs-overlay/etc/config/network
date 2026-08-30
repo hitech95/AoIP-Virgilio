@@ -1,0 +1,17 @@
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config interface 'lan'
+	option device 'eth0'
+	option proto 'dhcp'
+
+# Dante/PTP segment (eth1, only present in run-qemu.sh rig mode): statime +
+# inferno bind here; rigs assign the static IP via uci (see
+# scripts/test-*.sh). proto 'none' just brings the link up — no DHCP server
+# exists on the isolated segment.
+config interface 'aoip'
+	option device 'eth1'
+	option proto 'none'
