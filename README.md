@@ -1,4 +1,7 @@
-# dante — RK3506 Dante audio firmware on QEMU
+# virgilio — OpenWrt-style firmware for Dante/AES67 DSP speakers
+
+*Virgil is the guide who leads Dante through the Inferno — this firmware is
+what guides the [inferno] Dante stack inside an embedded speaker.*
 
 A minimal Linux firmware for a Rockchip RK3506-class target (3× ARM
 Cortex-A7 + NEON, 32-bit hard-float, musl), developed and validated in QEMU.
@@ -69,6 +72,14 @@ test boots never modify the built image.
 | `docs/ptp-monitor.md` | usrvclock monitor, ubus object, hotplug policy |
 | `docs/test-*.md` | scripted milestone tests (socket-rig era, still valid) |
 | `docs/crossover-to-camilladsp.md` | speaker DSP crossover background |
+
+## License
+
+The repository's own files (build recipes, overlay, scripts, docs) are
+licensed under **GPL-3.0-or-later** (see `LICENSE`). Files ported from
+OpenWrt keep their original GPL-2.0 headers. The integrated upstream
+projects retain their licenses: camilladsp (GPL-3.0-or-later), inferno
+(GPL-3.0-or-later OR AGPL-3.0-or-later), statime (MIT OR Apache-2.0).
 
 ## Key facts
 
