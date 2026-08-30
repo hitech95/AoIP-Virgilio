@@ -1,0 +1,10 @@
+# Buildroot output
+/output/
+
+# QEMU artifacts
+*.wav
+results/*.tmp
+
+# editor
+*.swp
+__pycache__/

@@ -1,0 +1,15 @@
+menu "RK3506 QEMU packages"
+
+# libubox and ubus come from Buildroot upstream (package/libubox, package/ubus)
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/camilladsp/Config.in"
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/statime/Config.in"
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/inferno/Config.in"
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/uci/Config.in"
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/procd/Config.in"
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/netifd/Config.in"
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/jsonfilter/Config.in"
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/ubox/Config.in"
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/ucode/Config.in"
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/udebug/Config.in"
+
+endmenu

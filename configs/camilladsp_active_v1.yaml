@@ -1,0 +1,80 @@
+# PROVISIONAL active crossover for SB12PACR25-4-COAX (v1)
+#
+# Target-based design (NOT a passive-network replica). Replaces the passive
+# network entirely; MONO speaker: 2 amplifier channels (one per driver),
+# both drivers non-inverted, coax = coincident so no delay.
+#
+# Assumptions - refine with real driver FRD/ZMA when available:
+#   - woofer in recommended 1.5 L sealed box: ~flat through the crossover band
+#   - tweeter natural 2nd-order HP at Fs=1300 Hz, assumed Q~0.5: droops ~2-3 dB
+#     at 2-3 kHz, compensated by placing the electrical HP4 lower (1900 Hz)
+#   - level: both drivers 87.5 dB, no pad
+#   - the 10 kHz dip / 17 kHz peak seen in the user's sim are EQ'd on the
+#     tweeter; verify by measurement before trusting
+devices:
+  samplerate: 96000
+  chunksize: 1024
+  capture:
+    type: Stdin
+    channels: 1
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:YourDAC"
+mixers:
+  mono_split:
+    type: Mixer
+    channels:
+      in: 1
+      out: 2
+    parameters:
+      mapping:
+        - dest: 0
+          sources:
+            - channel: 0
+              gain: 0.0
+              inverted: false
+        - dest: 1
+          sources:
+            - channel: 0
+              gain: 0.0
+              inverted: false
+filters:
+  w_lp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 2300
+      order: 4
+  t_hp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 1900
+      order: 4
+  t_notch10k:
+    type: Biquad
+    parameters:
+      type: Notch
+      freq: 10000
+      q: 2.0
+  t_peak17k:
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 17000
+      gain: -3.0
+      q: 2.0
+pipeline:
+  - type: Mixer
+    name: mono_split
+  - type: Filter
+    channel: 0
+    names:
+      - w_lp
+  - type: Filter
+    channel: 1
+    names:
+      - t_hp
+      - t_notch10k
+      - t_peak17k

@@ -1,0 +1,15 @@
+[submodule "deps/camilladsp"]
+	path = deps/camilladsp
+	url = https://github.com/HEnquist/camilladsp.git
+[submodule "deps/inferno"]
+	path = deps/inferno
+	url = https://github.com/teodly/inferno.git
+	branch = dev
+[submodule "buildroot"]
+	path = buildroot
+	url = https://github.com/buildroot/buildroot.git
+	branch = 2025.02.x
+[submodule "deps/statime"]
+	path = deps/statime
+	url = https://github.com/teodly/statime.git
+	branch = inferno-dev

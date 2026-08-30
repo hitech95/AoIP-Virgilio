@@ -1,0 +1,99 @@
+# Passive-crossover replica using ONLY native CamillaDSP filters.
+# Fs-independent: all filter parameters are computed by CamillaDSP at load,
+# so the FILTER SECTIONS below are identical for 44.1k / 48k / 96k / 192k.
+# On a source rate change: restart camilladsp and update ONLY
+# devices.samplerate - no coefficient regeneration, ever.
+#
+# MONO speaker: 1 input channel -> woofer (ch0) + tweeter (ch1).
+# For a stereo source, change capture.channels to 2 and the mixer mapping
+# to sum ch0+ch1 into the two outputs (add a -3 dB gain per source).
+#
+# Caveat: the 11.4 kHz tweeter pole pre-warps internally per Fs. Tilt of the
+# 1-3 kHz tweeter region: -2.3 dB @44.1k, -1.9 @48k, -0.5 @88.2k, -0.4 @96k,
+# -0.1 @192k. If running 44.1/48k and the region measures low, lower
+# t1_hp freq to ~9600 / ~9800.
+devices:
+  samplerate: 96000
+  chunksize: 1024
+  capture:
+    type: Stdin
+    channels: 1
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:YourDAC"
+mixers:
+  mono_split:
+    type: Mixer
+    channels:
+      in: 1
+      out: 2
+    parameters:
+      mapping:
+        - dest: 0
+          sources:
+            - channel: 0
+              gain: 0.0
+              inverted: false
+        - dest: 1
+          sources:
+            - channel: 0
+              gain: 0.0
+              inverted: false
+filters:
+  w1_shelf:
+    type: Biquad
+    parameters:
+      type: HighshelfFO
+      freq: 1172.7
+      gain: -9.04
+  w2_lp:
+    type: Biquad
+    parameters:
+      type: Lowpass
+      freq: 3376.3
+      q: 2.526
+  w_gain:
+    type: Gain
+    parameters:
+      gain: -0.57
+      inverted: false
+  t1_hp:
+    type: Biquad
+    parameters:
+      type: HighpassFO
+      freq: 11447.4
+  t2_hp:
+    type: Biquad
+    parameters:
+      type: Highpass
+      freq: 2786.4
+      q: 1.467
+  t2_shelf2:
+    type: Biquad
+    parameters:
+      type: LowshelfFO
+      freq: 1118.4
+      gain: 20.0
+  t2_shelf1:
+    type: Biquad
+    parameters:
+      type: LowshelfFO
+      freq: 237.9
+      gain: 6.0
+pipeline:
+  - type: Mixer
+    name: mono_split
+  - type: Filter
+    channel: 0
+    names:
+      - w1_shelf
+      - w2_lp
+      - w_gain
+  - type: Filter
+    channel: 1
+    names:
+      - t1_hp
+      - t2_hp
+      - t2_shelf2
+      - t2_shelf1
