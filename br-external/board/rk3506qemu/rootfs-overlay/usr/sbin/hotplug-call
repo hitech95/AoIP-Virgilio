@@ -1,0 +1,22 @@
+#!/bin/sh
+# hotplug-call — run /etc/hotplug.d/<type>/* handlers, ported from
+# openwrt.git package/base-files/files/sbin/hotplug-call (GPL-2.0, 2006-2016
+# OpenWrt.org). netifd execs this on interface events; our ptp hotplug
+# dispatcher reuses the same directory scheme. Handlers run in subshells
+# so their variables never leak.
+
+export HOTPLUG_TYPE="$1"
+
+. /lib/functions.sh
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+LOGNAME=root
+USER=root
+export PATH LOGNAME USER
+export DEVICENAME="${DEVPATH##*/}"
+
+if [ \! -z "$1" -a -d /etc/hotplug.d/$1 ]; then
+	for script in $(ls /etc/hotplug.d/$1/* 2>&-); do (
+		[ -f $script ] && . $script
+	); done
+fi
