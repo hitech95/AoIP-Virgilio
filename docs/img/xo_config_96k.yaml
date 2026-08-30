@@ -1,0 +1,90 @@
+devices:
+  samplerate: 96000
+  chunksize: 1024
+  capture:
+    type: Stdin
+    channels: 2
+  playback:
+    type: Alsa
+    channels: 4
+    device: "hw:YourDAC"
+mixers:
+  split4:
+    type: Mixer
+    channels:
+      in: 2
+      out: 4
+    parameters:
+      mapping:
+        - dest: 0
+          sources:
+            - channel: 0
+              gain: 0.0
+              inverted: false
+        - dest: 1
+          sources:
+            - channel: 0
+              gain: 0.0
+              inverted: false
+        - dest: 2
+          sources:
+            - channel: 1
+              gain: 0.0
+              inverted: false
+        - dest: 3
+          sources:
+            - channel: 1
+              gain: 0.0
+              inverted: false
+filters:
+  w1_shelf:
+    type: Biquad
+    parameters:
+      type: Freeform
+      b0: 0.367487752
+      b1: 0.044587555
+      b2: -0.322900197
+      a1: 0.044587555
+      a2: -0.955412445
+  w2_lp:
+    type: Biquad
+    parameters:
+      type: Freeform
+      b0: 0.0108276272
+      b1: 0.0216552545
+      b2: 0.0108276272
+      a1: -1.87092084
+      a2: 0.917165286
+  t1_hp:
+    type: Biquad
+    parameters:
+      type: Freeform
+      b0: 0.727475423
+      b1: -0.727475423
+      b2: 0.0
+      a1: -0.454950847
+      a2: 0.0
+  t2_hp:
+    type: Biquad
+    parameters:
+      type: Freeform
+      b0: 1.05376708
+      b1: -1.86598919
+      b2: 0.816977523
+      a1: -1.85283237
+      a2: 0.883901423
+pipeline:
+  - type: Mixer
+    name: split4
+  - type: Filter
+    channel: 0
+    names: [w1_shelf, w2_lp]
+  - type: Filter
+    channel: 1
+    names: [t1_hp, t2_hp]
+  - type: Filter
+    channel: 2
+    names: [w1_shelf, w2_lp]
+  - type: Filter
+    channel: 3
+    names: [t1_hp, t2_hp]
