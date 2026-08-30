@@ -1,0 +1,63 @@
+diff --git a/inferno_aoip/src/device_server/mod.rs b/inferno_aoip/src/device_server/mod.rs
+index 0a280bd..6b9abf0 100644
+--- a/inferno_aoip/src/device_server/mod.rs
++++ b/inferno_aoip/src/device_server/mod.rs
+@@ -84,7 +84,7 @@ pub struct DeviceServer {
+ impl DeviceServer {
+   pub async fn start(settings: settings::Settings) -> Self {
+     let self_info = Arc::new(settings.self_info);
+-    let state_storage = Arc::new(StateStorage::new(&self_info));
++    let state_storage = Arc::new(StateStorage::new(&self_info, settings.state_path));
+     let ref_instant = Instant::now();
+ 
+     let (shutdown_send, shdn_recv1) = broadcast_queue::channel(16);
+diff --git a/inferno_aoip/src/device_server/settings.rs b/inferno_aoip/src/device_server/settings.rs
+index 359fa90..8541bec 100644
+--- a/inferno_aoip/src/device_server/settings.rs
++++ b/inferno_aoip/src/device_server/settings.rs
+@@ -156,6 +156,7 @@ pub struct Settings {
+   pub self_info: DeviceInfo,
+   pub tx_latency_ns: u32,
+   pub clock_path: Option<PathBuf>,
++  pub state_path: Option<PathBuf>,
+   pub use_safe_clock: bool,
+   pub tx_source_bit_depth: u8,
+ }
+@@ -200,6 +201,7 @@ impl Settings {
+         .map(|p| p.parse().expect("invalid TX_LATENCY_NS, must be integer"))
+         .unwrap_or(10_000_000),
+       clock_path: config.get("CLOCK_PATH").map(|p| p.try_into().unwrap()),
++      state_path: config.get("STATE_PATH").map(|p| p.try_into().unwrap()),
+       use_safe_clock,
+       tx_source_bit_depth,
+     };
+diff --git a/inferno_aoip/src/state_storage.rs b/inferno_aoip/src/state_storage.rs
+index e582e3d..264972c 100644
+--- a/inferno_aoip/src/state_storage.rs
++++ b/inferno_aoip/src/state_storage.rs
+@@ -18,10 +18,21 @@ pub struct StateStorage {
+ }
+ 
+ impl StateStorage {
+-  pub fn new(self_info: &DeviceInfo) -> Self {
+-    let dir = AppDirs::new(Some("inferno_aoip"), false).unwrap().state_dir.to_str().unwrap().to_owned()
+-      + MAIN_SEPARATOR_STR
+-      + &hex::encode(self_info.factory_device_id);
++  pub fn new(self_info: &DeviceInfo, state_base: Option<std::path::PathBuf>) -> Self {
++    // Explicit base directory (INFERNO_STATE_PATH) wins over the XDG /
++    // home fallback: daemons without HOME would otherwise land in /.local,
++    // and embedded setups want state on a dedicated persistent volume.
++    // Final layout is always <base>/inferno_aoip/<factory-device-id>/.
++    let mut dir = match state_base {
++      Some(p) => {
++        let mut p = p;
++        p.push("inferno_aoip");
++        p
++      }
++      None => AppDirs::new(Some("inferno_aoip"), false).unwrap().state_dir,
++    };
++    dir.push(hex::encode(self_info.factory_device_id));
++    let dir = dir.to_str().unwrap().to_owned();
+     create_dir_all(&dir).log_and_forget();
+     info!("using state directory: {dir}");
+     Self { path_prefix: dir + MAIN_SEPARATOR_STR }

@@ -1,0 +1,28 @@
+# statime: PTP daemon settings. /etc/init.d/statime renders /tmp/statime.toml
+# from these options at every start (see docs/inferno.md).
+#
+# priority1: BMCA — lower wins GrandMaster (Dante hardware uses 249; the
+# default 251 means "slave unless nobody better is present").
+# protocol: PTPv1 or PTPv2 (the fork cannot act as master in PTPv1).
+
+config statime 'main'
+	# info logs 2 large Measurement lines/s (~1.5 KB/s): floods the 256 KiB
+	# ring buffer within minutes AND costs real CPU under TCG. Use info only
+	# when actively diagnosing clock quality (docs/bridge-rig.md).
+	option loglevel 'warn'
+	option domain '0'
+	option sdo_id '0'
+	option priority1 '251'
+	option slave_only '0'
+	# port settings (single-port setup, the Dante/PTP segment NIC)
+	option interface 'eth1'
+	option network_mode 'ipv4'
+	# auto | required | none | <PHC index>
+	option hardware_clock 'auto'
+	option protocol 'PTPv2'
+	# virtual media clock exported to inferno
+	option virtual_system_clock '1'
+	# TAI | monotonic | monotonic_raw | monotonic_coarse
+	option virtual_system_clock_base 'monotonic_raw'
+	option usrvclock_export '1'
+	option usrvclock_path '/tmp/ptp-usrvclock'

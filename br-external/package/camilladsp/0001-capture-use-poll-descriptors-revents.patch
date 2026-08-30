@@ -1,0 +1,96 @@
+diff --git a/src/alsa_backend/device.rs b/src/alsa_backend/device.rs
+index 10f3b17..0964e7e 100644
+--- a/src/alsa_backend/device.rs
++++ b/src/alsa_backend/device.rs
+@@ -757,7 +757,7 @@ fn capture_loop_bytes(
+     let fds = pcmdevice.get().unwrap();
+     trace!("File descriptors: {fds:?}");
+     let nbr_pcm_fds = fds.len();
+-    let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds };
++    let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds, pcm: pcmdevice };
+ 
+     let mut element_loopback: Option<ElemData> = None;
+     let mut element_uac2_gadget: Option<ElemData> = None;
+diff --git a/src/alsa_backend/threaded_device.rs b/src/alsa_backend/threaded_device.rs
+index d2808c5..7aa4aae 100644
+--- a/src/alsa_backend/threaded_device.rs
++++ b/src/alsa_backend/threaded_device.rs
+@@ -1401,7 +1401,7 @@ impl CaptureDevice for AlsaCaptureDevice {
+ 
+                                 let fds = pcmdevice.get().unwrap();
+                                 let nbr_pcm_fds = fds.len();
+-                                let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds };
++                                let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds, pcm: pcmdevice };
+ 
+                                 let mut element_loopback: Option<ElemData> = None;
+                                 let mut element_uac2_gadget: Option<ElemData> = None;
+diff --git a/src/alsa_backend/utils.rs b/src/alsa_backend/utils.rs
+index 09c8097..e36cf02 100644
+--- a/src/alsa_backend/utils.rs
++++ b/src/alsa_backend/utils.rs
+@@ -21,7 +21,7 @@ use alsa::ctl::{Ctl, DeviceIter, ElemId, ElemIface, ElemType, ElemValue};
+ use alsa::device_name::HintIter;
+ use alsa::hctl::{Elem, HCtl};
+ use alsa::pcm::{Format, HwParams};
+-use alsa::{Card, Direction};
++use alsa::{Card, Direction, PollDescriptors};
+ use alsa_sys;
+ use nix::errno::Errno;
+ use parking_lot::RwLock;
+@@ -404,9 +404,10 @@ pub struct CaptureElements<'a> {
+     pub mute: Option<ElemData<'a>>,
+ }
+ 
+-pub struct FileDescriptors {
++pub struct FileDescriptors<'a> {
+     pub fds: Vec<alsa::poll::pollfd>,
+     pub nbr_pcm_fds: usize,
++    pub pcm: &'a alsa::PCM,
+ }
+ 
+ #[derive(Debug)]
+@@ -416,32 +417,26 @@ pub struct PollResult {
+     pub ctl: bool,
+ }
+ 
+-impl FileDescriptors {
++impl<'a> FileDescriptors<'a> {
+     pub fn wait(&mut self, timeout: i32) -> alsa::Result<PollResult> {
+         let nbr_ready = alsa::poll::poll(&mut self.fds, timeout)?;
+         trace!("Got {nbr_ready} ready fds");
+-        let mut nbr_found = 0;
+         let mut pcm_res = false;
+-        for fd in self.fds.iter().take(self.nbr_pcm_fds) {
+-            if fd.revents > 0 {
+-                pcm_res = true;
+-                nbr_found += 1;
+-                if nbr_found == nbr_ready {
+-                    // We are done, let's return early
+-
+-                    return Ok(PollResult {
+-                        poll_res: nbr_ready,
+-                        pcm: pcm_res,
+-                        ctl: false,
+-                    });
+-                }
+-            }
++        if nbr_ready > 0 && self.nbr_pcm_fds > 0 {
++            // Translate the raw fd events through ALSA. This is mandatory for
++            // userspace (ioplug) PCMs, where the poll descriptors only become
++            // meaningful after snd_pcm_poll_descriptors_revents() has
++            // demultiplexed and acknowledged them.
++            let flags = self.pcm.revents(&self.fds[..self.nbr_pcm_fds])?;
++            trace!("PCM revents: {flags:?}");
++            pcm_res = !flags.is_empty();
+         }
+-        // There were other ready file descriptors than PCM, must be controls
++        // Any ready descriptors after the PCM ones are controls
++        let ctl = self.fds[self.nbr_pcm_fds..].iter().any(|fd| fd.revents != 0);
+         Ok(PollResult {
+             poll_res: nbr_ready,
+             pcm: pcm_res,
+-            ctl: true,
++            ctl,
+         })
+     }
+ }

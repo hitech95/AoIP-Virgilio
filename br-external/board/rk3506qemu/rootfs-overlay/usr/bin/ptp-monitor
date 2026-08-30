@@ -1,0 +1,306 @@
+#!/usr/bin/ucode
+/*
+ * ptp-monitor -- ucode daemon exposing statime's usrvclock state over ubus
+ * and triggering procd hotplug events on lock/lost transitions.
+ *
+ * usrvclock protocol (usrvclock-rs, see deps/inferno/usrvclock-rs):
+ * statime binds a unix datagram socket at clock_path; a client registers
+ * by sending an empty datagram and then receives a 40-byte update on every
+ * servo action (OverlayClock::set_frequency/step_clock -> Server::send).
+ * The servo only acts on incoming sync/delay measurements, i.e. updates
+ * flow exclusively while statime is SLAVED to a PTP master. A lone node
+ * that self-elects grandmaster via BMCA never receives syncs -> the socket
+ * stays quiet -> no media clock for the inferno ALSA plugin.
+ *
+ *   wire format (native endian, LE on target):
+ *     [0..2)  'V''C' magic     [2..4) proto major u16
+ *     [4..6)  proto minor u16  [6..8) flags u16 (=1)
+ *     [8..16)  clock_id  i64   (underlying clockid)
+ *     [16..24) last_sync i64 ns (underlying clock at last export)
+ *     [24..32) shift     i64 ns (accumulated clock correction)
+ *     [32..40) freq_scale f64  (rate correction, fractional)
+ *
+ * Outputs (this daemon only *reports*, it never manages services itself;
+ * policy lives in /etc/hotplug.d/ptp/*):
+ *  - ubus object "ptp":            ubus call ptp status
+ *  - ubus events "ptp":            ubus listen ptp   (on transitions)
+ *  - procd hotplug subsystem ptp:  sources /etc/hotplug.d/ptp/* with
+ *    ACTION=locked|lost (+ PTP_CLOCK_PATH / PTP_SHIFT_NS / PTP_FREQ_PPM)
+ *    via the hotplug.ptp ubus dispatcher (procd hotplug-dispatch watches
+ *    /etc/hotplug.d with inotify; scripts are sourced with
+ *    /lib/functions.sh preloaded). While locked, ACTION=locked is
+ *    re-emitted every ~60 s so idempotent handlers can self-heal.
+ *
+ * config: /etc/config/ptp-monitor
+ */
+
+import { readfile, unlink } from "fs";
+import * as struct from "struct";
+import * as socket from "socket";
+import * as uloop from "uloop";
+import * as ubus from "ubus";
+
+const TICK_MS = 1000;
+const HEAL_TICKS = 60;          // re-emit ACTION=locked while locked (~60 s)
+const REG_RETRY_TICKS = 5;      // re-register when starved (~5 s)
+const SOCK_PATH = "/tmp/ptp-monitor.sock";
+
+// --- config ---------------------------------------------------------------
+
+function parse_option(path, key, defval) {
+	let data = readfile(path);
+	if (!data)
+		return defval;
+
+	for (line in split(data, "\n")) {
+		line = trim(line);
+		if (substr(line, 0, 7) != "option ")
+			continue;
+		let t = split(substr(line, 7), " ");
+		if (length(t) >= 2 && trim(t[0]) == key)
+			return trim(t[length(t) - 1], "'\"");
+	}
+	return defval;
+}
+
+const CFG = "/etc/config/ptp-monitor";
+let opt_clock_path = parse_option(CFG, "clock_path", "/tmp/ptp-usrvclock");
+let opt_settle = int(parse_option(CFG, "settle", "3"));
+let opt_lost = int(parse_option(CFG, "lost_timeout", "5"));
+// statime observation socket (see /etc/init.d/statime): one JSON blob of
+// the full instance state per client connect
+const OBS_PATH = "/tmp/statime-observe.sock";
+// uci 'protocol' is "PTPv1"/"PTPv2" -> report as plain integer 1|2
+let opt_ptp_version = index(parse_option("/etc/config/statime", "protocol", "PTPv2"), "2") >= 0 ? 2 : 1;
+
+// --- state ----------------------------------------------------------------
+
+let conn = null;      // ubus connection
+let sk = null;        // usrvclock client socket
+let obsk = null;      // observation socket (stream, nonblocking)
+let obs_buf = "";
+let mode = null;      // statime port state ("Master"/"Slave"/...) or null
+let dom = null;       // PTP domain number
+let prio1 = null;     // priority1
+let locked = false;
+let live_ticks = 0;   // consecutive ticks that received updates
+let stale = 1000000;  // ticks since last update (starts "very stale")
+let updates = 0;
+let last = null;      // last parsed overlay
+let reg_ticks = 1000000;
+let heal = 0;
+let ticks = 0;
+
+function log(msg) {
+	print("ptp-monitor: " + msg + "\n");
+}
+
+// --- usrvclock client -------------------------------------------------------
+
+function sock_rebuild() {
+	if (sk) {
+		try { sk.close(); } catch (e) {}
+		sk = null;
+	}
+	unlink(SOCK_PATH);
+	try {
+		sk = socket.create(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK);
+		sk.bind(SOCK_PATH);
+		sk.connect(opt_clock_path);
+		sk.send("");   // register: server answers on its next send()
+	} catch (e) {
+		sk = null;
+	}
+	reg_ticks = 0;
+}
+
+function drain() {
+	if (!sk)
+		return 0;
+
+	let got = 0;
+	while (got < 64) {
+		let d;
+		try { d = sk.recv(64); } catch (e) { break; }
+		if (d == null || length(d) < 40)
+			break;
+
+		got++;
+		updates++;
+		stale = 0;
+
+		if (substr(d, 0, 2) != "VC")
+			continue;
+
+		let v = struct.unpack("<qqqd", d, 8);
+		// clock_id/last_sync are i64 and lose precision beyond 2^53 when
+		// serialized as ucode numbers; good enough for status display.
+		last = {
+			clock_id: v[0],
+			last_sync_ns: v[1],
+			shift_ns: v[2],
+			freq_scale: v[3],
+			freq_ppm: v[3] * 1000000.0
+		};
+	}
+	return got;
+}
+
+// --- statime observation socket --------------------------------------------
+// statime's observer serves one JSON blob per client connect:
+//   { "program": { "uptime": ... },
+//     "instance": { "default_ds": { priority_1, domain_number, ... },
+//                   "port_ds": [ { "port_state": "Master", ... } ] } }
+// Refresh every 5 ticks: connect on one tick, drain+parse on the next
+// (nonblocking sockets only -- the uloop must never block).
+
+function obs_poll() {
+	if (obsk) {
+		let d;
+		try { d = obsk.recv(65536); } catch (e) { d = null; }
+		if (d != null && length(d) > 0) {
+			obs_buf += d;
+			return;
+		}
+		// EOF or error: parse what we got and re-arm for the next cycle
+		try { obsk.close(); } catch (e) {}
+		obsk = null;
+		if (index(obs_buf, "{") >= 0) {
+			try {
+				let st = json(obs_buf);
+				let dds = st?.instance?.default_ds;
+				let pds = st?.instance?.port_ds;
+				if (dds) {
+					dom = dds.domain_number;
+					prio1 = dds.priority_1;
+				}
+				if (pds && length(pds) > 0)
+					mode = lc(pds[0].port_state);
+			} catch (e) {}
+		}
+		obs_buf = "";
+		return;
+	}
+
+	// (re)connect: statime writes the blob as soon as we are accepted
+	try {
+		obsk = socket.create(socket.AF_UNIX, socket.SOCK_STREAM | socket.SOCK_NONBLOCK);
+		obsk.connect(OBS_PATH);
+	} catch (e) {
+		obsk = null;
+	}
+}
+
+// --- ubus -------------------------------------------------------------------
+
+function status() {
+	return {
+		locked: locked,
+		mode: mode,                    // statime port state (Master/Slave/...)
+		ptp_version: opt_ptp_version,  // as configured (PTPv1/PTPv2)
+		domain: dom,
+		priority1: prio1,
+		updates: updates,
+		clock_path: opt_clock_path,
+		clock_id: last ? last.clock_id : null,
+		shift_ns: last ? last.shift_ns : null,
+		freq_scale: last ? last.freq_scale : null,
+		freq_ppm: last ? last.freq_ppm : null,
+		last_sync_ns: last ? last.last_sync_ns : null
+	};
+}
+
+function ubus_connect() {
+	try {
+		conn = ubus.connect();
+		conn.publish("ptp", {
+			status: {
+				call: function(req) { req.reply(status()); }
+			}
+		});
+	} catch (e) {
+		conn = null;
+	}
+}
+
+function ubus_event(data) {
+	if (!conn)
+		return;
+	try { conn.call("ubus", "event", { type: "ptp", data: data }); } catch (e) {}
+}
+
+// Trigger procd's hotplug dispatcher for the "ptp" subsystem
+// (/etc/hotplug.d/ptp/* are sourced with ACTION + PTP_* in the env).
+function emit_hotplug(action) {
+	if (!conn)
+		return;
+
+	let env = [
+		"ACTION=" + action,
+		"PTP_CLOCK_PATH=" + opt_clock_path
+	];
+	if (last) {
+		push(env, "PTP_SHIFT_NS=" + last.shift_ns);
+		push(env, "PTP_FREQ_PPM=" + last.freq_ppm);
+	}
+
+	try { conn.call("hotplug.ptp", "call", { env: env }); } catch (e) {}
+}
+
+// --- main loop ----------------------------------------------------------------
+
+function tick() {
+	if (!conn)
+		ubus_connect();
+
+	let got = drain();
+
+	// refresh statime port state every 5 ticks
+	if (ticks % 5 == 0)
+		obs_poll();
+	ticks++;
+
+	if (got > 0) {
+		live_ticks++;
+		stale = 0;
+	} else {
+		stale++;
+		if (!locked)
+			live_ticks = 0;
+	}
+
+	// server gone (statime restarted) or never came up: re-register
+	reg_ticks++;
+	if (stale >= opt_lost && reg_ticks >= REG_RETRY_TICKS)
+		sock_rebuild();
+
+	if (!locked && live_ticks >= opt_settle) {
+		locked = true;
+		heal = 0;
+		log("clock locked (statime tracking a PTP master)");
+		ubus_event(status());
+		emit_hotplug("locked");
+	} else if (locked && stale >= opt_lost) {
+		locked = false;
+		live_ticks = 0;
+		log("clock lost (no usrvclock updates for " + opt_lost + " s)");
+		ubus_event(status());
+		emit_hotplug("lost");
+	}
+
+	// self-heal support: re-emit ACTION=locked while locked so that
+	// idempotent hotplug handlers can restart a crashed service
+	heal++;
+	if (locked && heal >= HEAL_TICKS) {
+		heal = 0;
+		emit_hotplug("locked");
+	}
+}
+
+uloop.init();
+ubus_connect();
+sock_rebuild();
+log(sprintf("watching %s (settle=%d lost_timeout=%d)",
+            opt_clock_path, opt_settle, opt_lost));
+uloop.interval(TICK_MS, tick);
+uloop.run();

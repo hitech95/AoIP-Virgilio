@@ -1,0 +1,26 @@
+#!/bin/sh
+# mpd-ctl -- minimal MPD client via busybox nc (MPD protocol is plain
+# text over TCP 6600). NB: busybox nc exits on stdin EOF, so the command
+# stream is held open for a second to let MPD process it.
+# Usage:
+#   mpd-ctl status | pause | stop | next | prev | update | clear
+#   mpd-ctl play              (play the current queue from the top)
+#   mpd-ctl play 2            (play entry N of the current queue)
+#   mpd-ctl play <url>        (add a stream to the queue and play it —
+#                              MPD's own `play` only takes a position)
+#   mpd-ctl add <url>         (add to the queue without playing)
+#   mpd-ctl load radio        (load stored playlist and play)
+[ -n "$1" ] || { sed -n '2,11p' "$0"; exit 1; }
+{
+  case "$1" in
+    load)  printf 'command_list_begin\nload "%s"\nplay\ncommand_list_end\n' "$2" ;;
+    play)  case "${2-}" in
+             "") printf 'play\n' ;;
+             http://*|https://*)
+                   printf 'command_list_begin\nadd "%s"\nplay\ncommand_list_end\n' "$2" ;;
+             *)   printf 'play %s\n' "$2" ;;
+           esac ;;
+    *)     if [ -n "${2-}" ]; then printf '%s "%s"\n' "$1" "$2"; else printf '%s\n' "$1"; fi ;;
+  esac
+  sleep 1
+} | nc 127.0.0.1 6600 | sed 's/^OK$//' | grep -v '^$'

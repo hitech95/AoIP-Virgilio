@@ -1,0 +1,95 @@
+diff --git a/statime-linux/src/main.rs b/statime-linux/src/main.rs
+index 12c0f34..1adfd56 100644
+--- a/statime-linux/src/main.rs
++++ b/statime-linux/src/main.rs
+@@ -7,6 +7,7 @@ use rand::{rngs::StdRng, SeedableRng};
+ use statime::{
+     config::{ClockIdentity, InstanceConfig, SdoId, TimePropertiesDS, TimeSource},
+     filters::{Filter, KalmanConfiguration, KalmanFilter},
++    observability::port::PortState,
+     overlay_clock::{CallbackExporter, OverlayClock},
+     port::{
+         InBmca, Measurement, Port, PortAction, PortActionIterator,
+@@ -367,6 +368,12 @@ async fn actual_main() {
+     let time_properties_ds =
+         TimePropertiesDS::new_arbitrary_time(false, false, TimeSource::InternalOscillator);
+ 
++    // Shared handles for the usrvclock export: the servo-driven exporter
++    // closure below and the master-state keepalive task further down both
++    // need the server and the last sent overlay.
++    let mut usrvclock_server = None;
++    let mut usrvclock_last_overlay = None;
++
+     let system_clock = if config.virtual_system_clock {
+         let base_clockid = match config.virtual_system_clock_base {
+             SystemClockType::TAI => libc::CLOCK_TAI,
+@@ -385,8 +392,21 @@ async fn actual_main() {
+         };
+         
+         let exporter = if config.usrvclock_export {
+-            let mut server = usrvclock::Server::new(config.usrvclock_path.clone())
+-                .expect("failed to create usrvclock server");
++            let server = Arc::new(Mutex::new(
++                usrvclock::Server::new(config.usrvclock_path.clone())
++                    .expect("failed to create usrvclock server"),
++            ));
++            // Identity overlay (shift 0, freq_scale 0): valid before the
++            // servo ever acts, and the correct parameters while this
++            // instance is itself the grandmaster.
++            let last_overlay = Arc::new(Mutex::new(usrvclock::ClockOverlay {
++                clock_id: base_clockid as i64,
++                last_sync: 0,
++                shift: 0,
++                freq_scale: 0.0,
++            }));
++            usrvclock_server = Some(server.clone());
++            usrvclock_last_overlay = Some(last_overlay.clone());
+             CallbackExporter::from(move |overlay: &statime::overlay_clock::ClockOverlay| {
+                 use fixed::traits::LossyInto;
+                 let last_sync: i128 = overlay.last_sync.nanos().lossy_into();
+@@ -440,7 +460,8 @@ async fn actual_main() {
+                     }
+                 }
+                 if can_send {
+-                    server.send(new_overlay);
++                    *last_overlay.lock().unwrap() = new_overlay.clone();
++                    server.lock().unwrap().send(new_overlay);
+                 }
+             })
+         } else {
+@@ -477,8 +498,35 @@ async fn actual_main() {
+             path_trace_ds: instance.path_trace_ds(),
+             port_ds: vec![],
+         });
++    let master_export_state_receiver = instance_state_receiver.clone();
+     statime_linux::observer::spawn(&config, instance_state_receiver).await;
+ 
++    // While any port is in Master state the servo produces no output (a
++    // grandmaster receives no Sync messages to measure), so the exporter
++    // closure above never fires and usrvclock clients would starve even
++    // though this instance is a perfectly valid clock source. Re-send the
++    // last known overlay once per second while mastering: with the identity
++    // overlay that means "the reference is my own underlying clock", after
++    // a slave->master transition it keeps the last disciplined parameters
++    // (holdover).
++    if let (Some(server), Some(last_overlay)) = (usrvclock_server, usrvclock_last_overlay) {
++        tokio::spawn(async move {
++            let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
++            loop {
++                interval.tick().await;
++                let is_master = master_export_state_receiver
++                    .borrow()
++                    .port_ds
++                    .iter()
++                    .any(|port| port.port_state == PortState::Master);
++                if is_master {
++                    let overlay = last_overlay.lock().unwrap().clone();
++                    server.lock().unwrap().send(overlay);
++                }
++            }
++        });
++    }
++
+     let (bmca_notify_sender, bmca_notify_receiver) = tokio::sync::watch::channel(false);
+ 
+     let mut main_task_senders = Vec::with_capacity(config.ports.len());

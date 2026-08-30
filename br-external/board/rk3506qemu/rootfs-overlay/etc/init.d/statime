@@ -1,0 +1,88 @@
+#!/bin/sh /etc/rc.common
+# statime - PTP daemon (inferno fork). Must run BEFORE inferno: it exports
+# the PTP media clock via the usrvclock socket (default /tmp/ptp-usrvclock)
+# that inferno consumes (INFERNO_CLOCK_PATH).
+# The full configuration comes from uci (config statime, see
+# docs/inferno.md) and is rendered into /tmp/statime.toml at every start.
+
+START=60
+STOP=40
+USE_PROCD=1
+
+CONFFILE=/tmp/statime.toml
+
+statime_bool() {
+	case "$1" in
+	0|no|off|false) echo "false" ;;
+	*) echo "true" ;;
+	esac
+}
+
+start_service() {
+	local loglevel domain sdo_id priority1 slave_only
+	local interface network_mode hardware_clock protocol
+	local vclock vclock_base usrvclock_export usrvclock_path
+	local observation_path
+
+	config_load statime
+	config_get loglevel main loglevel info
+	config_get domain main domain 0
+	config_get sdo_id main sdo_id 0
+	config_get priority1 main priority1 251
+	config_get slave_only main slave_only 0
+	config_get interface main interface eth1
+	# the PTP port NIC (eth1) only exists in rig mode (run-qemu.sh --net
+	# socket-*/tap): skip instead of flapping in procd respawn when absent
+	if ! ip link show "$interface" >/dev/null 2>&1; then
+		echo "statime: interface ${interface} not present, not starting" >&2
+		return 0
+	fi
+	config_get network_mode main network_mode ipv4
+	config_get hardware_clock main hardware_clock auto
+	config_get protocol main protocol PTPv2
+	config_get vclock main virtual_system_clock 1
+	config_get vclock_base main virtual_system_clock_base monotonic_raw
+	config_get usrvclock_export main usrvclock_export 1
+	config_get usrvclock_path main usrvclock_path /tmp/ptp-usrvclock
+	# observation socket: one JSON blob of the full instance state
+	# (incl. per-port port_state) per client connect; consumed by
+	# /usr/bin/ptp-monitor for `ubus call ptp status`
+	config_get observation_path main observation_path /tmp/statime-observe.sock
+
+	cat > "$CONFFILE" <<EOF
+loglevel = "${loglevel}"
+sdo-id = ${sdo_id}
+domain = ${domain}
+priority1 = ${priority1}
+slave-only = $(statime_bool "${slave_only}")
+virtual-system-clock = $(statime_bool "${vclock}")
+virtual-system-clock-base = "${vclock_base}"
+usrvclock-export = $(statime_bool "${usrvclock_export}")
+usrvclock-path = "${usrvclock_path}"
+
+[observability]
+observation-path = "${observation_path}"
+
+[[port]]
+interface = "${interface}"
+network-mode = "${network_mode}"
+hardware-clock = "${hardware_clock}"
+protocol-version = "${protocol}"
+EOF
+
+	procd_open_instance
+	procd_set_param command /usr/bin/statime --config "$CONFFILE"
+	# PTP needs sub-100us punctuality: under load (camilladsp/inferno TX
+	# pacing, MPD decode) a same-priority statime gets its TX timestamps
+	# delayed by hundreds of us, which the slaves see as clock noise (D14)
+	procd_set_param nice -10
+	procd_set_param respawn
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+reload_service() {
+	stop
+	start
+}

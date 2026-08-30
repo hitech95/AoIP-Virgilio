@@ -1,0 +1,112 @@
+# camilladsp: pipeline is generated at runtime into /tmp/camilladsp.yml by
+# /usr/bin/camilladsp-genconf (docs: docs/camilladsp-uci.md).
+#
+# The audio chain is defined by generic uci nodes:
+#   config filter    one filter (option name/type + params)
+#   config mixer     one mixer  (option name/in/out)
+#   config mixroute  one mixer source contribution (mixer/dest/source/gain)
+#   config step      one pipeline step, ordered by option index
+#                    (Filter: list channels + list names | Mixer: option name)
+# No nodes -> plain pass-through capture -> playback.
+#
+# Device specs "TYPE[:VALUE]":
+#   capture:  Inferno (Dante RX) | WavFile:<path> | RawFile:<path> |
+#             Alsa:<alsa-dev> | Stdin
+#   playback: Inferno (Dante TX) | File:<path> | Alsa:<alsa-dev> | Stdout
+# 'Inferno' opens the inferno ALSA PCM (Dante over IP): the instance lives
+# inside camilladsp and reads its settings from /etc/config/inferno (name
+# defaults to the system hostname, channel counts follow channels /
+# output_channels, sample rate follows 'samplerate').
+# Default: Inferno capture -> File:/dev/null (records silence while no
+# Dante flows are subscribed).
+
+config camilladsp 'main'
+	option enabled '1'
+	option port '5000'
+	# flexi_logger spec (--custom_log_spec); default silences the inferno
+	# PCM short-read warnings (~2000 lines/s at warn)
+	option logspec 'warn,camillalib::alsa_backend::device=error'
+	option samplerate '48000'
+	option channels '2'
+	option output_channels ''
+	option chunksize '1024'
+	option format 'S16_LE'
+	option wav_header '1'
+	option capture 'Inferno'
+	option playback 'File:/dev/null'
+	# extra environment for the daemon; use for INFERNO_* settings that the
+	# inferno ALSA plugin picks up when capture/playback is 'Alsa:inferno*'
+	# (values must not contain spaces), e.g.:
+	#	list env 'INFERNO_NAME=myspeaker'
+	#	list env 'INFERNO_RX_CHANNELS=8'
+	#	list env 'INFERNO_BIND_IP=eth1'
+
+# --- 2-way speaker example (stereo in -> per-way select + crossover) --------
+# config mixer
+# 	option name 'srcmix'
+# 	option in '2'
+# 	option out '2'
+#
+# config mixroute                        # way 1 (woofer) = (L+R)/2
+# 	option mixer 'srcmix'
+# 	option dest '0'
+# 	option source '0'
+# 	option gain '0.5'
+# config mixroute
+# 	option mixer 'srcmix'
+# 	option dest '0'
+# 	option source '1'
+# 	option gain '0.5'
+# config mixroute                        # way 2 (tweeter) = (L+R)/2
+# 	option mixer 'srcmix'
+# 	option dest '1'
+# 	option source '0'
+# 	option gain '0.5'
+# config mixroute
+# 	option mixer 'srcmix'
+# 	option dest '1'
+# 	option source '1'
+# 	option gain '0.5'
+#
+# config filter
+# 	option name 'woofer_level'
+# 	option type 'gain'
+# 	option gain '-2.0'
+# config filter
+# 	option name 'woofer_lp'
+# 	option type 'lrlp'
+# 	option f '1800'
+# 	option order '4'
+# config filter
+# 	option name 'woofer_shelf'
+# 	option type 'ls'
+# 	option f '200'
+# 	option gain '2'
+# config filter
+# 	option name 'tweeter_hp'
+# 	option type 'lrhp'
+# 	option f '1800'
+# 	option order '4'
+# config filter
+# 	option name 'tweeter_shelf'
+# 	option type 'hs'
+# 	option f '6000'
+# 	option gain '-1.5'
+#
+# config step
+# 	option index '10'
+# 	option type 'Mixer'
+# 	option name 'srcmix'
+# config step
+# 	option index '20'
+# 	option type 'Filter'
+# 	list channels '0'
+# 	list names 'woofer_level'
+# 	list names 'woofer_lp'
+# 	list names 'woofer_shelf'
+# config step
+# 	option index '30'
+# 	option type 'Filter'
+# 	list channels '1'
+# 	list names 'tweeter_hp'
+# 	list names 'tweeter_shelf'

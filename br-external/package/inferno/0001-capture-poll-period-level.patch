@@ -1,0 +1,50 @@
+--- a/inferno_aoip/src/device_server/flows_rx.rs	2026-08-29 18:10:24.001080317 +0200
++++ b/inferno_aoip/src/device_server/flows_rx.rs	2026-08-30 00:09:13.087559247 +0200
+@@ -88,6 +88,10 @@
+   clock_recv: RealTimeBoxReceiver<Option<ClockOverlay>>,
+   ref_instant: Instant,
+   on_transfer: Option<TransferNotifier>,
++  // wall-clock instant of the last on_transfer notification: consumers
++  // only need to be woken once per max_interval_samples (= one PCM
++  // period), not on every received packet
++  last_on_transfer: Option<Instant>,
+   current_timestamp: Arc<AtomicUsize>,
+ }
+ 
+@@ -261,7 +265,27 @@
+         }
+       }
+       //if start_time_rx.is_none() {
+-      self.on_transfer.as_ref().map(|transfer| (transfer.callback)());
++      // Throttle to one notification per max_interval_samples (the ALSA
++      // PCM period) of wall time: waking the consumer per packet (1 kHz /
++      // ~48 frames at 48 kHz) makes poll-based applications spin on
++      // partial reads. Wall-clock pacing suffices — data pointers stay
++      // authoritative for correctness.
++      if let Some(transfer) = self.on_transfer.as_ref() {
++        let interval = Duration::from_nanos(
++          (transfer.max_interval_samples as u64).saturating_mul(1_000_000_000)
++            / self.sample_rate as u64,
++        );
++        let do_notify = match self.last_on_transfer {
++          Some(last) if last.elapsed() < interval => false,
++          _ => {
++            self.last_on_transfer = Some(Instant::now());
++            true
++          }
++        };
++        if do_notify {
++          (transfer.callback)();
++        }
++      }
+       //} XXX
+ 
+       if may_have_command {
+@@ -480,6 +504,7 @@
+       clock_recv,
+       ref_instant,
+       on_transfer,
++      last_on_transfer: None,
+       current_timestamp,
+     };
+     internal.run(start_time_rx);

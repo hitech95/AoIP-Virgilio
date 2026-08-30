@@ -1,0 +1,19 @@
+# ptp-monitor: ucode daemon that watches statime's usrvclock export
+# (/etc/init.d/ptp-monitor, /usr/bin/ptp-monitor) and reports lock state:
+#   ubus call ptp status        -- status object
+#   ubus listen ptp             -- events on transitions
+#   /etc/hotplug.d/ptp/*        -- sourced with ACTION=locked|lost (+PTP_*)
+# The daemon itself never starts/stops services; policy lives in the
+# hotplug handlers (e.g. 10-camilladsp below).
+
+config ptp-monitor 'main'
+	# usrvclock datagram socket exported by statime; keep in sync with
+	# /etc/config/inferno option clock_path
+	option clock_path '/tmp/ptp-usrvclock'
+	# consecutive 1 s ticks with updates before declaring "locked"
+	option settle '3'
+	# seconds without updates before declaring "lost". Generous on
+	# purpose: brief statime blips (TCG guests under host load) must not
+	# kill camilladsp — the servo and the inferno clock free-run through
+	# them using the last shift/freq overlay.
+	option lost_timeout '30'

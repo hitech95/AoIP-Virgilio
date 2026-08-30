@@ -1,0 +1,9 @@
+config BR2_PACKAGE_INFERNO
+	bool "inferno"
+	depends on BR2_USE_MMU # Rust
+	select BR2_PACKAGE_ALSA_LIB
+	help
+	  Unofficial implementation of the Dante protocol (Audio over IP).
+	  Binaries: inferno2pipe; ALSA plugin: alsa_pcm_inferno.
+
+	  https://github.com/teodly/inferno

@@ -1,0 +1,8 @@
+config BR2_PACKAGE_STATIME
+	bool "statime (inferno-dev fork)"
+	depends on BR2_USE_MMU # Rust
+	help
+	  PTP daemon (fork with PTPv1 / inferno support), required by inferno.
+	  Pinned commit from the inferno-dev branch.
+
+	  https://github.com/teodly/statime (fork of pendulum-project/statime)

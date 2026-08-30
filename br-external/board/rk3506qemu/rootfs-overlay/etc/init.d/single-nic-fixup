@@ -1,0 +1,31 @@
+#!/bin/sh /etc/rc.common
+# single-nic-fixup: in bridge rig mode (run-qemu.sh --net tap:if --no-mgmt)
+# the guest has ONE NIC, which the kernel names eth0 — but the overlay
+# config expects the Dante/PTP NIC on eth1 (dual-NIC rig mode). Rewrite the
+# four interface references once at boot when eth1 is absent, so both
+# topologies work from the same image.
+#   network.lan  (eth0, dhcp)  -> proto none (the mgmt NIC does not exist;
+#                                 a dhcp client would discover-spam the
+#                                 Dante segment and burn CPU)
+#   network.aoip (eth1, none)  -> device eth0
+#   statime.main.interface / inferno.main.interface -> eth0
+
+START=05
+USE_PROCD=0
+
+boot() {
+	if ip link show eth1 >/dev/null 2>&1 || ! ip link show eth0 >/dev/null 2>&1; then
+		return 0
+	fi
+
+	uci -q batch <<EOF
+set network.lan.proto='none'
+set network.aoip.device='eth0'
+set statime.main.interface='eth0'
+set inferno.main.interface='eth0'
+commit network
+commit statime
+commit inferno
+EOF
+	echo "single-nic-fixup: no eth1, retargeted lan/aoip/statime/inferno to eth0" >&2
+}

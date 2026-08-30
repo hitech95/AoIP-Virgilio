@@ -1,0 +1,81 @@
+#!/bin/sh /etc/rc.common
+# camilladsp service: generates /tmp/camilladsp.yml from uci, then runs the
+# DSP engine under procd supervision (respawn).
+
+START=75
+STOP=25
+USE_PROCD=1
+
+CONFFILE=/tmp/camilladsp.yml
+
+start_service() {
+	local enabled port logspec
+
+	config_load camilladsp
+	config_get enabled main enabled 1
+	config_get port main port 5000
+	# flexi_logger spec (camilladsp ignores RUST_LOG, that env only
+	# configures the inferno instance inside the ALSA plugin). Default
+	# silences the short-read warnings of the inferno capture loop.
+	config_get logspec main logspec 'warn,camillalib::alsa_backend::device=error'
+
+	[ "$enabled" = "1" ] || return 0
+
+	/usr/bin/camilladsp-genconf "$CONFFILE" || return 1
+
+	# extra environment for the daemon, e.g. INFERNO_* settings that end up
+	# in the inferno ALSA plugin instance hosted by camilladsp
+	# (values must not contain spaces)
+	local _envs=""
+	_env_cb() { _envs="${_envs}${_envs:+ }$1"; }
+	config_list_foreach main env _env_cb
+
+	# genconf sidecar (/tmp/camilladsp.env): generated INFERNO_* settings for
+	# 'Inferno' device specs; uci 'list env' entries above take precedence
+	if [ -f /tmp/camilladsp.env ]; then
+		while IFS= read -r _line; do
+			[ -n "$_line" ] || continue
+			_k="${_line%%=*}"
+			case " $_envs " in *" $_k="*) continue ;; esac
+			_envs="${_envs}${_envs:+ }$_line"
+		done < /tmp/camilladsp.env
+	fi
+
+	# Persistent state location for the hosted inferno instance
+	# (rx_subscriptions.toml keyed by factory device id): uci
+	# inferno.main.state_dir -> INFERNO_STATE_PATH (inferno patch
+	# 0002-state-storage-env-path). The end state is the user-data volume
+	# mounted at /opt/user_data (RW ubifs on real hardware), which also
+	# hosts camilladsp user configs/filters. Without it, daemons started
+	# without HOME would fall back to /.local at the rootfs root.
+	config_load inferno
+	config_get state_dir main state_dir /opt/user_data
+	mkdir -p "$state_dir"
+	case " $_envs " in *" INFERNO_STATE_PATH="*) ;; *)
+		_envs="INFERNO_STATE_PATH=$state_dir${_envs:+ $_envs}" ;;
+	esac
+
+	procd_open_instance
+	procd_set_param command /usr/bin/camilladsp "$CONFFILE" -p "$port" -a 0.0.0.0 \
+		--custom_log_spec "$logspec"
+	[ -n "$_envs" ] && procd_set_param env $_envs
+	procd_set_param respawn
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+# Reload without restart: regenerate config, then SIGHUP the running process
+# (camilladsp applies new settings without interrupting processing when
+# possible). NB: FIR coefficients are cached by filename — to update coeffs,
+# the fir_file path must change.
+reload_service() {
+	local enabled
+
+	config_load camilladsp
+	config_get enabled main enabled 1
+	[ "$enabled" = "1" ] || return 0
+
+	/usr/bin/camilladsp-genconf "$CONFFILE" || return 1
+	procd_send_signal camilladsp '' SIGHUP
+}

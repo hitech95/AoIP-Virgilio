@@ -1,0 +1,51 @@
+#!/bin/sh /etc/rc.common
+# aoip-bridge — sink-side Dante receiver feeding camilladsp through a FIFO.
+#
+#   inferno2pipe (rx 1..N, clocked by statime) -> /tmp/aoip.fifo
+#     -> camilladsp capture 'RawFile:/tmp/aoip.fifo' (S32_LE) -> playback
+#
+# Why not capture the inferno PCM directly: camilladsp polls raw
+# descriptors without snd_pcm_poll_descriptors_revents, so the userspace
+# plugin's eventfd stays readable forever and its capture loop spins on
+# partial reads at one full pegged core (three plugin-side fixes did not
+# change this — plan D16). A kernel FIFO gives real blocking reads: the
+# capture thread drops from ~850 to ~38 ticks/8 s.
+#
+# Camilladsp uci to pair with this service:
+#   capture='RawFile:/tmp/aoip.fifo'  format='S32_LE'  samplerate='48000'
+# The ARC subscription (--to <sink-ip>) is answered by inferno2pipe's
+# device instance. If either side restarts: a dead reader stalls the
+# writer until respawn; a dead writer ends camilladsp's stream (EOF) and
+# procd restarts it, which reopens the FIFO.
+
+START=96
+STOP=35
+USE_PROCD=1
+
+FIFO=/tmp/aoip.fifo
+
+start_service() {
+	local interface clock_path channels samplerate
+	config_load inferno
+	config_get interface main interface eth0
+	config_get clock_path main clock_path /tmp/ptp-usrvclock
+	config_get channels main rx_channels 2
+	config_get samplerate main sample_rate 48000
+	config_get state_dir main state_dir /opt/user_data
+	[ -n "$channels" ] || channels=2
+
+	[ -p "$FIFO" ] || mkfifo "$FIFO"
+	mkdir -p "$state_dir"
+
+	procd_open_instance
+	procd_set_param command /usr/bin/inferno2pipe --channels-count "$channels" --output "$FIFO"
+	procd_set_param env INFERNO_BIND_IP="$interface" \
+		INFERNO_CLOCK_PATH="$clock_path" \
+		INFERNO_SAMPLE_RATE="$samplerate" \
+		INFERNO_RX_CHANNELS="$channels" \
+		INFERNO_STATE_PATH="$state_dir"
+	procd_set_param respawn
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}

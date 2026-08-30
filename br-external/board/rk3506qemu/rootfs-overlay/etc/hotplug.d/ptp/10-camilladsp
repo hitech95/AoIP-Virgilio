@@ -1,0 +1,21 @@
+# camilladsp PTP-clock handler, sourced by procd's hotplug.ptp dispatcher
+# with ACTION=locked|lost, PTP_CLOCK_PATH, PTP_SHIFT_NS, PTP_FREQ_PPM in
+# the environment and /lib/functions.sh already loaded.
+# ptp-monitor re-emits ACTION=locked every ~60 s while the clock is up,
+# so the start branch is idempotent and doubles as crash-loop self-heal.
+
+case "$ACTION" in
+locked)
+	[ "$(uci -q get camilladsp.main.enabled || echo 1)" = "1" ] || exit 0
+	if ! pidof camilladsp >/dev/null; then
+		logger -t hotplug-ptp "starting camilladsp (PTP clock locked)"
+		/etc/init.d/camilladsp start
+	fi
+	;;
+lost)
+	if pidof camilladsp >/dev/null; then
+		logger -t hotplug-ptp "stopping camilladsp (PTP clock lost)"
+		/etc/init.d/camilladsp stop
+	fi
+	;;
+esac

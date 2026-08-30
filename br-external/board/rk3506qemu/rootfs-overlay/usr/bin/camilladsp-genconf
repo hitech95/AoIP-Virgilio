@@ -1,0 +1,321 @@
+#!/bin/sh
+# camilladsp-genconf - generate a camilladsp v4 YAML config from uci
+# (config camilladsp). Default output: /tmp/camilladsp.yml.
+#
+# Structure (generic pipeline, mirrors camilladsp devices/filters/mixers/pipeline):
+#
+#   config camilladsp 'main'   devices + global settings (see /etc/config/camilladsp)
+#   config filter              one filter node  (option name, type + params)
+#   config mixer               one mixer node   (option name, channels_in/out)
+#   config mixroute            one mixer source contribution (mixer,dest,source,gain,...)
+#   config step                one pipeline step, ordered by option index
+#                               (type Filter: list channels + list names
+#                                type Mixer: option name)
+#
+# Filter types and parameters:
+#   gain   gain(dB) [inverted] [mute]      conv  filename (text coeffs)
+#   hp|lp  f q                              lrhp|lrlp  f order
+#   hs|ls  f gain q|slope                   peak f gain q
+#   notch|ap  f q
+
+OUT="${1:-/tmp/camilladsp.yml}"
+
+. /lib/functions.sh
+
+config_load camilladsp 2>/dev/null || true
+
+# ---- main --------------------------------------------------------------------
+config_get CH main channels 2
+config_get PBCH main output_channels ""
+[ -n "$PBCH" ] || PBCH="$CH"
+config_get RATE main samplerate 44100
+config_get CHUNK main chunksize 1024
+config_get FORMAT main format S16_LE
+config_get WAVHDR main wav_header 1
+config_get CAP main capture "RawFile:/dev/zero"
+config_get PB main playback "File:/dev/null"
+
+case "$WAVHDR" in
+0|no|off|false) WAVHDR="false" ;;
+*) WAVHDR="true" ;;
+esac
+
+[ "$CH" -ge 1 ] 2>/dev/null || { echo "camilladsp-genconf: bad channels '$CH'" >&2; exit 1; }
+[ "$PBCH" -ge 1 ] 2>/dev/null || { echo "camilladsp-genconf: bad output_channels '$PBCH'" >&2; exit 1; }
+
+# ---- inferno env sidecar ----------------------------------------------------
+# When capture/playback is 'Inferno', camilladsp hosts an inferno instance
+# (inside the inferno ALSA plugin). Its INFERNO_* settings are derived here:
+# shared schema in /etc/config/inferno, name defaults to the system
+# hostname, channel counts follow the camilladsp devices. The init script
+# passes the file to the daemon as environment.
+
+ENVOUT="${OUT%.yml}.env"
+CAP_INFERNO=""
+PB_INFERNO=""
+case "$CAP" in Inferno) CAP_INFERNO=1 ;; esac
+case "$PB" in Inferno) PB_INFERNO=1 ;; esac
+
+if [ -n "$CAP_INFERNO" ] || [ -n "$PB_INFERNO" ]; then
+	config_load inferno 2>/dev/null || true
+	config_get INAME main name ""
+	config_get IIF main interface eth1
+	config_get ICLK main clock_path /tmp/ptp-usrvclock
+	config_get IRX main rx_channels ""
+	config_get ITX main tx_channels ""
+	[ -n "$IRX" ] || { [ -n "$CAP_INFERNO" ] && IRX="$CH" || IRX=0; }
+	[ -n "$ITX" ] || { [ -n "$PB_INFERNO" ] && ITX="$PBCH" || ITX=0; }
+	[ -n "$INAME" ] || INAME=$(uci -q get system.@system[0].hostname 2>/dev/null) || INAME="rk3506qemu"
+	{
+		# NB: this RUST_LOG configures the *inferno* instance (tracing env
+	# filter) hosted inside camilladsp, NOT camilladsp itself: camilladsp
+	# uses flexi_logger via --custom_log_spec (see init script, uci
+	# camilladsp.main.logspec).
+	echo "RUST_LOG=warn"
+		echo "INFERNO_NAME=$INAME"
+		echo "INFERNO_BIND_IP=$IIF"
+		echo "INFERNO_CLOCK_PATH=$ICLK"
+		echo "INFERNO_RX_CHANNELS=$IRX"
+		echo "INFERNO_TX_CHANNELS=$ITX"
+		echo "INFERNO_SAMPLE_RATE=$RATE"
+	} > "$ENVOUT"
+fi
+
+# ---- collect nodes -----------------------------------------------------------
+
+FILTER_IDS=""
+_flt_cb() {
+	local id="$1" v
+	config_get v "$id" name ""
+	[ -n "$v" ] || { echo "camilladsp-genconf: filter section '$id' missing name" >&2; exit 1; }
+	FILTER_IDS="$FILTER_IDS $id"
+	for k in name type f q gain order slope inverted mute filename; do
+		config_get v "$id" "$k" ""
+		eval "FLT_${id}_${k}=\"\$v\""
+	done
+}
+config_foreach _flt_cb filter
+
+MIXER_IDS=""
+_mixer_cb() {
+	local id="$1" v
+	config_get v "$id" name ""
+	[ -n "$v" ] || { echo "camilladsp-genconf: mixer section '$id' missing name" >&2; exit 1; }
+	MIXER_IDS="$MIXER_IDS $id"
+	for k in name in out; do
+		config_get v "$id" "$k" ""
+		eval "MX_${id}_${k}=\"\$v\""
+	done
+}
+config_foreach _mixer_cb mixer
+
+ROUTE_IDS=""
+_route_cb() {
+	local id="$1" v
+	ROUTE_IDS="$ROUTE_IDS $id"
+	for k in mixer dest source gain inverted mute; do
+		config_get v "$id" "$k" ""
+		eval "RT_${id}_${k}=\"\$v\""
+	done
+}
+config_foreach _route_cb mixroute
+
+# steps: collect "index section-id" lines, sort numerically
+_STEP_RAW=""
+_step_cb() {
+	local id="$1" v idx
+	config_get idx "$id" index ""
+	[ -n "$idx" ] || { echo "camilladsp-genconf: step '$id' missing index" >&2; exit 1; }
+	_STEP_RAW="${_STEP_RAW}${idx} $id
+"
+	for k in type name; do
+		config_get v "$id" "$k" ""
+		eval "SP_${id}_${k}=\"\$v\""
+	done
+	eval "SP_${id}_CH=\"\"; SP_${id}_NAMES=\"\""
+	_step_ch_cb() { eval "SP_${id}_CH=\"\${SP_${id}_CH}\${SP_${id}_CH:+ }\$1\""; }
+	config_list_foreach "$id" channels _step_ch_cb
+	_step_nm_cb() { eval "SP_${id}_NAMES=\"\${SP_${id}_NAMES}\${SP_${id}_NAMES:+ }\$1\""; }
+	config_list_foreach "$id" names _step_nm_cb
+}
+config_foreach _step_cb step
+STEP_ORDER=$(printf '%s' "$_STEP_RAW" | sort -n | while read _i _id; do printf '%s ' "$_id"; done)
+
+# ---- devices -----------------------------------------------------------------
+
+cap_yaml() {
+	_type="${1%%:*}"
+	_val="${1#*:}"
+	[ "$_val" = "$1" ] && _val=""
+	case "$_type" in
+	WavFile)
+		printf '  capture:\n    type: WavFile\n    filename: %s\n' "$_val" ;;
+	RawFile)
+		printf '  capture:\n    type: RawFile\n    channels: %s\n    filename: %s\n    format: %s\n' "$CH" "$_val" "$FORMAT" ;;
+	Alsa)
+		printf '  capture:\n    type: Alsa\n    channels: %s\n    device: %s\n' "$CH" "$_val" ;;
+	Inferno)
+		# Dante RX via the inferno ALSA plugin (settings: /etc/config/inferno,
+		# exported as INFERNO_* env by the init script)
+		printf '  capture:\n    type: Alsa\n    channels: %s\n    device: inferno\n' "$CH" ;;
+	Stdin)
+		printf '  capture:\n    type: Stdin\n    channels: %s\n    format: %s\n' "$CH" "$FORMAT" ;;
+	*)
+		echo "camilladsp-genconf: unknown capture spec: $1" >&2; return 1 ;;
+	esac
+}
+
+pb_yaml() {
+	_type="${1%%:*}"
+	_val="${1#*:}"
+	[ "$_val" = "$1" ] && _val=""
+	case "$_type" in
+	File)
+		printf '  playback:\n    type: File\n    channels: %s\n    filename: %s\n    format: %s\n    wav_header: %s\n' "$PBCH" "$_val" "$FORMAT" "$WAVHDR" ;;
+	Alsa)
+		printf '  playback:\n    type: Alsa\n    channels: %s\n    device: %s\n' "$PBCH" "$_val" ;;
+	Inferno)
+		# Dante TX via the inferno ALSA plugin
+		printf '  playback:\n    type: Alsa\n    channels: %s\n    device: inferno\n' "$PBCH" ;;
+	Stdout)
+		printf '  playback:\n    type: Stdout\n    channels: %s\n    format: %s\n' "$PBCH" "$FORMAT" ;;
+	*)
+		echo "camilladsp-genconf: unknown playback spec: $1" >&2; return 1 ;;
+	esac
+}
+
+# ---- filter emission ---------------------------------------------------------
+
+emit_filter_yaml() {
+	local id="$1"
+	local name type f q gain order slope inverted mute filename
+	eval "name=\"\$FLT_${id}_name\"; type=\"\$FLT_${id}_type\"; f=\"\$FLT_${id}_f\"; q=\"\$FLT_${id}_q\"; gain=\"\$FLT_${id}_gain\"; order=\"\$FLT_${id}_order\"; slope=\"\$FLT_${id}_slope\"; inverted=\"\$FLT_${id}_inverted\"; mute=\"\$FLT_${id}_mute\"; filename=\"\$FLT_${id}_filename\""
+
+	[ -n "$type" ] || { echo "camilladsp-genconf: filter '$name' missing type" >&2; return 1; }
+
+	case "$type" in
+	gain)
+		[ -n "$gain" ] || { echo "camilladsp-genconf: filter '$name' (gain) needs gain=" >&2; return 1; }
+		printf '  %s:\n    type: Gain\n    parameters:\n      gain: %s\n' "$name" "$gain"
+		[ "$inverted" = "1" ] && printf '      inverted: true\n'
+		[ "$mute" = "1" ] && printf '      mute: true\n'
+		;;
+	conv)
+		[ -n "$filename" ] || { echo "camilladsp-genconf: filter '$name' (conv) needs filename=" >&2; return 1; }
+		printf '  %s:\n    type: Conv\n    parameters:\n      type: Raw\n      format: TEXT\n      filename: %s\n' "$name" "$filename"
+		;;
+	hp|lp)
+		[ -n "$f" ] || { echo "camilladsp-genconf: filter '$name' ($type) needs f=" >&2; return 1; }
+		[ -z "$q" ] && q=0.707
+		local ytype="Highpass"; [ "$type" = lp ] && ytype="Lowpass"
+		printf '  %s:\n    type: Biquad\n    parameters:\n      type: %s\n      freq: %s\n      q: %s\n' "$name" "$ytype" "$f" "$q"
+		;;
+	lrhp|lrlp)
+		[ -n "$f" ] || { echo "camilladsp-genconf: filter '$name' ($type) needs f=" >&2; return 1; }
+		[ -z "$order" ] && order=4
+		local ytype="LinkwitzRileyHighpass"; [ "$type" = lrlp ] && ytype="LinkwitzRileyLowpass"
+		printf '  %s:\n    type: BiquadCombo\n    parameters:\n      type: %s\n      freq: %s\n      order: %s\n' "$name" "$ytype" "$f" "$order"
+		;;
+	hs|ls)
+		[ -n "$f" ] && [ -n "$gain" ] || { echo "camilladsp-genconf: filter '$name' ($type) needs f= and gain=" >&2; return 1; }
+		local ytype="Highshelf"; [ "$type" = ls ] && ytype="Lowshelf"
+		printf '  %s:\n    type: Biquad\n    parameters:\n      type: %s\n      freq: %s\n      gain: %s\n' "$name" "$ytype" "$f" "$gain"
+		if [ -n "$slope" ]; then
+			printf '      slope: %s\n' "$slope"
+		else
+			[ -z "$q" ] && q=0.707
+			printf '      q: %s\n' "$q"
+		fi
+		;;
+	peak)
+		[ -n "$f" ] && [ -n "$gain" ] || { echo "camilladsp-genconf: filter '$name' (peak) needs f= and gain=" >&2; return 1; }
+		[ -z "$q" ] && q=1.0
+		printf '  %s:\n    type: Biquad\n    parameters:\n      type: Peaking\n      freq: %s\n      q: %s\n      gain: %s\n' "$name" "$f" "$q" "$gain"
+		;;
+	notch|ap)
+		[ -n "$f" ] || { echo "camilladsp-genconf: filter '$name' ($type) needs f=" >&2; return 1; }
+		[ -z "$q" ] && q=0.707
+		local ytype="Notch"; [ "$type" = ap ] && ytype="Allpass"
+		printf '  %s:\n    type: Biquad\n    parameters:\n      type: %s\n      freq: %s\n      q: %s\n' "$name" "$ytype" "$f" "$q"
+		;;
+	*)
+		echo "camilladsp-genconf: filter '$name': unknown type '$type'" >&2; return 1 ;;
+	esac
+	return 0
+}
+
+# ---- output ------------------------------------------------------------------
+
+KNOWN_FLT=""
+for id in $FILTER_IDS; do
+	eval "KNOWN_FLT=\"\$KNOWN_FLT \${FLT_${id}_name}\""
+done
+KNOWN_MX=""
+for id in $MIXER_IDS; do
+	eval "KNOWN_MX=\"\$KNOWN_MX \${MX_${id}_name}\""
+done
+
+{
+	printf 'devices:\n'
+	printf '  samplerate: %s\n  chunksize: %s\n' "$RATE" "$CHUNK"
+	cap_yaml "$CAP" || exit 1
+	pb_yaml "$PB" || exit 1
+
+	if [ -n "$MIXER_IDS" ]; then
+		printf 'mixers:\n'
+		for id in $MIXER_IDS; do
+			eval "_n=\"\$MX_${id}_name\"; _in=\"\$MX_${id}_in\"; _out=\"\$MX_${id}_out\""
+			printf '  %s:\n    channels:\n      in: %s\n      out: %s\n    mapping:\n' "$_n" "$_in" "$_out"
+			_d=0
+			while [ "$_d" -lt "$_out" ]; do
+				_first=1
+				for rid in $ROUTE_IDS; do
+					eval "_rm=\"\$RT_${rid}_mixer\"; _rd=\"\$RT_${rid}_dest\""
+					[ "$_rm" = "$_n" ] || continue
+					[ "$_rd" = "$_d" ] || continue
+					if [ "$_first" = 1 ]; then
+						printf '      - dest: %s\n        sources:\n' "$_d"
+						_first=0
+					fi
+					eval "_rs=\"\$RT_${rid}_source\"; _rg=\"\$RT_${rid}_gain\"; _ri=\"\$RT_${rid}_inverted\"; _rmt=\"\$RT_${rid}_mute\""
+					printf '          - channel: %s\n' "$_rs"
+					[ -n "$_rg" ] && printf '            gain: %s\n' "$_rg"
+					[ "$_ri" = "1" ] && printf '            inverted: true\n'
+					[ "$_rmt" = "1" ] && printf '            mute: true\n'
+				done
+				_d=$((_d + 1))
+			done
+		done
+	fi
+
+	if [ -n "$FILTER_IDS" ]; then
+		printf 'filters:\n'
+		for id in $FILTER_IDS; do
+			emit_filter_yaml "$id" || exit 1
+		done
+	fi
+
+	[ -n "$STEP_ORDER" ] && printf 'pipeline:\n'
+	for id in $STEP_ORDER; do
+		eval "_t=\"\$SP_${id}_type\"; _n=\"\$SP_${id}_name\"; _ch=\"\$SP_${id}_CH\"; _nm=\"\$SP_${id}_NAMES\""
+		case "$_t" in
+		Filter|filter)
+			_chy=""; for c in $_ch; do _chy="${_chy}${_chy:+, }$c"; done
+			_nmy=""; for n in $_nm; do
+				case " $KNOWN_FLT " in *" $n "*) ;; *) echo "camilladsp-genconf: step references unknown filter '$_n' -> '$n'" >&2; exit 1 ;; esac
+				_nmy="${_nmy}${_nmy:+, }$n"
+			done
+			[ -n "$_nmy" ] || { echo "camilladsp-genconf: Filter step needs list names" >&2; exit 1; }
+			printf '  - type: Filter\n'
+			[ -n "$_chy" ] && printf '    channels: [%s]\n' "$_chy"
+			printf '    names: [%s]\n' "$_nmy"
+			;;
+		Mixer|mixer)
+			case " $KNOWN_MX " in *" $_n "*) ;; *) echo "camilladsp-genconf: step references unknown mixer '$_n'" >&2; exit 1 ;; esac
+			printf '  - type: Mixer\n    name: %s\n' "$_n"
+			;;
+		*)
+			echo "camilladsp-genconf: step has bad type '$_t' (Filter|Mixer)" >&2; exit 1 ;;
+		esac
+	done
+} > "$OUT"
