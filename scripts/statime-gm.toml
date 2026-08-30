@@ -1,0 +1,37 @@
+# Grand master for the bridge rig (D15): native x86 statime on the host,
+# attached to br-dante (scripts/qemu-bridge.sh). priority1 10 wins BMCA
+# against any guest — guests then run as pure slaves, which removes the
+# "loaded QEMU master poisons every slave" failure mode entirely.
+#
+# Build (once):
+#   git -C deps/statime submodule update --init --recursive
+#   (cd deps/statime && CARGO_TARGET_DIR=/tmp/opencode/statime-target \
+#      cargo build --release --bin statime)
+#   cp /tmp/opencode/statime-target/release/statime ~/.local/bin/statime-gm
+#   sudo setcap cap_net_bind_service,cap_net_admin+ep \
+#        ~/.local/bin/statime-gm
+#   (NB: setcap on /tmp is ignored — nosuid mount; use a home path)
+#
+# Run (after `sudo scripts/qemu-bridge.sh up`):
+#   ~/.local/bin/statime-gm --config scripts/statime-gm.toml
+#
+# NB: the fork's main.rs evaluates the MAC-derived identity EAGERLY inside
+# unwrap_or(...), so a locally-administered bridge MAC panics even with an
+# explicit identity configured — hence the fixed identity below plus the
+# local unwrap_or_else patch during the build above.
+loglevel = "info"
+sdo-id = 0
+domain = 0
+priority1 = 10
+slave-only = false
+identity = "0011223344540001"
+# a GM does not steer any clock (it IS the reference): the virtual system
+# clock avoids /dev/ptp (root-only)
+virtual-system-clock = true
+virtual-system-clock-base = "monotonic_raw"
+
+[[port]]
+interface = "br-dante"
+network-mode = "ipv4"
+hardware-clock = "none"
+protocol-version = "PTPv2"

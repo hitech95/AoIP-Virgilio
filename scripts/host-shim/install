@@ -1,0 +1,5 @@
+#!/bin/sh
+# Shim: Buildroot 2025.02 is incompatible with uutils 'install'
+# (https://github.com/uutils/coreutils/issues/12166) present on Ubuntu >= 25.10.
+# Delegate to GNU install where available (checked by build.sh).
+exec /usr/bin/gnuinstall "$@"
