@@ -1,0 +1,100 @@
+{
+  "version": 2,
+  "devices": {
+    "sha256": "87be175d3010485bd20b6b5c25c5a77146e36f7e46f813d77c6ba53425716895"
+  },
+  "mixers": {
+    "sha256": "987b9724af1436454f1335d886921001f0e6a39492d9c396d9e54f3c00ee0002",
+    "user_gains": [
+      "srcmix"
+    ]
+  },
+  "subchains": [
+    {
+      "policy": "child",
+      "name": "user_in0",
+      "slot": 0,
+      "channels": [
+        0
+      ],
+      "allow": [
+        "Gain",
+        "Biquad",
+        "Biquad",
+        "Biquad",
+        "Biquad",
+        "Biquad",
+        "Conv",
+        "Delay"
+      ],
+      "max_steps": 8
+    },
+    {
+      "policy": "child",
+      "name": "user_in1",
+      "slot": 0,
+      "channels": [
+        1
+      ],
+      "allow": [
+        "Gain",
+        "Biquad",
+        "Biquad",
+        "Biquad",
+        "Biquad",
+        "Biquad",
+        "Conv",
+        "Delay"
+      ],
+      "max_steps": 8
+    },
+    {
+      "policy": "locked",
+      "name": "src_sel",
+      "sha256": "a5f41a97bee6bf755628569385fde22eca3635373dcb607cbf099f46526e2c97",
+      "steps": [
+        {
+          "name": "srcmix",
+          "type": "Mixer"
+        }
+      ]
+    },
+    {
+      "policy": "locked",
+      "name": "wf_tail",
+      "sha256": "f9d021155cdd5bc01092024ff790e57d18ac63624727d3ee2ce30e1011419772",
+      "steps": [
+        {
+          "channels": [
+            0
+          ],
+          "names": [
+            "wf_lp",
+            "wf_fir",
+            "wf_limit"
+          ],
+          "type": "Filter"
+        }
+      ]
+    },
+    {
+      "policy": "locked",
+      "name": "tw_tail",
+      "sha256": "39b9241a3f552e35c66dd32889212c1e0a30da09d4c5a769da2eaacb6b71c841",
+      "steps": [
+        {
+          "channels": [
+            1
+          ],
+          "names": [
+            "tw_hp",
+            "tw_notch10k",
+            "tw_peak17k",
+            "tw_limit"
+          ],
+          "type": "Filter"
+        }
+      ]
+    }
+  ]
+}

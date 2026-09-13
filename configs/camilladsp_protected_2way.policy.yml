@@ -1,0 +1,38 @@
+# Policy spec for configs/camilladsp_protected_2way.yaml
+# (rendered by camilladsp-genconf from uci on the device; kept in the
+# repo as the reference example). Consumed by:
+#   camilladsp camilladsp_protected_2way.yaml --make-manifest <this file>
+# Locked entries carry their step range in the rendered pipeline:
+#   [0] user_slot_user_in0   -> user_in0 (child, slot 0)
+#   [1] user_slot_user_in1   -> user_in1 (child, slot 0)
+#   [2] Mixer srcmix         -> src_sel (anchor 1)
+#   [3] wf_lp, wf_fir, wf_limit -> wf_tail (anchor 2)
+#   [4] tw_hp..tw_limit      -> tw_tail (anchor 3)
+# allow lists use uci filter type names (translated by camilladsp):
+#   gain peak hs ls notch ap conv delay ...
+subchains:
+  - policy: child
+    name: user_in0
+    channels: [0]
+    allow: [gain, peak, hs, ls, notch, ap, conv, delay]
+    max_steps: 8
+  - policy: child
+    name: user_in1
+    channels: [1]
+    allow: [gain, peak, hs, ls, notch, ap, conv, delay]
+    max_steps: 8
+  - policy: locked
+    name: src_sel
+    first_step: 2
+    steps: 1
+  - policy: locked
+    name: wf_tail
+    first_step: 3
+    steps: 1
+  - policy: locked
+    name: tw_tail
+    first_step: 4
+    steps: 1
+# srcmix route gains are user-selectable (source mix: 100% ch0 /
+# 100% ch1 / (ch0+ch1)/2 are just gain presets). Absent = fully locked.
+user_gains: [srcmix]

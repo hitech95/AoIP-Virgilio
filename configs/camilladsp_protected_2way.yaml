@@ -1,0 +1,136 @@
+# Protected 2-way speaker pipeline — rendered-target example
+# (plan/protected-xover-pipeline.md §2)
+#
+# This is the exact structure /usr/bin/camilladsp-genconf renders into
+# /tmp/camilladsp.yml for the protected speaker product. The YAML itself
+# carries NO grouping: the sub-chain partition, policies and hashes live
+# in the companion manifest (/tmp/camilladsp.manifest). The comments
+# below map each pipeline step to its sub chain for review only.
+#
+# Signal flow: user EQ lives on the INPUT channels (two editable groups,
+# one per input channel, BEFORE the mixer), then the source-select mix
+# (stereo -> per-way feeds) and the locked xover+FIR+limiter tails.
+#
+# Schema verified against the fork (v4.1.3, deps/camilladsp/src/config/
+# mod.rs, serde deny_unknown_fields):
+#   - Mixer: { description?, channels: {in, out}, mapping: [...] } and
+#     pipeline Filter steps use `channels: [...]` (list). NB: the older
+#     configs/camilladsp_active_v1.yaml syntax (mixer `type: Mixer` +
+#     `parameters:` wrapper, step `channel:` singular) is NOT accepted
+#     by this version.
+#   - mixer source `gain` defaults to scale: dB in v4 — uci gains are
+#     LINEAR, so every route is emitted with an explicit
+#     `scale: linear`.
+#
+# Sub chains (see manifest for policies/hashes):
+#   user_in0 (child,  slot 0)     input ch0 user EQ — placeholder first
+#   user_in1 (child,  slot 0)     input ch1 user EQ — placeholder first
+#   src_sel  (locked, anchor 1)   mixer step
+#   wf_tail  (locked, anchor 2)   ch0 woofer xover + FIR + limiter
+#   tw_tail  (locked, anchor 3)   ch1 tweeter xover + EQ + limiter
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  capture:
+    type: Alsa
+    channels: 2
+    device: inferno
+  playback:
+    type: Alsa
+    channels: 2
+    device: inferno
+mixers:
+  srcmix:
+    channels:
+      in: 2
+      out: 2
+    mapping:
+      - dest: 0                    # woofer feed = (L+R)/2
+        sources:
+          - channel: 0
+            gain: 0.5
+            scale: linear
+          - channel: 1
+            gain: 0.5
+            scale: linear
+      - dest: 1                    # tweeter feed = (L+R)/2
+        sources:
+          - channel: 0
+            gain: 0.5
+            scale: linear
+          - channel: 1
+            gain: 0.5
+            scale: linear
+filters:
+  # --- editable-slot placeholders (input-channel user EQ) ----------------
+  # user_slot_<subchain>: Gain 0 dB = transparent anchor; user steps
+  # splice in AFTER this step (same step or extra steps in the slot).
+  user_slot_user_in0:
+    type: Gain
+    parameters:
+      gain: 0
+  user_slot_user_in1:
+    type: Gain
+    parameters:
+      gain: 0
+  # --- locked: woofer tail (wf_tail) -------------------------------------
+  wf_lp:                           # Linkwitz-Riley 4th @ 2300 Hz
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 2300
+      order: 4
+  wf_fir:                          # corrective FIR (vendor read-only path)
+    type: Conv
+    parameters:
+      type: Raw
+      format: TEXT
+      filename: /usr/share/camilladsp/coeffs/wf_fir.txt
+  wf_limit:                        # driver-protection limiter
+    type: Limiter
+    parameters:
+      clip_limit: 0.9
+  # --- locked: tweeter tail (tw_tail) ------------------------------------
+  tw_hp:                           # Linkwitz-Riley 4th @ 1900 Hz
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 1900
+      order: 4
+  tw_notch10k:                     # factory EQ: 10 kHz dip
+    type: Biquad
+    parameters:
+      type: Notch
+      freq: 10000
+      q: 2.0
+  tw_peak17k:                      # factory EQ: 17 kHz peak
+    type: Biquad
+    parameters:
+      type: Peaking
+      freq: 17000
+      gain: -3.0
+      q: 2.0
+  tw_limit:                        # driver-protection limiter
+    type: Limiter
+    parameters:
+      clip_limit: 0.8
+pipeline:
+  # subchain user_in0 (child, slot 0): input ch0 user EQ — placeholder FIRST
+  - type: Filter
+    channels: [0]
+    names: [user_slot_user_in0]
+  # subchain user_in1 (child, slot 0): input ch1 user EQ — placeholder FIRST
+  - type: Filter
+    channels: [1]
+    names: [user_slot_user_in1]
+  # subchain src_sel (locked anchor 1): source select, mode ch1_ch2_avg
+  - type: Mixer
+    name: srcmix
+  # subchain wf_tail (locked anchor 2): woofer xover + FIR + protection
+  - type: Filter
+    channels: [0]
+    names: [wf_lp, wf_fir, wf_limit]
+  # subchain tw_tail (locked anchor 3): tweeter xover + EQ + protection
+  - type: Filter
+    channels: [1]
+    names: [tw_hp, tw_notch10k, tw_peak17k, tw_limit]

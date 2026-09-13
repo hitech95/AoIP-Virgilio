@@ -1,0 +1,1687 @@
+diff --git a/src/bin.rs b/src/bin.rs
+index 09b385a..db9aa69 100644
+--- a/src/bin.rs
++++ b/src/bin.rs
+@@ -539,6 +539,25 @@ fn main_process() -> i32 {
+                 .requires("configfile")
+                 .action(ArgAction::SetTrue),
+         )
++        .arg(
++            Arg::new("manifest")
++                .help("Lock the configuration using the given manifest file. The config is validated against the manifest on startup and on every later config change.")
++                .long("manifest")
++                .value_name("MANIFEST")
++                .display_order(5)
++                .action(ArgAction::Set)
++                .value_parser(clap::builder::NonEmptyStringValueParser::new()),
++        )
++        .arg(
++            Arg::new("make_manifest")
++                .help("Generate a locked-config manifest from CONFIGFILE and the given policy spec (YAML/JSON), print it and exit")
++                .long("make-manifest")
++                .value_name("POLICYFILE")
++                .display_order(6)
++                .requires("configfile")
++                .action(ArgAction::Set)
++                .value_parser(clap::builder::NonEmptyStringValueParser::new()),
++        )
+         .arg(
+             Arg::new("verbosity")
+                 .help("Increase message verbosity")
+@@ -960,6 +979,29 @@ fn main_process() -> i32 {
+ 
+     debug!("Read config file {configname:?}");
+ 
++    if let Some(policy_path) = matches.get_one::<String>("make_manifest") {
++        match config::manifest::make_manifest(&configname.clone().unwrap(), policy_path) {
++            Ok(json) => {
++                println!("{json}");
++                return EXIT_OK;
++            }
++            Err(err) => {
++                eprintln!("Unable to generate manifest: {err}");
++                return EXIT_BAD_CONFIG;
++            }
++        }
++    }
++
++    if let Some(manifest_path) = matches.get_one::<String>("manifest") {
++        match config::manifest::load_and_activate(manifest_path) {
++            Ok(_) => debug!("Locked-config manifest loaded from {manifest_path}"),
++            Err(err) => {
++                error!("Unable to load manifest: {err}");
++                return EXIT_BAD_CONFIG;
++            }
++        }
++    }
++
+     if matches.get_flag("check") {
+         match config::load_validate_config(&configname.unwrap()) {
+             Ok(_) => {
+diff --git a/src/config/manifest.rs b/src/config/manifest.rs
+new file mode 100644
+index 0000000..a9e7058
+--- /dev/null
++++ b/src/config/manifest.rs
+@@ -0,0 +1,1591 @@
++// CamillaDSP - A flexible tool for processing audio
++// Copyright (C) 2026 Henrik Enquist
++//
++// This file is part of CamillaDSP.
++//
++// CamillaDSP is free software; you can redistribute it and/or modify it
++// under the terms of either:
++//
++// a) the GNU General Public License version 3,
++//    or
++// b) the Mozilla Public License Version 2.0.
++//
++// You should have received copies of the GNU General Public License
++// and the Mozilla Public License along with this program. If not, see
++// <https://www.gnu.org/licenses/> or <https://www.mozilla.org/MPL/2.0/>.
++
++//! Locked-config manifest: opt-in protection of pipeline sub chains.
++//!
++//! A manifest partitions the pipeline into ordered sub chains, each with
++//! a policy:
++//!   - `locked`: steps (and the filter/mixer definitions they reference)
++//!     are pinned by a sha256 hash; position pinned. Anchors the gaps.
++//!   - `child`:  content editable within constraints (allow-listed filter
++//!     types, owned channels, max steps); position pinned to its slot.
++//!   - `free`:   like `child` but the whole run may relocate between the
++//!     gaps listed in the manifest.
++//!
++//! The manifest is generated from a config plus a policy spec by this
++//! same binary (`--make-manifest`), so the canonical form used for
++//! hashing is defined by one code path.
++//!
++//! Canonical form (single rule, used for every hash):
++//!   JSON, nulls stripped recursively, object keys sorted, whole-valued
++//!   floats normalized to integers, compact serialization; sha256 hex.
++//!
++//! When a manifest is active (started with `--manifest`), every config
++//! passing through `validate_config` is checked against it. Startup
++//! then aborts on mismatch; websocket/Reload edits are rejected.
++
++use std::collections::{BTreeMap, HashSet};
++use std::sync::OnceLock;
++
++use serde::{Deserialize, Serialize};
++use serde_json::{Map, Value};
++
++use crate::config::{ConfigError, Configuration, PipelineStep};
++use crate::Res;
++
++pub const MANIFEST_VERSION: u32 = 2;
++
++static ACTIVE: OnceLock<Manifest> = OnceLock::new();
++
++// --------------------------------------------------------------------------
++// SHA-256 (self-contained, no external dependency)
++// --------------------------------------------------------------------------
++
++const SHA256_K: [u32; 64] = [
++    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
++    0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
++    0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
++    0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
++    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
++    0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
++    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
++    0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
++    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
++    0xc67178f2,
++];
++
++fn sha256(data: &[u8]) -> [u8; 32] {
++    let mut h: [u32; 8] = [
++        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
++        0x5be0cd19,
++    ];
++    let bitlen = (data.len() as u64).wrapping_mul(8);
++    let mut msg = data.to_vec();
++    msg.push(0x80);
++    while msg.len() % 64 != 56 {
++        msg.push(0);
++    }
++    msg.extend_from_slice(&bitlen.to_be_bytes());
++    for chunk in msg.chunks_exact(64) {
++        let mut w = [0u32; 64];
++        for (i, word) in w.iter_mut().enumerate().take(16) {
++            *word = u32::from_be_bytes([
++                chunk[4 * i],
++                chunk[4 * i + 1],
++                chunk[4 * i + 2],
++                chunk[4 * i + 3],
++            ]);
++        }
++        for i in 16..64 {
++            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
++            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
++            w[i] = w[i - 16]
++                .wrapping_add(s0)
++                .wrapping_add(w[i - 7])
++                .wrapping_add(s1);
++        }
++        let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) =
++            (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
++        for i in 0..64 {
++            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
++            let ch = (e & f) ^ ((!e) & g);
++            let t1 = hh
++                .wrapping_add(s1)
++                .wrapping_add(ch)
++                .wrapping_add(SHA256_K[i])
++                .wrapping_add(w[i]);
++            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
++            let maj = (a & b) ^ (a & c) ^ (b & c);
++            let t2 = s0.wrapping_add(maj);
++            hh = g;
++            g = f;
++            f = e;
++            e = d.wrapping_add(t1);
++            d = c;
++            c = b;
++            b = a;
++            a = t1.wrapping_add(t2);
++        }
++        h[0] = h[0].wrapping_add(a);
++        h[1] = h[1].wrapping_add(b);
++        h[2] = h[2].wrapping_add(c);
++        h[3] = h[3].wrapping_add(d);
++        h[4] = h[4].wrapping_add(e);
++        h[5] = h[5].wrapping_add(f);
++        h[6] = h[6].wrapping_add(g);
++        h[7] = h[7].wrapping_add(hh);
++    }
++    let mut out = [0u8; 32];
++    for (i, word) in h.iter().enumerate() {
++        out[4 * i..4 * i + 4].copy_from_slice(&word.to_be_bytes());
++    }
++    out
++}
++
++fn sha256_hex(data: &[u8]) -> String {
++    let digest = sha256(data);
++    let mut s = String::with_capacity(64);
++    for byte in digest {
++        s.push_str(&format!("{byte:02x}"));
++    }
++    s
++}
++
++// --------------------------------------------------------------------------
++// Canonical form
++// --------------------------------------------------------------------------
++
++/// Canonicalize a JSON value: strip nulls recursively, sort object keys,
++/// normalize whole-valued floats to integers.
++fn canonicalize(value: Value) -> Value {
++    match value {
++        Value::Object(map) => {
++            let mut sorted: BTreeMap<String, Value> = BTreeMap::new();
++            for (key, val) in map {
++                if val.is_null() {
++                    continue;
++                }
++                sorted.insert(key, canonicalize(val));
++            }
++            let mut out = Map::with_capacity(sorted.len());
++            for (key, val) in sorted {
++                out.insert(key, val);
++            }
++            Value::Object(out)
++        }
++        Value::Array(items) => Value::Array(items.into_iter().map(canonicalize).collect()),
++        Value::Number(number) => {
++            if let Some(f) = number.as_f64()
++                && f.is_finite()
++                && f.fract() == 0.0
++                && f.abs() < 9.0e15
++            {
++                return Value::Number(serde_json::Number::from(f as i64));
++            }
++            Value::Number(number)
++        }
++        other => other,
++    }
++}
++
++fn canonical<T: Serialize>(value: &T) -> Value {
++    canonicalize(serde_json::to_value(value).unwrap_or(Value::Null))
++}
++
++fn hash_value(value: &Value) -> String {
++    sha256_hex(value.to_string().as_bytes())
++}
++
++// --------------------------------------------------------------------------
++// Manifest schema
++// --------------------------------------------------------------------------
++
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct HashEntry {
++    pub sha256: String,
++}
++
++/// Mixers region entry: hash of the region with route gains stripped
++/// for the mixers listed in `user_gains` only. Mixers NOT listed are
++/// hashed with their gains — fully locked. A candidate config is
++/// accepted when the same computation matches `sha256`.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct MixersEntry {
++    pub sha256: String,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub user_gains: Option<Vec<String>>,
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[serde(tag = "policy")]
++pub enum SubChain {
++    #[serde(rename = "locked")]
++    Locked {
++        name: String,
++        sha256: String,
++        steps: Vec<Value>,
++    },
++    #[serde(rename = "child")]
++    Child {
++        name: String,
++        slot: usize,
++        channels: Vec<usize>,
++        allow: Vec<String>,
++        max_steps: usize,
++    },
++    #[serde(rename = "free")]
++    Free {
++        name: String,
++        gaps: Vec<usize>,
++        channels: Vec<usize>,
++        allow: Vec<String>,
++        max_steps: usize,
++    },
++}
++
++impl SubChain {
++    pub fn name(&self) -> &str {
++        match self {
++            SubChain::Locked { name, .. } => name,
++            SubChain::Child { name, .. } => name,
++            SubChain::Free { name, .. } => name,
++        }
++    }
++
++    /// (allowed channels, allowed filter types, max extra steps) for
++    /// editable sub chains; None for locked.
++    pub fn constraints(&self) -> Option<(&[usize], &[String], usize)> {
++        match self {
++            SubChain::Locked { .. } => None,
++            SubChain::Child {
++                channels,
++                allow,
++                max_steps,
++                ..
++            }
++            | SubChain::Free {
++                channels,
++                allow,
++                max_steps,
++                ..
++            } => Some((channels, allow, *max_steps)),
++        }
++    }
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct Manifest {
++    pub version: u32,
++    pub devices: HashEntry,
++    pub mixers: MixersEntry,
++    pub subchains: Vec<SubChain>,
++}
++
++// --------------------------------------------------------------------------
++// Activation
++// --------------------------------------------------------------------------
++
++/// Load a manifest file and activate it. Called once at startup when the
++/// `--manifest` option is given. Fails if a manifest is already active.
++pub fn load_and_activate(path: &str) -> Res<&'static Manifest> {
++    let file = std::fs::File::open(path)
++        .map_err(|e| ConfigError::new(&format!("Unable to open manifest file {path}: {e}")))?;
++    let manifest: Manifest = yaml_serde::from_reader(file)
++        .map_err(|e| ConfigError::new(&format!("Unable to parse manifest file {path}: {e}")))?;
++    if manifest.version != MANIFEST_VERSION {
++        return Err(ConfigError::new(&format!(
++            "Unsupported manifest version {} (expected {MANIFEST_VERSION})",
++            manifest.version
++        ))
++        .into());
++    }
++    if manifest.subchains.is_empty() {
++        return Err(ConfigError::new("Manifest has no subchains").into());
++    }
++    if !matches!(
++        manifest.subchains.last(),
++        Some(SubChain::Locked { .. })
++    ) {
++        return Err(ConfigError::new("The last subchain of a manifest must be locked").into());
++    }
++    if ACTIVE.set(manifest).is_err() {
++        return Err(ConfigError::new("A manifest is already active").into());
++    }
++    Ok(ACTIVE.get().unwrap())
++}
++
++/// The active manifest, if the daemon was started with `--manifest`.
++pub fn active() -> Option<&'static Manifest> {
++    ACTIVE.get()
++}
++
++// --------------------------------------------------------------------------
++// Validation
++// --------------------------------------------------------------------------
++
++/// Check a configuration against a manifest. Called from validate_config
++/// when a manifest is active; pure so it can be unit-tested.
++pub fn validate_against_manifest(conf: &Configuration, manifest: &Manifest) -> Result<(), String> {
++    // Devices are fully locked. The mixers region is pinned up to the
++    // route gains of the mixers listed in `user_gains` (free user
++    // state, e.g. source-mix selection: 100% ch0 / 100% ch1 /
++    // (ch0+ch1)/2 are just gains); mixers not listed are fully locked.
++    let devices_hash = hash_value(&canonical(&conf.devices));
++    if devices_hash != manifest.devices.sha256 {
++        return Err("devices section does not match the manifest".to_string());
++    }
++    let user_gains: HashSet<String> = manifest
++        .mixers
++        .user_gains
++        .clone()
++        .unwrap_or_default()
++        .into_iter()
++        .collect();
++    let mixers_hash = mixers_region_hash(conf, &user_gains);
++    if mixers_hash != manifest.mixers.sha256 {
++        return Err(
++            "mixers section does not match the manifest (only the route gains of \
++             user_gains mixers are editable)"
++                .to_string(),
++        );
++    }
++    if let Some(processors) = &conf.processors
++        && !processors.is_empty()
++    {
++        return Err("processors are not allowed in a locked pipeline".to_string());
++    }
++
++    let steps: Vec<PipelineStep> = conf.pipeline.clone().unwrap_or_default();
++    let step_values: Vec<Value> = steps.iter().map(|s| canonical(s)).collect();
++
++    // Phase A: match the locked runs, in manifest order. The steps
++    // between the end of one locked run and the start of the next form
++    // the slot of the editable sub chains living there.
++    let mut gaps: Vec<(usize, usize)> = Vec::new(); // gaps[k] = range before locked anchor k+1
++    let mut cursor = 0usize;
++    for subchain in &manifest.subchains {
++        let SubChain::Locked {
++            name,
++            sha256,
++            steps: expected,
++        } = subchain
++        else {
++            continue;
++        };
++        let n = expected.len();
++        let mut found: Option<usize> = None;
++        let mut p = cursor;
++        while p + n <= step_values.len() {
++            if (0..n).all(|i| step_values[p + i] == expected[i]) {
++                found = Some(p);
++                break;
++            }
++            p += 1;
++        }
++        let Some(start) = found else {
++            return Err(format!(
++                "locked subchain '{name}' is missing, modified or moved"
++            ));
++        };
++        // Pin the referenced filter/mixer definitions by hashing the run body.
++        let body = run_body(conf, name, &step_values[start..start + n], &user_gains);
++        if hash_value(&body) != *sha256 {
++            return Err(format!(
++                "locked subchain '{name}' does not match the manifest (content hash)"
++            ));
++        }
++        gaps.push((cursor, start));
++        cursor = start + n;
++    }
++
++    // The last subchain must be locked and nothing may follow it.
++    if cursor != step_values.len() {
++        return Err("steps found after the last locked subchain".to_string());
++    }
++
++    // Phase B: parse each gap into placeholder-headed runs and check
++    // them against the constraints of the editable sub chain they
++    // belong to.
++    let bus_channels = conf.devices.playback.channels();
++    let mut seen: HashSet<String> = HashSet::new();
++    for (gap_nr, &(start, end)) in gaps.iter().enumerate() {
++        if start == end {
++            continue; // empty gap
++        }
++        // slot 0 (before the first locked anchor) may hold editable
++        // groups, e.g. per-input-channel user EQ ahead of the mixer
++        let slot = gap_nr; // slot k sits after locked anchor k
++        let expected_here: Vec<&SubChain> = manifest
++            .subchains
++            .iter()
++            .filter(|sc| match sc {
++                SubChain::Child { slot: s, .. } => *s == slot,
++                SubChain::Free { gaps: g, .. } => g.contains(&slot),
++                SubChain::Locked { .. } => false,
++            })
++            .collect();
++        let mut current: Option<&SubChain> = None;
++        let mut step_count: usize = 0;
++        for idx in start..end {
++            let step = &step_values[idx];
++            if let Some(group) = placeholder_group(step, &expected_here) {
++                if !seen.insert(group.name().to_string()) {
++                    return Err(format!(
++                        "subchain '{}' appears more than once",
++                        group.name()
++                    ));
++                }
++                current = Some(group);
++                step_count = 0;
++                check_step_channels(step, group, bus_channels, "placeholder")?;
++                // extra filter names carried by the placeholder step are
++                // editable content of the group
++                if let Some(names) = step.get("names").and_then(Value::as_array) {
++                    check_filter_names(names.iter().skip(1), group, conf)?;
++                }
++                continue;
++            }
++            let Some(group) = current else {
++                return Err(format!(
++                    "step {idx} in slot {slot} is not preceded by a subchain placeholder"
++                ));
++            };
++            step_count += 1;
++            check_editable_step(step, group, conf, step_count, bus_channels)?;
++        }
++    }
++
++    // Every editable subchain must be present exactly once.
++    for subchain in &manifest.subchains {
++        if subchain.constraints().is_some() && !seen.contains(subchain.name()) {
++            return Err(format!(
++                "editable subchain '{}' is missing (no placeholder found)",
++                subchain.name()
++            ));
++        }
++    }
++
++    // Phase C: no unreferenced filter definitions.
++    let mut referenced: HashSet<String> = HashSet::new();
++    for step in &steps {
++        match step {
++            PipelineStep::Filter(fstep) => {
++                for name in &fstep.names {
++                    referenced.insert(name.clone());
++                }
++            }
++            PipelineStep::Mixer(mstep) => {
++                referenced.insert(mstep.name.clone());
++            }
++            PipelineStep::Processor(_) => {
++                return Err("processor steps are not allowed in a locked pipeline".to_string());
++            }
++        }
++    }
++    if let Some(filters) = &conf.filters {
++        for name in filters.keys() {
++            if !referenced.contains(name) {
++                return Err(format!("filter '{name}' is not used by any pipeline step"));
++            }
++        }
++    }
++    Ok(())
++}
++
++/// Body hashed for a locked run: name + steps + referenced definitions.
++/// Mixer definitions of `user_gains` mixers are embedded with their
++/// route gains stripped (gains are free user state); all other
++/// definitions are embedded verbatim.
++fn run_body(
++    conf: &Configuration,
++    name: &str,
++    step_values: &[Value],
++    user_gains: &HashSet<String>,
++) -> Value {
++    let mut filters = Map::new();
++    let mut mixers = Map::new();
++    for step_value in step_values {
++        if step_value.get("type").and_then(Value::as_str) == Some("Filter")
++            && let Some(names) = step_value.get("names").and_then(Value::as_array)
++        {
++            for n in names {
++                if let Some(fname) = n.as_str()
++                    && let Some(filters_map) = &conf.filters
++                    && let Some(def) = filters_map.get(fname)
++                {
++                    filters.insert(fname.to_string(), canonical(def));
++                }
++            }
++        }
++        if step_value.get("type").and_then(Value::as_str) == Some("Mixer")
++            && let Some(mname) = step_value.get("name").and_then(Value::as_str)
++            && let Some(mixers_map) = &conf.mixers
++            && let Some(def) = mixers_map.get(mname)
++        {
++            // gains are free user state: embed the mixer STRUCTURE only
++            let mut def_value = canonical(def);
++            if user_gains.contains(mname) {
++                strip_mixer_gains(&mut def_value);
++            }
++            mixers.insert(mname.to_string(), def_value);
++        }
++    }
++    let mut body = Map::new();
++    body.insert("name".to_string(), Value::String(name.to_string()));
++    body.insert("steps".to_string(), Value::Array(step_values.to_vec()));
++    body.insert("filters".to_string(), Value::Object(filters));
++    body.insert("mixers".to_string(), Value::Object(mixers));
++    canonicalize(Value::Object(body))
++}
++
++/// If the step leads with a placeholder name ("user_slot_<name>") of one
++/// of the expected groups, return that group. The step may carry extra
++/// filter names after the placeholder; those are editable content.
++fn placeholder_group<'a>(step: &Value, expected: &'a [&'a SubChain]) -> Option<&'a SubChain> {
++    if step.get("type").and_then(Value::as_str) != Some("Filter") {
++        return None;
++    }
++    let names = step.get("names").and_then(Value::as_array)?;
++    let name = names.first()?.as_str()?;
++    let suffix = name.strip_prefix("user_slot_")?;
++    expected.iter().find(|sc| sc.name() == suffix).copied()
++}
++
++/// Channels of a step, with an omitted list meaning all bus channels.
++fn effective_channels(step: &Value, bus_channels: usize) -> Result<Vec<usize>, String> {
++    match step.get("channels") {
++        None => Ok((0..bus_channels).collect()),
++        Some(Value::Array(chs)) => {
++            let mut out = Vec::with_capacity(chs.len());
++            for c in chs {
++                out.push(
++                    c.as_u64()
++                        .ok_or_else(|| "channel list contains a non-integer".to_string())?
++                        as usize,
++                );
++            }
++            Ok(out)
++        }
++        Some(_) => Err("channels must be a list".to_string()),
++    }
++}
++
++fn check_step_channels(
++    step: &Value,
++    group: &SubChain,
++    bus_channels: usize,
++    what: &str,
++) -> Result<(), String> {
++    let Some((allowed, _, _)) = group.constraints() else {
++        return Ok(());
++    };
++    let chs = effective_channels(step, bus_channels)?;
++    if chs.iter().all(|c| allowed.contains(c)) {
++        Ok(())
++    } else {
++        Err(format!(
++            "{what} of subchain '{}' uses channels outside its allowed set",
++            group.name()
++        ))
++    }
++}
++
++fn check_editable_step(
++    step: &Value,
++    group: &SubChain,
++    conf: &Configuration,
++    step_count: usize,
++    bus_channels: usize,
++) -> Result<(), String> {
++    let name = group.name();
++    let Some((_allowed, allow_types, max_steps)) = group.constraints() else {
++        return Err(format!("subchain '{name}' is not editable"));
++    };
++    if step.get("type").and_then(Value::as_str) != Some("Filter") {
++        return Err(format!("subchain '{name}' may only contain Filter steps"));
++    }
++    if step_count > max_steps {
++        return Err(format!(
++            "subchain '{name}' exceeds max_steps ({max_steps})"
++        ));
++    }
++    check_step_channels(step, group, bus_channels, "step")?;
++    let Some(names) = step.get("names").and_then(Value::as_array) else {
++        return Err(format!("Filter step in '{name}' has no filter names"));
++    };
++    check_filter_names(names.iter(), group, conf)
++}
++
++/// Check that each referenced filter exists and its type is allowed in
++/// the group.
++fn check_filter_names<'a, I>(names: I, group: &SubChain, conf: &Configuration) -> Result<(), String>
++where
++    I: Iterator<Item = &'a Value>,
++{
++    let name = group.name();
++    let Some((_, allow_types, _)) = group.constraints() else {
++        return Err(format!("subchain '{name}' is not editable"));
++    };
++    for n in names {
++        let Some(fname) = n.as_str() else {
++            return Err(format!("Filter step in '{name}' has a non-string name"));
++        };
++        let Some(filters) = &conf.filters else {
++            return Err(format!("filter '{fname}' is not defined"));
++        };
++        let Some(def) = filters.get(fname) else {
++            return Err(format!("filter '{fname}' is not defined"));
++        };
++        let ftype = canonical(def)
++            .get("type")
++            .and_then(Value::as_str)
++            .unwrap_or("?")
++            .to_string();
++        if !allow_types.contains(&ftype) {
++            return Err(format!(
++                "filter '{fname}' of type '{ftype}' is not allowed in subchain '{name}'"
++            ));
++        }
++    }
++    Ok(())
++}
++
++// --------------------------------------------------------------------------
++// Manifest generation (--make-manifest)
++// --------------------------------------------------------------------------
++
++/// Policy spec: the vendor's declaration of the partition, rendered from
++/// uci by camilladsp-genconf. Locked sub chains are identified by their
++/// step range in the rendered config; editable ones carry constraints.
++/// A `free` group lists the locked anchor names it may relocate after.
++#[derive(Debug, Clone, Deserialize)]
++pub struct PolicySpec {
++    pub subchains: Vec<PolicyEntry>,
++    /// Mixers whose route gains are free user state (source-mix
++    /// selection). Absent/empty = every mixer fully locked.
++    #[serde(default)]
++    pub user_gains: Option<Vec<String>>,
++}
++
++#[derive(Debug, Clone, Deserialize)]
++#[serde(tag = "policy")]
++pub enum PolicyEntry {
++    #[serde(rename = "locked")]
++    Locked {
++        name: String,
++        first_step: usize,
++        steps: usize,
++    },
++    #[serde(rename = "child")]
++    Child {
++        name: String,
++        channels: Vec<usize>,
++        allow: Vec<String>,
++        max_steps: usize,
++    },
++    #[serde(rename = "free")]
++    Free {
++        name: String,
++        gaps: Vec<String>,
++        channels: Vec<usize>,
++        allow: Vec<String>,
++        max_steps: usize,
++    },
++}
++
++/// Translate a filter type from the policy spec to the camilladsp
++/// config type name used at validation time. Accepts the uci filter
++/// type names (as rendered by camilladsp-genconf) and passes the
++/// camilladsp names through.
++fn translate_allow(name: &str) -> Result<String, String> {
++    let translated = match name {
++        "gain" => "Gain",
++        "conv" => "Conv",
++        "delay" => "Delay",
++        "hp" | "lp" | "hs" | "ls" | "peak" | "notch" | "ap" => "Biquad",
++        "lrhp" | "lrlp" => "BiquadCombo",
++        "Gain" => "Gain",
++        "Biquad" => "Biquad",
++        "BiquadCombo" => "BiquadCombo",
++        "Conv" => "Conv",
++        "Delay" => "Delay",
++        _ => return Err(format!("unknown filter type '{name}' in allow list")),
++    };
++    Ok(translated.to_string())
++}
++
++fn translate_allow_list(allow: &[String]) -> Result<Vec<String>, String> {
++    let mut out = Vec::with_capacity(allow.len());
++    for name in allow {
++        out.push(translate_allow(name)?);
++    }
++    Ok(out)
++}
++
++/// Strip the per-route `gain` from one canonical mixer value.
++fn strip_mixer_gains(mixer: &mut Value) {
++    let Some(mapping) = mixer
++        .as_object_mut()
++        .and_then(|m| m.get_mut("mapping"))
++        .and_then(Value::as_array_mut)
++    else {
++        return;
++    };
++    for entry in mapping.iter_mut() {
++        let Some(sources) = entry
++            .as_object_mut()
++            .and_then(|e| e.get_mut("sources"))
++            .and_then(Value::as_array_mut)
++        else {
++            continue;
++        };
++        for src in sources.iter_mut() {
++            if let Some(obj) = src.as_object_mut() {
++                obj.remove("gain");
++            }
++        }
++    }
++}
++
++/// Canonical mixers value with route gains stripped — but only for the
++/// mixers whose gains are free user state (source-mix selection).
++/// Mixers not in `user_gains` are hashed with their gains: fully
++/// locked.
++fn mixers_canonical(conf: &Configuration, user_gains: &HashSet<String>) -> Value {
++    let mut value = canonical(&conf.mixers);
++    if let Some(mixers_map) = value.as_object_mut() {
++        for (name, mixer) in mixers_map.iter_mut() {
++            if user_gains.contains(name) {
++                strip_mixer_gains(mixer);
++            }
++        }
++    }
++    value
++}
++
++fn mixers_region_hash(conf: &Configuration, user_gains: &HashSet<String>) -> String {
++    hash_value(&mixers_canonical(conf, user_gains))
++}
++
++/// Build a manifest from a validated configuration and a policy spec.
++/// Self-checks by validating the config against the result.
++pub fn generate_manifest(conf: &Configuration, spec: &PolicySpec) -> Result<Manifest, String> {
++    if spec.subchains.is_empty() {
++        return Err("policy spec has no subchains".to_string());
++    }
++    // user-gain mixers must exist
++    let user_gains: HashSet<String> = spec.user_gains.clone().unwrap_or_default().into_iter().collect();
++    if let Some(mixers_map) = &conf.mixers {
++        for name in &user_gains {
++            if !mixers_map.contains_key(name) {
++                return Err(format!("user_gains references unknown mixer '{name}'"));
++            }
++        }
++    }
++    let steps: Vec<PipelineStep> = conf.pipeline.clone().unwrap_or_default();
++    let step_values: Vec<Value> = steps.iter().map(|s| canonical(s)).collect();
++
++    // Map anchor names to their slot index (1-based, in order).
++    let mut anchor_slots: BTreeMap<String, usize> = BTreeMap::new();
++    let mut counter = 0usize;
++    for entry in &spec.subchains {
++        if let PolicyEntry::Locked { name, .. } = entry {
++            counter += 1;
++            anchor_slots.insert(name.clone(), counter);
++        }
++    }
++
++    let mut subchains: Vec<SubChain> = Vec::new();
++    let mut anchor_count = 0usize;
++    let mut previous_locked_end = 0usize;
++    for entry in &spec.subchains {
++        match entry {
++            PolicyEntry::Locked {
++                name,
++                first_step,
++                steps: n,
++            } => {
++                if *n == 0 {
++                    return Err(format!("locked subchain '{name}' has zero steps"));
++                }
++                if *first_step < previous_locked_end || *first_step + *n > step_values.len() {
++                    return Err(format!(
++                        "locked subchain '{name}' step range {first_step}..{} is out of range or overlaps the previous locked run",
++                        first_step + n
++                    ));
++                }
++                let run = &step_values[*first_step..*first_step + *n];
++                let body = run_body(conf, name, run, &user_gains);
++                subchains.push(SubChain::Locked {
++                    name: name.clone(),
++                    sha256: hash_value(&body),
++                    steps: run.to_vec(),
++                });
++                previous_locked_end = *first_step + *n;
++                anchor_count += 1;
++            }
++            PolicyEntry::Child {
++                name,
++                channels,
++                allow,
++                max_steps,
++            } => {
++                if channels.is_empty() || allow.is_empty() || *max_steps == 0 {
++                    return Err(format!(
++                        "child subchain '{name}' needs channels, allow and max_steps"
++                    ));
++                }
++                let allow = translate_allow_list(allow)?;
++                subchains.push(SubChain::Child {
++                    name: name.clone(),
++                    slot: anchor_count,
++                    channels: channels.clone(),
++                    allow,
++                    max_steps: *max_steps,
++                });
++            }
++            PolicyEntry::Free {
++                name,
++                gaps,
++                channels,
++                allow,
++                max_steps,
++            } => {
++                let mut slot_gaps = Vec::new();
++                for g in gaps {
++                    let Some(slot) = anchor_slots.get(g) else {
++                        return Err(format!(
++                            "free subchain '{name}' references unknown anchor '{g}'"
++                        ));
++                    };
++                    slot_gaps.push(*slot);
++                }
++                let allow = translate_allow_list(allow)?;
++                subchains.push(SubChain::Free {
++                    name: name.clone(),
++                    gaps: slot_gaps,
++                    channels: channels.clone(),
++                    allow,
++                    max_steps: *max_steps,
++                });
++            }
++        }
++    }
++    if !matches!(subchains.last(), Some(SubChain::Locked { .. })) {
++        return Err("the last subchain must be locked".to_string());
++    }
++
++    let manifest = Manifest {
++        version: MANIFEST_VERSION,
++        devices: HashEntry {
++            sha256: hash_value(&canonical(&conf.devices)),
++        },
++        mixers: MixersEntry {
++            sha256: mixers_region_hash(conf, &user_gains),
++            user_gains: if user_gains.is_empty() {
++                None
++            } else {
++                Some(user_gains.into_iter().collect())
++            },
++        },
++        subchains,
++    };
++    // Self-check: the config we just hashed must validate cleanly.
++    validate_against_manifest(conf, &manifest)?;
++    Ok(manifest)
++}
++
++/// Load a config and a policy spec from files and produce the manifest
++/// as pretty JSON (used by --make-manifest).
++pub fn make_manifest(config_path: &str, policy_path: &str) -> Res<String> {
++    let conf = crate::config::load_validate_config(config_path)?;
++    let policy_data = std::fs::read_to_string(policy_path).map_err(|e| {
++        ConfigError::new(&format!("Unable to read policy spec {policy_path}: {e}"))
++    })?;
++    let spec: PolicySpec = yaml_serde::from_str(&policy_data).map_err(|e| {
++        ConfigError::new(&format!("Unable to parse policy spec {policy_path}: {e}"))
++    })?;
++    let manifest = generate_manifest(&conf, &spec).map_err(|e| ConfigError::new(&e))?;
++    serde_json::to_string_pretty(&manifest)
++        .map_err(|e| ConfigError::new(&format!("Unable to serialize manifest: {e}")).into())
++}
++
++// --------------------------------------------------------------------------
++// Tests
++// --------------------------------------------------------------------------
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn sha256_str(s: &str) -> String {
++        sha256_hex(s.as_bytes())
++    }
++
++    #[test]
++    fn test_sha256_vectors() {
++        assert_eq!(
++            sha256_str("abc"),
++            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
++        );
++        assert_eq!(
++            sha256_str(""),
++            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
++        );
++        assert_eq!(
++            sha256_str("The quick brown fox jumps over the lazy dog"),
++            "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
++        );
++    }
++
++    #[test]
++    fn test_canonicalize() {
++        let v: Value = serde_json::from_str(
++            r#"{"b": 1, "a": null, "c": {"y": null, "x": [2.0, 1, 0.5]}}"#,
++        )
++        .unwrap();
++        let c = canonicalize(v);
++        assert_eq!(c.to_string(), r#"{"b":1,"c":{"x":[2,1,0.5]}}"#);
++    }
++
++    const BASE_CONFIG: &str = r#"
++devices:
++  samplerate: 48000
++  chunksize: 1024
++  capture:
++    type: RawFile
++    channels: 2
++    filename: /dev/zero
++    format: S16_LE
++  playback:
++    type: File
++    channels: 2
++    filename: /dev/null
++    format: S16_LE
++    wav_header: false
++mixers:
++  srcmix:
++    channels:
++      in: 2
++      out: 2
++    mapping:
++      - dest: 0
++        sources:
++          - channel: 0
++            gain: 0.5
++            scale: linear
++          - channel: 1
++            gain: 0.5
++            scale: linear
++      - dest: 1
++        sources:
++          - channel: 0
++            gain: 0.5
++            scale: linear
++          - channel: 1
++            gain: 0.5
++            scale: linear
++filters:
++  user_slot_user_wf:
++    type: Gain
++    parameters:
++      gain: 0
++  user_slot_user_tw:
++    type: Gain
++    parameters:
++      gain: 0
++  wf_lp:
++    type: BiquadCombo
++    parameters:
++      type: LinkwitzRileyLowpass
++      freq: 2300
++      order: 4
++  wf_limit:
++    type: Limiter
++    parameters:
++      clip_limit: 0.9
++  tw_hp:
++    type: BiquadCombo
++    parameters:
++      type: LinkwitzRileyHighpass
++      freq: 1900
++      order: 4
++pipeline:
++  - type: Mixer
++    name: srcmix
++  - type: Filter
++    channels: [0]
++    names: [user_slot_user_wf]
++  - type: Filter
++    channels: [0]
++    names: [wf_lp, wf_limit]
++  - type: Filter
++    channels: [1]
++    names: [user_slot_user_tw]
++  - type: Filter
++    channels: [1]
++    names: [tw_hp]
++"#;
++
++    const BASE_POLICY: &str = r#"
++subchains:
++  - policy: locked
++    name: src_sel
++    first_step: 0
++    steps: 1
++  - policy: child
++    name: user_wf
++    channels: [0]
++    allow: [Gain, Biquad, BiquadCombo, Conv, Delay]
++    max_steps: 8
++  - policy: locked
++    name: wf_tail
++    first_step: 2
++    steps: 1
++  - policy: child
++    name: user_tw
++    channels: [1]
++    allow: [Gain, Biquad, BiquadCombo, Conv, Delay]
++    max_steps: 8
++  - policy: locked
++    name: tw_tail
++    first_step: 4
++    steps: 1
++user_gains: [srcmix]
++"#;
++
++    use std::sync::atomic::{AtomicUsize, Ordering};
++    static CONF_N: AtomicUsize = AtomicUsize::new(0);
++
++    fn with_conf(yaml: &str) -> Configuration {
++        let n = CONF_N.fetch_add(1, Ordering::SeqCst);
++        let path = format!("/tmp/cdsp_test_conf_{n}.yml");
++        std::fs::write(&path, yaml).unwrap();
++        let conf = crate::config::load_validate_config(&path)
++            .expect("config should load and validate");
++        let _ = std::fs::remove_file(&path);
++        conf
++    }
++
++    fn base_conf() -> Configuration {
++        with_conf(BASE_CONFIG)
++    }
++
++    fn base_manifest() -> Manifest {
++        let spec: PolicySpec = yaml_serde::from_str(BASE_POLICY).unwrap();
++        generate_manifest(&base_conf(), &spec).expect("manifest generation should succeed")
++    }
++
++    #[test]
++    fn test_generate_and_validate_clean() {
++        let manifest = base_manifest();
++        let conf = base_conf();
++        assert!(validate_against_manifest(&conf, &manifest).is_ok());
++        // round-trip through serialization
++        let json = serde_json::to_string(&manifest).unwrap();
++        let m2: Manifest = serde_json::from_str(&json).unwrap();
++        assert!(validate_against_manifest(&conf, &m2).is_ok());
++    }
++
++    #[test]
++    fn test_tamper_locked_param() {
++        let manifest = base_manifest();
++        let conf = with_conf(&BASE_CONFIG.replace("freq: 2300", "freq: 2500"));
++        assert!(validate_against_manifest(&conf, &manifest)
++            .unwrap_err()
++            .contains("wf_tail"));
++    }
++
++    #[test]
++    fn test_tamper_locked_bypassed() {
++        let manifest = base_manifest();
++        let yaml = BASE_CONFIG.replace(
++            "    names: [wf_lp, wf_limit]",
++            "    names: [wf_lp, wf_limit]\n    bypassed: true",
++        );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++    }
++
++    #[test]
++    fn test_delete_locked_step() {
++        let manifest = base_manifest();
++        let yaml = BASE_CONFIG.replace(
++            "  - type: Filter\n    channels: [1]\n    names: [tw_hp]\n",
++            "",
++        );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++    }
++
++    #[test]
++    fn test_tamper_devices() {
++        let manifest = base_manifest();
++        let conf = with_conf(&BASE_CONFIG.replace("chunksize: 1024", "chunksize: 2048"));
++        assert!(validate_against_manifest(&conf, &manifest)
++            .unwrap_err()
++            .contains("devices"));
++    }
++
++    #[test]
++    fn test_tamper_mixer() {
++        let manifest = base_manifest();
++        // scale is part of the pinned structure
++        let conf = with_conf(&BASE_CONFIG.replace("scale: linear", "scale: dB"));
++        assert!(validate_against_manifest(&conf, &manifest)
++            .unwrap_err()
++            .contains("mixers"));
++    }
++
++    #[test]
++    fn test_mixer_route_gains_free() {
++        let manifest = base_manifest();
++        // srcmix is a user_gains mixer: any route gains accepted
++        // (source-mix selection)
++        let conf = with_conf(&BASE_CONFIG.replace("gain: 0.5", "gain: 1.0"));
++        assert!(validate_against_manifest(&conf, &manifest).is_ok());
++        let conf = with_conf(&BASE_CONFIG.replace("gain: 0.5", "gain: 0.0"));
++        assert!(validate_against_manifest(&conf, &manifest).is_ok());
++        // ...but the structure is pinned: removing a source route
++        let dropped = BASE_CONFIG.replace(
++            "      - dest: 1\n        sources:\n          - channel: 0\n            gain: 0.5\n            scale: linear\n          - channel: 1\n            gain: 0.5\n            scale: linear",
++            "      - dest: 1\n        sources:\n          - channel: 0\n            gain: 0.5\n            scale: linear",
++        );
++        let conf = with_conf(&dropped);
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++        // ...adding a flag to a route is a structure change too
++        let flagged = BASE_CONFIG.replace(
++            "      - dest: 1\n        sources:\n          - channel: 0\n            gain: 0.5",
++            "      - dest: 1\n        sources:\n          - channel: 0\n            inverted: true\n            gain: 0.5",
++        );
++        let conf = with_conf(&flagged);
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++    }
++
++    #[test]
++    fn test_mixer_fully_locked_without_user_gains() {
++        // no user_gains in the policy -> the mixer is 100% locked
++        let policy = BASE_POLICY.replace("user_gains: [srcmix]", "");
++        let spec: PolicySpec = yaml_serde::from_str(&policy).unwrap();
++        let manifest = generate_manifest(&base_conf(), &spec).unwrap();
++        let conf = with_conf(&BASE_CONFIG.replace("gain: 0.5", "gain: 1.0"));
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++        // and the pristine config still validates
++        assert!(validate_against_manifest(&base_conf(), &manifest).is_ok());
++    }
++
++    #[test]
++    fn test_user_eq_in_slot_accepted() {
++        let manifest = base_manifest();
++        let yaml = BASE_CONFIG
++            .replace(
++                "  user_slot_user_tw:",
++                "  user_eq1:\n    type: Biquad\n    parameters:\n      type: Peaking\n      freq: 1000\n      gain: 3\n      q: 1\n  user_slot_user_tw:",
++            )
++            .replace(
++                "    names: [user_slot_user_wf]",
++                "    names: [user_slot_user_wf, user_eq1]",
++            );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest).is_ok());
++    }
++
++    #[test]
++    fn test_user_step_wrong_channel() {
++        let manifest = base_manifest();
++        let yaml = BASE_CONFIG
++            .replace(
++                "  user_slot_user_tw:",
++                "  user_eq1:\n    type: Biquad\n    parameters:\n      type: Peaking\n      freq: 1000\n      gain: 3\n      q: 1\n  user_slot_user_tw:",
++            )
++            .replace(
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]",
++                "  - type: Filter\n    channels: [1]\n    names: [user_slot_user_wf, user_eq1]",
++            );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++    }
++
++    #[test]
++    fn test_user_step_disallowed_type() {
++        let manifest = base_manifest();
++        let yaml = BASE_CONFIG
++            .replace(
++                "  user_slot_user_tw:",
++                "  user_lim:\n    type: Limiter\n    parameters:\n      clip_limit: 0.5\n  user_slot_user_tw:",
++            )
++            .replace(
++                "    names: [user_slot_user_wf]",
++                "    names: [user_slot_user_wf, user_lim]",
++            );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest)
++            .unwrap_err()
++            .contains("not allowed"));
++    }
++
++    #[test]
++    fn test_user_step_omitted_channels_rejected() {
++        let manifest = base_manifest();
++        let yaml = BASE_CONFIG
++            .replace(
++                "  user_slot_user_tw:",
++                "  user_eq1:\n    type: Gain\n    parameters:\n      gain: -2\n  user_slot_user_tw:",
++            )
++            .replace(
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]",
++                "  - type: Filter\n    names: [user_slot_user_wf, user_eq1]",
++            );
++        let conf = with_conf(&yaml);
++        // slot owns only [0]; omitted channels = all bus channels [0,1]
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++    }
++
++    #[test]
++    fn test_user_step_before_placeholder_rejected() {
++        let manifest = base_manifest();
++        let yaml = BASE_CONFIG
++            .replace(
++                "  user_slot_user_tw:",
++                "  user_eq1:\n    type: Gain\n    parameters:\n      gain: -2\n  user_slot_user_tw:",
++            )
++            .replace(
++                "    names: [user_slot_user_wf]",
++                "    names: [user_eq1, user_slot_user_wf]",
++            );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++    }
++
++    #[test]
++    fn test_missing_placeholder_rejected() {
++        let manifest = base_manifest();
++        // empty the user_wf slot entirely
++        let yaml = BASE_CONFIG.replace(
++            "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]\n",
++            "",
++        );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest)
++            .unwrap_err()
++            .contains("user_wf"));
++    }
++
++    #[test]
++    fn test_child_group_moved_rejected() {
++        let manifest = base_manifest();
++        // swap the two placeholder steps (user_tw run lands in slot 1)
++        let yaml = BASE_CONFIG
++            .replace("    names: [user_slot_user_wf]", "    names: [SWAP]")
++            .replace("    names: [user_slot_user_tw]", "    names: [user_slot_user_wf]")
++            .replace("    names: [SWAP]", "    names: [user_slot_user_tw]");
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++    }
++
++    #[test]
++    fn test_step_after_tail_rejected() {
++        let manifest = base_manifest();
++        let yaml = BASE_CONFIG
++            .replace(
++                "  user_slot_user_tw:",
++                "  user_eq1:\n    type: Gain\n    parameters:\n      gain: -2\n  user_slot_user_tw:",
++            )
++            .replace(
++                "  - type: Filter\n    channels: [1]\n    names: [tw_hp]",
++                "  - type: Filter\n    channels: [1]\n    names: [tw_hp]\n  - type: Filter\n    channels: [1]\n    names: [user_eq1]",
++            );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest)
++            .unwrap_err()
++            .contains("after the last locked"));
++    }
++
++    #[test]
++    fn test_unused_filter_rejected() {
++        let manifest = base_manifest();
++        let yaml = BASE_CONFIG.replace(
++            "  user_slot_user_tw:",
++            "  stray:\n    type: Gain\n    parameters:\n      gain: -2\n  user_slot_user_tw:",
++        );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest)
++            .unwrap_err()
++            .contains("stray"));
++    }
++
++    #[test]
++    fn test_max_steps_exceeded() {
++        let policy = BASE_POLICY.replace("max_steps: 8", "max_steps: 1");
++        let spec: PolicySpec = yaml_serde::from_str(&policy).unwrap();
++        let manifest = generate_manifest(&base_conf(), &spec).unwrap();
++        let yaml = BASE_CONFIG
++            .replace(
++                "  user_slot_user_tw:",
++                "  user_eq1:\n    type: Gain\n    parameters:\n      gain: -2\n  user_eq2:\n    type: Gain\n    parameters:\n      gain: -3\n  user_slot_user_tw:",
++            )
++            .replace(
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]",
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]\n  - type: Filter\n    channels: [0]\n    names: [user_eq1]\n  - type: Filter\n    channels: [0]\n    names: [user_eq2]",
++            );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest)
++            .unwrap_err()
++            .contains("max_steps"));
++    }
++
++    #[test]
++    fn test_locked_run_duplicated_in_gap() {
++        // a full copy of the wf_tail run inside the user slot is rejected
++        let manifest = base_manifest();
++        let yaml = BASE_CONFIG.replace(
++            "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]",
++            "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]\n  - type: Filter\n    channels: [0]\n    names: [wf_lp, wf_limit]",
++        );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++    }
++
++    #[test]
++    fn test_input_eq_before_mixer() {
++        // user EQ as two groups on the INPUT channels, ahead of the
++        // mixer (slot 0): [in0][in1][mixer][wf_tail][tw_tail]
++        let config = r#"
++devices:
++  samplerate: 48000
++  chunksize: 1024
++  capture:
++    type: RawFile
++    channels: 2
++    filename: /dev/zero
++    format: S16_LE
++  playback:
++    type: File
++    channels: 2
++    filename: /dev/null
++    format: S16_LE
++    wav_header: false
++mixers:
++  srcmix:
++    channels:
++      in: 2
++      out: 2
++    mapping:
++      - dest: 0
++        sources:
++          - channel: 0
++            gain: 0.5
++            scale: linear
++      - dest: 1
++        sources:
++          - channel: 1
++            gain: 0.5
++            scale: linear
++filters:
++  user_slot_user_in0:
++    type: Gain
++    parameters:
++      gain: 0
++  user_slot_user_in1:
++    type: Gain
++    parameters:
++      gain: 0
++  wf_lp:
++    type: BiquadCombo
++    parameters:
++      type: LinkwitzRileyLowpass
++      freq: 2300
++      order: 4
++  tw_hp:
++    type: BiquadCombo
++    parameters:
++      type: LinkwitzRileyHighpass
++      freq: 1900
++      order: 4
++pipeline:
++  - type: Filter
++    channels: [0]
++    names: [user_slot_user_in0]
++  - type: Filter
++    channels: [1]
++    names: [user_slot_user_in1]
++  - type: Mixer
++    name: srcmix
++  - type: Filter
++    channels: [0]
++    names: [wf_lp]
++  - type: Filter
++    channels: [1]
++    names: [tw_hp]
++"#;
++        // uci filter type names in the allow list: must be translated
++        let policy = r#"
++subchains:
++  - policy: child
++    name: user_in0
++    channels: [0]
++    allow: [gain, peak, hs, ls, notch, ap, conv, delay]
++    max_steps: 8
++  - policy: child
++    name: user_in1
++    channels: [1]
++    allow: [gain, peak, hs, ls, notch, ap, conv, delay]
++    max_steps: 8
++  - policy: locked
++    name: src_sel
++    first_step: 2
++    steps: 1
++  - policy: locked
++    name: wf_tail
++    first_step: 3
++    steps: 1
++  - policy: locked
++    name: tw_tail
++    first_step: 4
++    steps: 1
++"#;
++        let conf = with_conf(config);
++        let spec: PolicySpec = yaml_serde::from_str(policy).unwrap();
++        let manifest = generate_manifest(&conf, &spec).expect("input-EQ manifest should generate");
++        // translation happened: uci 'gain'/'peak' -> Gain/Biquad
++        let sc = &manifest.subchains[0];
++        match sc {
++            SubChain::Child { allow, slot, .. } => {
++                assert_eq!(*slot, 0);
++                assert!(allow.contains(&"Gain".to_string()));
++                assert!(allow.contains(&"Biquad".to_string()));
++                assert!(!allow.contains(&"gain".to_string()));
++            }
++            _ => panic!("expected child"),
++        }
++        assert!(validate_against_manifest(&conf, &manifest).is_ok());
++
++        // user EQ appended to input slot 0: accepted
++        let with_eq = config
++            .replace(
++                "  user_slot_user_in1:",
++                "  user_eq1:\n    type: Biquad\n    parameters:\n      type: Peaking\n      freq: 1000\n      gain: 3\n      q: 1\n  user_slot_user_in1:",
++            )
++            .replace(
++                "    names: [user_slot_user_in0]",
++                "    names: [user_slot_user_in0, user_eq1]",
++            );
++        let conf_eq = with_conf(&with_eq);
++        assert!(validate_against_manifest(&conf_eq, &manifest).is_ok());
++
++        // moving an input slot after the mixer: rejected (position lock)
++        let moved = config
++            .replace(
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_in0]\n",
++                "",
++            )
++            .replace(
++                "  - type: Mixer\n    name: srcmix",
++                "  - type: Mixer\n    name: srcmix\n  - type: Filter\n    channels: [0]\n    names: [user_slot_user_in0]",
++            );
++        let conf_moved = with_conf(&moved);
++        assert!(validate_against_manifest(&conf_moved, &manifest).is_err());
++
++        // swapping the two input groups within slot 0: allowed
++        let swapped = config
++            .replace(
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_in0]\n  - type: Filter\n    channels: [1]\n    names: [user_slot_user_in1]",
++                "  - type: Filter\n    channels: [1]\n    names: [user_slot_user_in1]\n  - type: Filter\n    channels: [0]\n    names: [user_slot_user_in0]",
++            );
++        let conf_swapped = with_conf(&swapped);
++        assert!(validate_against_manifest(&conf_swapped, &manifest).is_ok());
++    }
++
++    #[test]
++    fn test_unknown_allow_type_rejected() {
++        let policy = BASE_POLICY.replace("[Gain, Biquad, BiquadCombo, Conv, Delay]", "[gain, bogus]");
++        let spec: PolicySpec = yaml_serde::from_str(&policy).unwrap();
++        assert!(generate_manifest(&base_conf(), &spec)
++            .unwrap_err()
++            .contains("bogus"));
++    }
++
++    #[test]
++    fn test_processor_rejected() {
++        let manifest = base_manifest();
++        // a Processor step spliced into a user slot (with its definition)
++        let yaml = BASE_CONFIG
++            .replace(
++                "pipeline:",
++                "processors:\n  comp1:\n    type: Compressor\n    parameters:\n      channels: 2\n      attack: 5\n      release: 50\n      threshold: -10\n      factor: 4\npipeline:",
++            )
++            .replace(
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]",
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]\n  - type: Processor\n    name: comp1",
++            );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest)
++            .unwrap_err()
++            .contains("processor"));
++    }
++
++    #[test]
++    fn test_mixer_step_in_slot_rejected() {
++        let manifest = base_manifest();
++        // a Mixer step spliced into a user slot: not a Filter step
++        let yaml = BASE_CONFIG.replace(
++            "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]",
++            "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]\n  - type: Mixer\n    name: srcmix",
++        );
++        let conf = with_conf(&yaml);
++        assert!(validate_against_manifest(&conf, &manifest).is_err());
++    }
++
++    #[test]
++    fn test_free_group_relocation() {
++        // add a free group allowed after src_sel or wf_tail
++        let yaml = BASE_CONFIG
++            .replace(
++                "  user_slot_user_tw:",
++                "  user_slot_user_x:\n    type: Gain\n    parameters:\n      gain: 0\n  user_slot_user_tw:",
++            )
++            .replace(
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]",
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]\n  - type: Filter\n    channels: [0]\n    names: [user_slot_user_x]",
++            );
++        let conf = with_conf(&yaml);
++        let policy = BASE_POLICY
++            .replace(
++                "  - policy: locked
++    name: wf_tail
++    first_step: 2",
++                "  - policy: free
++    name: user_x
++    gaps: [src_sel, wf_tail]
++    channels: [0]
++    allow: [Gain, Biquad, BiquadCombo, Conv, Delay]
++    max_steps: 4
++  - policy: locked
++    name: wf_tail
++    first_step: 3",
++            )
++            .replace(
++                "  - policy: locked
++    name: tw_tail
++    first_step: 4",
++                "  - policy: locked
++    name: tw_tail
++    first_step: 5",
++            );
++        let spec: PolicySpec = yaml_serde::from_str(&policy).unwrap();
++        let manifest = generate_manifest(&conf, &spec).expect("free manifest should generate");
++        assert!(validate_against_manifest(&conf, &manifest).is_ok());
++
++        // relocate the free run into gap 2 (after wf_tail) — still allowed
++        let moved = yaml
++            .replace(
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]\n  - type: Filter\n    channels: [0]\n    names: [user_slot_user_x]",
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_wf]",
++            )
++            .replace(
++                "  - type: Filter\n    channels: [1]\n    names: [user_slot_user_tw]",
++                "  - type: Filter\n    channels: [0]\n    names: [user_slot_user_x]\n  - type: Filter\n    channels: [1]\n    names: [user_slot_user_tw]",
++            );
++        let conf_moved = with_conf(&moved);
++        assert!(validate_against_manifest(&conf_moved, &manifest).is_ok());
++
++        // forbid gap 2: regenerate a manifest allowing only gap 1
++        let policy2 = policy.replace("gaps: [src_sel, wf_tail]", "gaps: [src_sel]");
++        let spec2: PolicySpec = yaml_serde::from_str(&policy2).unwrap();
++        let manifest2 = generate_manifest(&conf, &spec2).unwrap();
++        assert!(validate_against_manifest(&conf_moved, &manifest2).is_err());
++    }
++}
+diff --git a/src/config/mod.rs b/src/config/mod.rs
+index b466d01..312f1c0 100644
+--- a/src/config/mod.rs
++++ b/src/config/mod.rs
+@@ -15,6 +15,7 @@
+ // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
+ 
+ mod utils;
++pub mod manifest;
+ 
+ use self::utils::validate_nonzero_usize;
+ use crate::utils::wavtools::{WavParams, find_data_in_wav_stream};
+diff --git a/src/config/utils.rs b/src/config/utils.rs
+index cbd4098..ed4bfb5 100644
+--- a/src/config/utils.rs
++++ b/src/config/utils.rs
+@@ -791,6 +791,13 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
+         );
+         return Err(ConfigError::new(&msg).into());
+     }
++    // Locked-config manifest check (no-op unless --manifest was given).
++    if let Some(manifest) = super::manifest::active()
++        && let Err(msg) = super::manifest::validate_against_manifest(conf, manifest)
++    {
++        log::error!("Config rejected by locked manifest: {msg}");
++        return Err(ConfigError::new(&msg).into());
++    }
+     Ok(())
+ }
+ 
