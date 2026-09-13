@@ -1,12 +1,15 @@
 # camilladsp: pipeline is generated at runtime into /tmp/camilladsp.yml by
-# /usr/bin/camilladsp-genconf (docs: docs/camilladsp-uci.md).
+# /usr/bin/camilladsp-genconf (docs: docs/camilladsp.md).
 #
 # The audio chain is defined by generic uci nodes:
 #   config filter    one filter (option name/type + params)
 #   config mixer     one mixer  (option name/in/out)
 #   config mixroute  one mixer source contribution (mixer/dest/source/gain)
 #   config step      one pipeline step, ordered by option index
-#                    (Filter: list channels + list names | Mixer: option name)
+#                    (Filter: list channels + list names | Mixer: option name |
+#                     editable sub chain slot: option subchain only)
+#   config subchain  one logical sub chain (policy locked|child|free),
+#                    see "Protected pipeline" in docs/camilladsp.md
 # No nodes -> plain pass-through capture -> playback.
 #
 # Device specs "TYPE[:VALUE]":
@@ -23,6 +26,11 @@
 config camilladsp 'main'
 	option enabled '1'
 	option port '5000'
+	# websocket bind address. The WS API has NO authentication: the
+	# product binds loopback (127.0.0.1) so only local tools reach it.
+	# The dev rig sets 0.0.0.0 here to use the forwarded port from the
+	# host (run-qemu.sh hostfwd, scripts/protected_ws_test.py).
+	option ws_address '0.0.0.0'
 	# flexi_logger spec (--custom_log_spec); default silences the inferno
 	# PCM short-read warnings (~2000 lines/s at warn)
 	option logspec 'warn,camillalib::alsa_backend::device=error'
@@ -41,23 +49,52 @@ config camilladsp 'main'
 	#	list env 'INFERNO_RX_CHANNELS=8'
 	#	list env 'INFERNO_BIND_IP=eth1'
 
-# --- 2-way speaker example (stereo in -> per-way select + crossover) --------
+# --- protected 2-way speaker example (sub chains + user EQ slots) ----------
+# The pipeline is partitioned into logical sub chains; genconf renders the
+# config AND a policy spec, camilladsp builds its manifest from them and
+# enforces it (see docs/camilladsp.md "Protected pipeline" and
+# plan/protected-xover-pipeline.md). User EQ lives on the INPUT channels
+# (two editable slots before the mixer); mix + xover/FIR/limiter tails
+# are locked.
+#
+# config subchain
+# 	option name 'user_in0'            # editable slot, input ch0
+# 	option policy 'child'             # content editable, position fixed
+# 	option channels '0'               # bus channels the slot owns
+# 	option allow 'gain peak hs ls notch ap conv delay'   # uci filter types
+# 	option max_steps '8'
+# config subchain
+# 	option name 'user_in1'
+# 	option policy 'child'
+# 	option channels '1'
+# 	option allow 'gain peak hs ls notch ap conv delay'
+# 	option max_steps '8'
+# config subchain
+# 	option name 'src_sel'             # source-select mixer
+# 	option policy 'locked'            # content + position pinned
+# config subchain
+# 	option name 'wf_tail'             # woofer xover + FIR + limiter
+# 	option policy 'locked'
+# config subchain
+# 	option name 'tw_tail'             # tweeter xover + EQ + limiter
+# 	option policy 'locked'
+#
 # config mixer
 # 	option name 'srcmix'
+#	option user_gains '1'              # route gains selectable via WS
 # 	option in '2'
 # 	option out '2'
-#
-# config mixroute                        # way 1 (woofer) = (L+R)/2
+# config mixroute                        # woofer feed = (L+R)/2
 # 	option mixer 'srcmix'
 # 	option dest '0'
 # 	option source '0'
-# 	option gain '0.5'
+# 	option gain '0.5'                # LINEAR (0.5 = -6 dB)
 # config mixroute
 # 	option mixer 'srcmix'
 # 	option dest '0'
 # 	option source '1'
 # 	option gain '0.5'
-# config mixroute                        # way 2 (tweeter) = (L+R)/2
+# config mixroute                        # tweeter feed = (L+R)/2
 # 	option mixer 'srcmix'
 # 	option dest '1'
 # 	option source '0'
@@ -69,44 +106,65 @@ config camilladsp 'main'
 # 	option gain '0.5'
 #
 # config filter
-# 	option name 'woofer_level'
-# 	option type 'gain'
-# 	option gain '-2.0'
-# config filter
-# 	option name 'woofer_lp'
+# 	option name 'wf_lp'
 # 	option type 'lrlp'
-# 	option f '1800'
+# 	option f '2300'
 # 	option order '4'
 # config filter
-# 	option name 'woofer_shelf'
-# 	option type 'ls'
-# 	option f '200'
-# 	option gain '2'
+# 	option name 'wf_fir'              # locked conv filters must point
+# 	option type 'conv'                # under /usr/share/camilladsp/coeffs
+# 	option filename '/usr/share/camilladsp/coeffs/wf_fir.txt'
 # config filter
-# 	option name 'tweeter_hp'
+# 	option name 'wf_limit'
+# 	option type 'limiter'
+# 	option clip_limit '0.9'
+# config filter
+# 	option name 'tw_hp'
 # 	option type 'lrhp'
-# 	option f '1800'
+# 	option f '1900'
 # 	option order '4'
 # config filter
-# 	option name 'tweeter_shelf'
-# 	option type 'hs'
-# 	option f '6000'
-# 	option gain '-1.5'
+# 	option name 'tw_notch10k'
+# 	option type 'notch'
+# 	option f '10000'
+# 	option q '2.0'
+# config filter
+# 	option name 'tw_peak17k'
+# 	option type 'peak'
+# 	option f '17000'
+# 	option gain '-3.0'
+# 	option q '2.0'
+# config filter
+# 	option name 'tw_limit'
+# 	option type 'limiter'
+# 	option clip_limit '0.8'
 #
 # config step
-# 	option index '10'
-# 	option type 'Mixer'
-# 	option name 'srcmix'
+# 	option index '10'                 # editable slot: bare step,
+# 	option subchain 'user_in0'        # renders user_slot_user_in0
+# config step
+# 	option index '15'
+# 	option subchain 'user_in1'
 # config step
 # 	option index '20'
-# 	option type 'Filter'
-# 	list channels '0'
-# 	list names 'woofer_level'
-# 	list names 'woofer_lp'
-# 	list names 'woofer_shelf'
+# 	option subchain 'src_sel'
+# 	option type 'Mixer'
+# 	option name 'srcmix'
+#	option user_gains '1'              # route gains selectable via WS
 # config step
 # 	option index '30'
+# 	option subchain 'wf_tail'
+# 	option type 'Filter'
+# 	list channels '0'
+# 	list names 'wf_lp'
+# 	list names 'wf_fir'
+# 	list names 'wf_limit'
+# config step
+# 	option index '40'
+# 	option subchain 'tw_tail'
 # 	option type 'Filter'
 # 	list channels '1'
-# 	list names 'tweeter_hp'
-# 	list names 'tweeter_shelf'
+# 	list names 'tw_hp'
+# 	list names 'tw_notch10k'
+# 	list names 'tw_peak17k'
+# 	list names 'tw_limit'

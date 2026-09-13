@@ -1,19 +1,49 @@
 #!/bin/sh /etc/rc.common
-# camilladsp service: generates /tmp/camilladsp.yml from uci, then runs the
+# camilladsp service: generates /tmp/camilladsp.yml (and, when uci
+# declares sub chains, the policy + manifest) from uci, then runs the
 # DSP engine under procd supervision (respawn).
+#
+# Protected pipeline chain (see docs/camilladsp.md "Protected pipeline"):
+#   genconf (uci) -> /tmp/camilladsp.yml + /tmp/camilladsp.policy
+#   camilladsp --make-manifest -> /tmp/camilladsp.manifest
+#   camilladsp ... --manifest -> enforces it on every config change
 
 START=75
 STOP=25
 USE_PROCD=1
 
 CONFFILE=/tmp/camilladsp.yml
+POLICYFILE=/tmp/camilladsp.policy
+MANIFESTFILE=/tmp/camilladsp.manifest
+
+# Regenerate the manifest if a policy exists (sub chains declared).
+# Returns 0 on success (or when unprotected), 1 on failure.
+regen_manifest() {
+	if [ ! -f "$POLICYFILE" ]; then
+		rm -f "$MANIFESTFILE"
+		return 0
+	fi
+	if ! /usr/bin/camilladsp "$CONFFILE" --make-manifest "$POLICYFILE" \
+		> "$MANIFESTFILE.new" 2>/dev/null; then
+		echo "camilladsp: manifest generation failed, config kept" >&2
+		rm -f "$MANIFESTFILE.new"
+		return 1
+	fi
+	mv "$MANIFESTFILE.new" "$MANIFESTFILE"
+	return 0
+}
 
 start_service() {
-	local enabled port logspec
+	local enabled port logspec wsaddr
 
 	config_load camilladsp
 	config_get enabled main enabled 1
 	config_get port main port 5000
+	# websocket bind address. The WS API has NO authentication: bind to
+	# loopback (product default) so only local tools (web UI, preset
+	# daemon) can reach it. The dev rig overrides this to 0.0.0.0 to
+	# use the forwarded port.
+	config_get wsaddr main ws_address 127.0.0.1
 	# flexi_logger spec (camilladsp ignores RUST_LOG, that env only
 	# configures the inferno instance inside the ALSA plugin). Default
 	# silences the short-read warnings of the inferno capture loop.
@@ -22,6 +52,10 @@ start_service() {
 	[ "$enabled" = "1" ] || return 0
 
 	/usr/bin/camilladsp-genconf "$CONFFILE" || return 1
+	regen_manifest || return 1
+
+	local manifest_arg=""
+	[ -f "$MANIFESTFILE" ] && manifest_arg="--manifest $MANIFESTFILE"
 
 	# extra environment for the daemon, e.g. INFERNO_* settings that end up
 	# in the inferno ALSA plugin instance hosted by camilladsp
@@ -56,8 +90,8 @@ start_service() {
 	esac
 
 	procd_open_instance
-	procd_set_param command /usr/bin/camilladsp "$CONFFILE" -p "$port" -a 0.0.0.0 \
-		--custom_log_spec "$logspec"
+	procd_set_param command /usr/bin/camilladsp "$CONFFILE" -p "$port" -a "$wsaddr" \
+		--custom_log_spec "$logspec" $manifest_arg
 	[ -n "$_envs" ] && procd_set_param env $_envs
 	procd_set_param respawn
 	procd_set_param stdout 1
@@ -69,6 +103,9 @@ start_service() {
 # (camilladsp applies new settings without interrupting processing when
 # possible). NB: FIR coefficients are cached by filename — to update coeffs,
 # the fir_file path must change.
+# With a manifest active, SIGHUP validates the new config against the
+# manifest loaded at STARTUP: if the vendor (locked) content changed, the
+# manifest changed too and the daemon must restart to pick it up.
 reload_service() {
 	local enabled
 
@@ -77,5 +114,22 @@ reload_service() {
 	[ "$enabled" = "1" ] || return 0
 
 	/usr/bin/camilladsp-genconf "$CONFFILE" || return 1
+
+	if [ -f "$POLICYFILE" ]; then
+		/usr/bin/camilladsp "$CONFFILE" --make-manifest "$POLICYFILE" \
+			> "$MANIFESTFILE.new" 2>/dev/null || {
+			echo "camilladsp: manifest generation failed, keeping old config" >&2
+			rm -f "$MANIFESTFILE.new"
+			return 1
+		}
+		if [ -f "$MANIFESTFILE" ] && ! cmp -s "$MANIFESTFILE.new" "$MANIFESTFILE"; then
+			echo "camilladsp: locked content changed, restarting to load the new manifest" >&2
+			mv "$MANIFESTFILE.new" "$MANIFESTFILE"
+			restart
+			return
+		fi
+		mv "$MANIFESTFILE.new" "$MANIFESTFILE"
+	fi
+
 	procd_send_signal camilladsp '' SIGHUP
 }

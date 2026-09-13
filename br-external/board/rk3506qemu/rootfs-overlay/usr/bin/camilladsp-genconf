@@ -10,21 +10,56 @@
 #   config mixroute            one mixer source contribution (mixer,dest,source,gain,...)
 #   config step                one pipeline step, ordered by option index
 #                               (type Filter: list channels + list names
-#                                type Mixer: option name)
+#                                type Mixer: option name
+#                                editable sub chain slot: option subchain only)
+#   config subchain            one logical sub chain: name + policy
+#                               (locked | child | free) + constraints
 #
 # Filter types and parameters:
 #   gain   gain(dB) [inverted] [mute]      conv  filename (text coeffs)
 #   hp|lp  f q                              lrhp|lrlp  f order
 #   hs|ls  f gain q|slope                   peak f gain q
 #   notch|ap  f q
+#
+# Sub chains (protected pipeline, see plan/protected-xover-pipeline.md):
+#   config subchain
+#       option name    unique sub chain name
+#       option policy  locked | child | free
+#       option channels '<n> [<n>...]'   (editable: bus channels the slot owns)
+#       option allow   '<uci filter types...>' (editable: allowed user filter types)
+#       option max_steps '<n>'           (editable, default 8)
+#       list   allowed_after '<anchor>'  (free: locked anchors it may relocate after)
+#   Every step carries option subchain '<name>'. An editable (child/free)
+#   sub chain is declared by ONE bare step (option index + option
+#   subchain, no type/filters): it renders a transparent placeholder
+#   (user_slot_<name>, Gain 0 dB) that anchors the user slot.
+#
+# Outputs (only when subchain sections exist):
+#   <out>.yml      the full config (format unchanged; placeholders rendered)
+#   <out>.policy   the policy spec consumed by
+#                    camilladsp <yml> --make-manifest <out>.policy
+# With no subchain sections the rendering is unchanged (except mixer
+# routes now always emit gain + scale: linear, see below).
+#
+# NB: mixer route gain in uci is LINEAR (0.5 = -6 dB, default 1.0).
+# camilladsp v4 interprets a bare gain as dB, so every rendered route
+# carries an explicit "scale: linear".
 
 OUT="${1:-/tmp/camilladsp.yml}"
 
 . /lib/functions.sh
 
+VENDOR_COEFF_PREFIX="/usr/share/camilladsp/coeffs"
+
+fail() {
+	echo "camilladsp-genconf: $*" >&2
+	exit 1
+}
+
 config_load camilladsp 2>/dev/null || true
 
 # ---- main --------------------------------------------------------------------
+
 config_get CH main channels 2
 config_get PBCH main output_channels ""
 [ -n "$PBCH" ] || PBCH="$CH"
@@ -40,15 +75,95 @@ case "$WAVHDR" in
 *) WAVHDR="true" ;;
 esac
 
-[ "$CH" -ge 1 ] 2>/dev/null || { echo "camilladsp-genconf: bad channels '$CH'" >&2; exit 1; }
-[ "$PBCH" -ge 1 ] 2>/dev/null || { echo "camilladsp-genconf: bad output_channels '$PBCH'" >&2; exit 1; }
+[ "$CH" -ge 1 ] 2>/dev/null || fail "bad channels '$CH'"
+[ "$PBCH" -ge 1 ] 2>/dev/null || fail "bad output_channels '$PBCH'"
 
-# ---- inferno env sidecar ----------------------------------------------------
+# ---- collect nodes -----------------------------------------------------------
+# NB: must run while the camilladsp uci state is loaded; the inferno
+# sidecar below re-loads a different config and replaces it.
+
+FILTER_IDS=""
+_flt_cb() {
+	local id="$1" v
+	config_get v "$id" name ""
+	[ -n "$v" ] || fail "filter section '$id' missing name"
+	FILTER_IDS="$FILTER_IDS $id"
+	for k in name type f q gain order slope inverted mute filename clip_limit; do
+		config_get v "$id" "$k" ""
+		eval "FLT_${id}_${k}=\"\$v\""
+	done
+}
+config_foreach _flt_cb filter
+
+MIXER_IDS=""
+_mixer_cb() {
+	local id="$1" v
+	config_get v "$id" name ""
+	[ -n "$v" ] || fail "mixer section '$id' missing name"
+	MIXER_IDS="$MIXER_IDS $id"
+	for k in name in out user_gains; do
+		config_get v "$id" "$k" ""
+		eval "MX_${id}_${k}=\"\$v\""
+	done
+}
+config_foreach _mixer_cb mixer
+
+ROUTE_IDS=""
+_route_cb() {
+	local id="$1"
+	ROUTE_IDS="$ROUTE_IDS $id"
+	for k in mixer dest source gain inverted mute; do
+		config_get v "$id" "$k" ""
+		eval "RT_${id}_${k}=\"\$v\""
+	done
+}
+config_foreach _route_cb mixroute
+
+SUBCHAIN_IDS=""
+_subchain_cb() {
+	local id="$1" v
+	config_get v "$id" name ""
+	[ -n "$v" ] || fail "subchain section '$id' missing name"
+	SUBCHAIN_IDS="$SUBCHAIN_IDS $id"
+	for k in name policy channels allow max_steps; do
+		config_get v "$id" "$k" ""
+		eval "SC_${id}_${k}=\"\$v\""
+	done
+	eval "SC_${id}_AFTER=\"\""
+	_sc_after_cb() { eval "SC_${id}_AFTER=\"\${SC_${id}_AFTER}\${SC_${id}_AFTER:+ }\$1\""; }
+	config_list_foreach "$id" allowed_after _sc_after_cb
+}
+config_foreach _subchain_cb subchain
+
+# steps: collect "index section-id" lines, sort numerically
+_STEP_RAW=""
+_step_cb() {
+	local id="$1" v idx
+	config_get idx "$id" index ""
+	[ -n "$idx" ] || fail "step '$id' missing index"
+	_STEP_RAW="${_STEP_RAW}${idx} $id
+"
+	for k in type name subchain; do
+		config_get v "$id" "$k" ""
+		eval "SP_${id}_${k}=\"\$v\""
+	done
+	eval "SP_${id}_CH=\"\"; SP_${id}_NAMES=\"\""
+	_step_ch_cb() { eval "SP_${id}_CH=\"\${SP_${id}_CH}\${SP_${id}_CH:+ }\$1\""; }
+	config_list_foreach "$id" channels _step_ch_cb
+	_step_nm_cb() { eval "SP_${id}_NAMES=\"\${SP_${id}_NAMES}\${SP_${id}_NAMES:+ }\$1\""; }
+	config_list_foreach "$id" names _step_nm_cb
+}
+config_foreach _step_cb step
+STEP_ORDER=$(printf '%s' "$_STEP_RAW" | sort -n | while read _i _id; do printf '%s ' "$_id"; done)
+
+# ---- inferno env sidecar ------------------------------------------------------
 # When capture/playback is 'Inferno', camilladsp hosts an inferno instance
 # (inside the inferno ALSA plugin). Its INFERNO_* settings are derived here:
 # shared schema in /etc/config/inferno, name defaults to the system
 # hostname, channel counts follow the camilladsp devices. The init script
 # passes the file to the daemon as environment.
+# NB: this re-loads the inferno uci config; all camilladsp nodes were
+# collected above.
 
 ENVOUT="${OUT%.yml}.env"
 CAP_INFERNO=""
@@ -68,10 +183,10 @@ if [ -n "$CAP_INFERNO" ] || [ -n "$PB_INFERNO" ]; then
 	[ -n "$INAME" ] || INAME=$(uci -q get system.@system[0].hostname 2>/dev/null) || INAME="rk3506qemu"
 	{
 		# NB: this RUST_LOG configures the *inferno* instance (tracing env
-	# filter) hosted inside camilladsp, NOT camilladsp itself: camilladsp
-	# uses flexi_logger via --custom_log_spec (see init script, uci
-	# camilladsp.main.logspec).
-	echo "RUST_LOG=warn"
+		# filter) hosted inside camilladsp, NOT camilladsp itself: camilladsp
+		# uses flexi_logger via --custom_log_spec (see init script, uci
+		# camilladsp.main.logspec).
+		echo "RUST_LOG=warn"
 		echo "INFERNO_NAME=$INAME"
 		echo "INFERNO_BIND_IP=$IIF"
 		echo "INFERNO_CLOCK_PATH=$ICLK"
@@ -81,65 +196,113 @@ if [ -n "$CAP_INFERNO" ] || [ -n "$PB_INFERNO" ]; then
 	} > "$ENVOUT"
 fi
 
-# ---- collect nodes -----------------------------------------------------------
+# ---- sub chain validation ----------------------------------------------------
+# Runs only when subchain sections exist. Fails early (refuse to render):
+# a broken partition must never produce a config.
 
-FILTER_IDS=""
-_flt_cb() {
-	local id="$1" v
-	config_get v "$id" name ""
-	[ -n "$v" ] || { echo "camilladsp-genconf: filter section '$id' missing name" >&2; exit 1; }
-	FILTER_IDS="$FILTER_IDS $id"
-	for k in name type f q gain order slope inverted mute filename; do
-		config_get v "$id" "$k" ""
-		eval "FLT_${id}_${k}=\"\$v\""
-	done
-}
-config_foreach _flt_cb filter
+SC_BYNAME=""
+for id in $SUBCHAIN_IDS; do
+	eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
+	case " $SC_BYNAME " in *" $_n "*) fail "duplicate subchain name '$_n'" ;; esac
+	SC_BYNAME="$SC_BYNAME $_n"
+	case "$_p" in
+	locked|child|free) ;;
+	*) fail "subchain '$_n': bad policy '$_p' (locked|child|free)" ;;
+	esac
+	if [ "$_p" != locked ]; then
+		eval "_c=\"\$SC_${id}_channels\"; _a=\"\$SC_${id}_allow\"; _m=\"\$SC_${id}_max_steps\""
+		[ -n "$_c" ] || fail "subchain '$_n' (policy $_p) needs channels="
+		[ -n "$_a" ] || fail "subchain '$_n' (policy $_p) needs allow="
+		[ -z "$_m" ] && eval "SC_${id}_max_steps=8"
+	fi
+done
 
-MIXER_IDS=""
-_mixer_cb() {
-	local id="$1" v
-	config_get v "$id" name ""
-	[ -n "$v" ] || { echo "camilladsp-genconf: mixer section '$id' missing name" >&2; exit 1; }
-	MIXER_IDS="$MIXER_IDS $id"
-	for k in name in out; do
-		config_get v "$id" "$k" ""
-		eval "MX_${id}_${k}=\"\$v\""
+if [ -n "$SUBCHAIN_IDS" ]; then
+	# every step must be classified
+	for id in $STEP_ORDER; do
+		eval "_s=\"\$SP_${id}_subchain\""
+		[ -n "$_s" ] || fail "step '$id' has no subchain (subchains are declared)"
+		case " $SC_BYNAME " in *" $_s "*) ;; *) fail "step '$id' references unknown subchain '$_s'" ;; esac
 	done
-}
-config_foreach _mixer_cb mixer
-
-ROUTE_IDS=""
-_route_cb() {
-	local id="$1" v
-	ROUTE_IDS="$ROUTE_IDS $id"
-	for k in mixer dest source gain inverted mute; do
-		config_get v "$id" "$k" ""
-		eval "RT_${id}_${k}=\"\$v\""
+	# every subchain needs at least one step; editable: exactly one bare slot
+	for id in $SUBCHAIN_IDS; do
+		eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
+		_cnt=0
+		for sid in $STEP_ORDER; do
+			eval "[ \"\$SP_${sid}_subchain\" = \"\$_n\" ]" && _cnt=$((_cnt + 1))
+		done
+		[ "$_cnt" -ge 1 ] || fail "subchain '$_n' has no steps"
+		if [ "$_p" != locked ] && [ "$_cnt" -gt 1 ]; then
+			fail "subchain '$_n' (policy $_p) must have exactly one slot step"
+		fi
 	done
-}
-config_foreach _route_cb mixroute
-
-# steps: collect "index section-id" lines, sort numerically
-_STEP_RAW=""
-_step_cb() {
-	local id="$1" v idx
-	config_get idx "$id" index ""
-	[ -n "$idx" ] || { echo "camilladsp-genconf: step '$id' missing index" >&2; exit 1; }
-	_STEP_RAW="${_STEP_RAW}${idx} $id
-"
-	for k in type name; do
-		config_get v "$id" "$k" ""
-		eval "SP_${id}_${k}=\"\$v\""
+	# steps of each subchain must be contiguous; editable steps are bare slots;
+	# remember the sub chain order (first appearance in STEP_ORDER)
+	SC_ORDER=""
+	_prev=""
+	for id in $STEP_ORDER; do
+		eval "_s=\"\$SP_${id}_subchain\"; _t=\"\$SP_${id}_type\"; _nm=\"\$SP_${id}_NAMES\""
+		case " $_prev " in
+		" $_s ") ;;
+		*)
+			case " $SC_ORDER " in *" $_s "*) fail "subchain '$_s' steps are not contiguous" ;; esac
+			SC_ORDER="$SC_ORDER $_s"
+			_prev="$_s"
+			;;
+		esac
+		_scid=""
+		for sid in $SUBCHAIN_IDS; do
+			eval "[ \"\$SC_${sid}_name\" = \"\$_s\" ] && _scid=\$sid"
+		done
+		eval "_p=\"\$SC_${_scid}_policy\""
+		if [ "$_p" != locked ]; then
+			[ -z "$_t" ] && [ -z "$_nm" ] || fail "subchain '$_s' slot step '$id' must have no type/filters"
+		else
+			[ -n "$_t" ] || fail "step '$id' (locked subchain '$_s') missing type"
+		fi
 	done
-	eval "SP_${id}_CH=\"\"; SP_${id}_NAMES=\"\""
-	_step_ch_cb() { eval "SP_${id}_CH=\"\${SP_${id}_CH}\${SP_${id}_CH:+ }\$1\""; }
-	config_list_foreach "$id" channels _step_ch_cb
-	_step_nm_cb() { eval "SP_${id}_NAMES=\"\${SP_${id}_NAMES}\${SP_${id}_NAMES:+ }\$1\""; }
-	config_list_foreach "$id" names _step_nm_cb
-}
-config_foreach _step_cb step
-STEP_ORDER=$(printf '%s' "$_STEP_RAW" | sort -n | while read _i _id; do printf '%s ' "$_id"; done)
+	# the last sub chain must be locked: nothing may follow the protection tail
+	_last=$(printf '%s' "$SC_ORDER" | awk '{print $NF}')
+	for id in $SUBCHAIN_IDS; do
+		eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
+		[ "$_n" = "$_last" ] && [ "$_p" != locked ] && fail "last subchain '$_n' must be locked"
+	done
+	# free groups: allowed_after must name locked anchors
+	for id in $SUBCHAIN_IDS; do
+		eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\"; _af=\"\$SC_${id}_AFTER\""
+		[ "$_p" = free ] || continue
+		for a in $_af; do
+			_aid=""
+			for sid in $SUBCHAIN_IDS; do
+				eval "_an=\"\$SC_${sid}_name\"; _ap=\"\$SC_${sid}_policy\""
+				[ "$_an" = "$a" ] && { [ "$_ap" = locked ] || fail "free subchain '$_n': allowed_after '$_a' is not locked"; _aid=$sid; }
+			done
+			[ -n "$_aid" ] || fail "free subchain '$_n': allowed_after references unknown anchor '$_a'"
+		done
+	done
+	# locked conv filters must use the vendor read-only coefficient path
+	for id in $SUBCHAIN_IDS; do
+		eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
+		[ "$_p" = locked ] || continue
+		for sid in $STEP_ORDER; do
+			eval "_s=\"\$SP_${sid}_subchain\""
+			[ "$_s" = "$_n" ] || continue
+			eval "_names=\"\$SP_${sid}_NAMES\""
+			for fname in $_names; do
+				for fid in $FILTER_IDS; do
+					eval "_fn=\"\$FLT_${fid}_name\"; _ft=\"\$FLT_${fid}_type\"; _ff=\"\$FLT_${fid}_filename\""
+					[ "$_fn" = "$fname" ] || continue
+					if [ "$_ft" = conv ]; then
+						case "$_ff" in
+						"$VENDOR_COEFF_PREFIX"/*) ;;
+						*) fail "locked subchain '$_n': conv filter '$fname' filename must be under $VENDOR_COEFF_PREFIX" ;;
+						esac
+					fi
+				done
+			done
+		done
+	done
+fi
 
 # ---- devices -----------------------------------------------------------------
 
@@ -189,35 +352,40 @@ pb_yaml() {
 emit_filter_yaml() {
 	local id="$1"
 	local name type f q gain order slope inverted mute filename
-	eval "name=\"\$FLT_${id}_name\"; type=\"\$FLT_${id}_type\"; f=\"\$FLT_${id}_f\"; q=\"\$FLT_${id}_q\"; gain=\"\$FLT_${id}_gain\"; order=\"\$FLT_${id}_order\"; slope=\"\$FLT_${id}_slope\"; inverted=\"\$FLT_${id}_inverted\"; mute=\"\$FLT_${id}_mute\"; filename=\"\$FLT_${id}_filename\""
+	eval "name=\"\$FLT_${id}_name\"; type=\"\$FLT_${id}_type\"; f=\"\$FLT_${id}_f\"; q=\"\$FLT_${id}_q\"; gain=\"\$FLT_${id}_gain\"; order=\"\$FLT_${id}_order\"; slope=\"\$FLT_${id}_slope\"; inverted=\"\$FLT_${id}_inverted\"; mute=\"\$FLT_${id}_mute\"; filename=\"\$FLT_${id}_filename\"; clip_limit=\"\$FLT_${id}_clip_limit\""
 
-	[ -n "$type" ] || { echo "camilladsp-genconf: filter '$name' missing type" >&2; return 1; }
+	[ -n "$type" ] || fail "filter '$name' missing type"
 
 	case "$type" in
 	gain)
-		[ -n "$gain" ] || { echo "camilladsp-genconf: filter '$name' (gain) needs gain=" >&2; return 1; }
+		[ -n "$gain" ] || fail "filter '$name' (gain) needs gain="
 		printf '  %s:\n    type: Gain\n    parameters:\n      gain: %s\n' "$name" "$gain"
 		[ "$inverted" = "1" ] && printf '      inverted: true\n'
 		[ "$mute" = "1" ] && printf '      mute: true\n'
 		;;
 	conv)
-		[ -n "$filename" ] || { echo "camilladsp-genconf: filter '$name' (conv) needs filename=" >&2; return 1; }
+		[ -n "$filename" ] || fail "filter '$name' (conv) needs filename="
 		printf '  %s:\n    type: Conv\n    parameters:\n      type: Raw\n      format: TEXT\n      filename: %s\n' "$name" "$filename"
 		;;
+	limiter)
+		[ -n "$clip_limit" ] || fail "filter '$name' (limiter) needs clip_limit="
+		printf '  %s:\n    type: Limiter\n    parameters:\n      clip_limit: %s\n' "$name" "$clip_limit"
+		[ "$inverted" = "1" ] && printf '      soft_clip: true\n'
+		;;
 	hp|lp)
-		[ -n "$f" ] || { echo "camilladsp-genconf: filter '$name' ($type) needs f=" >&2; return 1; }
+		[ -n "$f" ] || fail "filter '$name' ($type) needs f="
 		[ -z "$q" ] && q=0.707
 		local ytype="Highpass"; [ "$type" = lp ] && ytype="Lowpass"
 		printf '  %s:\n    type: Biquad\n    parameters:\n      type: %s\n      freq: %s\n      q: %s\n' "$name" "$ytype" "$f" "$q"
 		;;
 	lrhp|lrlp)
-		[ -n "$f" ] || { echo "camilladsp-genconf: filter '$name' ($type) needs f=" >&2; return 1; }
+		[ -n "$f" ] || fail "filter '$name' ($type) needs f="
 		[ -z "$order" ] && order=4
 		local ytype="LinkwitzRileyHighpass"; [ "$type" = lrlp ] && ytype="LinkwitzRileyLowpass"
 		printf '  %s:\n    type: BiquadCombo\n    parameters:\n      type: %s\n      freq: %s\n      order: %s\n' "$name" "$ytype" "$f" "$order"
 		;;
 	hs|ls)
-		[ -n "$f" ] && [ -n "$gain" ] || { echo "camilladsp-genconf: filter '$name' ($type) needs f= and gain=" >&2; return 1; }
+		[ -n "$f" ] && [ -n "$gain" ] || fail "filter '$name' ($type) needs f= and gain="
 		local ytype="Highshelf"; [ "$type" = ls ] && ytype="Lowshelf"
 		printf '  %s:\n    type: Biquad\n    parameters:\n      type: %s\n      freq: %s\n      gain: %s\n' "$name" "$ytype" "$f" "$gain"
 		if [ -n "$slope" ]; then
@@ -228,18 +396,18 @@ emit_filter_yaml() {
 		fi
 		;;
 	peak)
-		[ -n "$f" ] && [ -n "$gain" ] || { echo "camilladsp-genconf: filter '$name' (peak) needs f= and gain=" >&2; return 1; }
+		[ -n "$f" ] && [ -n "$gain" ] || fail "filter '$name' (peak) needs f= and gain="
 		[ -z "$q" ] && q=1.0
-		printf '  %s:\n    type: Biquad\n    parameters:\n      type: Peaking\n      freq: %s\n      q: %s\n      gain: %s\n' "$name" "$f" "$q" "$gain"
+		printf '  %s:\n    type: Biquad\n    parameters:\n      type: Peaking\n      freq: %s\n      gain: %s\n      q: %s\n' "$name" "$f" "$gain" "$q"
 		;;
 	notch|ap)
-		[ -n "$f" ] || { echo "camilladsp-genconf: filter '$name' ($type) needs f=" >&2; return 1; }
+		[ -n "$f" ] || fail "filter '$name' ($type) needs f="
 		[ -z "$q" ] && q=0.707
 		local ytype="Notch"; [ "$type" = ap ] && ytype="Allpass"
 		printf '  %s:\n    type: Biquad\n    parameters:\n      type: %s\n      freq: %s\n      q: %s\n' "$name" "$ytype" "$f" "$q"
 		;;
 	*)
-		echo "camilladsp-genconf: filter '$name': unknown type '$type'" >&2; return 1 ;;
+		fail "filter '$name': unknown type '$type'" ;;
 	esac
 	return 0
 }
@@ -250,10 +418,24 @@ KNOWN_FLT=""
 for id in $FILTER_IDS; do
 	eval "KNOWN_FLT=\"\$KNOWN_FLT \${FLT_${id}_name}\""
 done
+# editable sub chains add their placeholder filter definitions
+PLACEHOLDERS=""
+for id in $SUBCHAIN_IDS; do
+	eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
+	[ "$_p" != locked ] && PLACEHOLDERS="$PLACEHOLDERS user_slot_${_n}"
+done
+KNOWN_FLT="$KNOWN_FLT$PLACEHOLDERS"
 KNOWN_MX=""
 for id in $MIXER_IDS; do
 	eval "KNOWN_MX=\"\$KNOWN_MX \${MX_${id}_name}\""
 done
+
+yaml_list() {
+	# "a b c" -> "[a, b, c]"
+	_out="["; _sep=""
+	for _v in $1; do _out="${_out}${_sep}${_v}"; _sep=", "; done
+	printf '%s]' "$_out"
+}
 
 {
 	printf 'devices:\n'
@@ -278,8 +460,10 @@ done
 						_first=0
 					fi
 					eval "_rs=\"\$RT_${rid}_source\"; _rg=\"\$RT_${rid}_gain\"; _ri=\"\$RT_${rid}_inverted\"; _rmt=\"\$RT_${rid}_mute\""
-					printf '          - channel: %s\n' "$_rs"
-					[ -n "$_rg" ] && printf '            gain: %s\n' "$_rg"
+					# uci mixer gain is LINEAR (default 1.0); v4 reads a bare
+					# gain as dB -> always emit gain + scale: linear
+					[ -z "$_rg" ] && _rg=1.0
+					printf '          - channel: %s\n            gain: %s\n            scale: linear\n' "$_rs" "$_rg"
 					[ "$_ri" = "1" ] && printf '            inverted: true\n'
 					[ "$_rmt" = "1" ] && printf '            mute: true\n'
 				done
@@ -288,8 +472,12 @@ done
 		done
 	fi
 
-	if [ -n "$FILTER_IDS" ]; then
+	if [ -n "$FILTER_IDS" ] || [ -n "$PLACEHOLDERS" ]; then
 		printf 'filters:\n'
+		# transparent slot anchors for editable sub chains (Gain 0 dB)
+		for ph in $PLACEHOLDERS; do
+			printf '  %s:\n    type: Gain\n    parameters:\n      gain: 0\n' "$ph"
+		done
 		for id in $FILTER_IDS; do
 			emit_filter_yaml "$id" || exit 1
 		done
@@ -297,25 +485,83 @@ done
 
 	[ -n "$STEP_ORDER" ] && printf 'pipeline:\n'
 	for id in $STEP_ORDER; do
-		eval "_t=\"\$SP_${id}_type\"; _n=\"\$SP_${id}_name\"; _ch=\"\$SP_${id}_CH\"; _nm=\"\$SP_${id}_NAMES\""
+		eval "_t=\"\$SP_${id}_type\"; _n=\"\$SP_${id}_name\"; _ch=\"\$SP_${id}_CH\"; _nm=\"\$SP_${id}_NAMES\"; _s=\"\$SP_${id}_subchain\""
+		if [ -n "$SUBCHAIN_IDS" ]; then
+			# editable sub chain slot: render the placeholder step
+			_scid=""
+			for sid in $SUBCHAIN_IDS; do
+				eval "[ \"\$SC_${sid}_name\" = \"\$_s\" ] && _scid=\$sid"
+			done
+			eval "_p=\"\$SC_${_scid}_policy\""
+			if [ "$_p" != locked ]; then
+				eval "_c=\"\$SC_${_scid}_channels\""
+				printf '  - type: Filter\n    channels: %s\n    names: [user_slot_%s]\n' "$(yaml_list "$_c")" "$_s"
+				continue
+			fi
+		fi
 		case "$_t" in
 		Filter|filter)
 			_chy=""; for c in $_ch; do _chy="${_chy}${_chy:+, }$c"; done
 			_nmy=""; for n in $_nm; do
-				case " $KNOWN_FLT " in *" $n "*) ;; *) echo "camilladsp-genconf: step references unknown filter '$_n' -> '$n'" >&2; exit 1 ;; esac
+				case " $KNOWN_FLT " in *" $n "*) ;; *) fail "step references unknown filter '$_n' -> '$n'" ;; esac
 				_nmy="${_nmy}${_nmy:+, }$n"
 			done
-			[ -n "$_nmy" ] || { echo "camilladsp-genconf: Filter step needs list names" >&2; exit 1; }
+			[ -n "$_nmy" ] || fail "Filter step needs list names"
 			printf '  - type: Filter\n'
 			[ -n "$_chy" ] && printf '    channels: [%s]\n' "$_chy"
 			printf '    names: [%s]\n' "$_nmy"
 			;;
 		Mixer|mixer)
-			case " $KNOWN_MX " in *" $_n "*) ;; *) echo "camilladsp-genconf: step references unknown mixer '$_n'" >&2; exit 1 ;; esac
+			case " $KNOWN_MX " in *" $_n "*) ;; *) fail "step references unknown mixer '$_n'" ;; esac
 			printf '  - type: Mixer\n    name: %s\n' "$_n"
 			;;
 		*)
-			echo "camilladsp-genconf: step has bad type '$_t' (Filter|Mixer)" >&2; exit 1 ;;
+			fail "step has bad type '$_t' (Filter|Mixer)" ;;
 		esac
 	done
 } > "$OUT"
+
+# ---- policy spec (only when sub chains are declared) ---------------------------
+
+if [ -n "$SUBCHAIN_IDS" ]; then
+	POLICYOUT="${OUT%.yml}.policy"
+	{
+		printf 'subchains:\n'
+		for scn in $SC_ORDER; do
+			_scid=""
+			for sid in $SUBCHAIN_IDS; do
+				eval "[ \"\$SC_${sid}_name\" = \"\$scn\" ] && _scid=\$sid"
+			done
+			eval "_p=\"\$SC_${_scid}_policy\"; _c=\"\$SC_${_scid}_channels\"; _a=\"\$SC_${_scid}_allow\"; _m=\"\$SC_${_scid}_max_steps\"; _af=\"\$SC_${_scid}_AFTER\""
+			case "$_p" in
+			locked)
+				# rendered step range (0-based position in the pipeline list)
+				_first=""; _count=0; _pos=0
+				for sid in $STEP_ORDER; do
+					eval "_ss=\"\$SP_${sid}_subchain\""
+					if [ "$_ss" = "$scn" ]; then
+						[ -z "$_first" ] && _first=$_pos
+						_count=$((_count + 1))
+					fi
+					_pos=$((_pos + 1))
+				done
+				printf '  - policy: locked\n    name: %s\n    first_step: %s\n    steps: %s\n' "$scn" "$_first" "$_count"
+				;;
+			child)
+				printf '  - policy: child\n    name: %s\n    channels: %s\n    allow: %s\n    max_steps: %s\n' "$scn" "$(yaml_list "$_c")" "$(yaml_list "$_a")" "$_m"
+				;;
+			free)
+				printf '  - policy: free\n    name: %s\n    gaps: %s\n    channels: %s\n    allow: %s\n    max_steps: %s\n' "$scn" "$(yaml_list "$_af")" "$(yaml_list "$_c")" "$(yaml_list "$_a")" "$_m"
+				;;
+			esac
+		done
+		# mixers whose route gains are free user state (source-mix
+		# selection); absent = every mixer fully locked
+		_ug=""
+		for sid in $MIXER_IDS; do
+			eval "_u=\"\$MX_${sid}_user_gains\"; _n=\"\$MX_${sid}_name\""
+			case "$_u" in 1|yes|on|true) _ug="$_ug $_n" ;; esac
+		done
+		[ -n "$_ug" ] && printf 'user_gains: %s\n' "$(yaml_list "$_ug")"
+	} > "$POLICYOUT"
+fi

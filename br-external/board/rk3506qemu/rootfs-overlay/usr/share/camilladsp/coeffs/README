@@ -1,0 +1,10 @@
+Vendor crossover FIR coefficients (read-only, part of the locked
+pipeline). Locked conv filters must point under this directory
+(camilladsp-genconf enforces it); user FIRs live elsewhere, e.g.
+/opt/user_data.
+
+The shipped wf_fir.txt / tw_fir.txt are 1-tap passthrough placeholders
+(gain 1.0). Replace with the real corrective FIR designs from
+scripts/camilladsp_xo_coeffs.py (docs/crossover-to-camilladsp.md) via
+an image build; coefficient updates are a vendor action (OPKG/image),
+never a websocket one. TEXT format: one coefficient per line.
