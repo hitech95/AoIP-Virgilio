@@ -92,7 +92,8 @@ Use `service camilladsp restart` for a full stop/start (new PID).
 | Key | Default | Description |
 |---|---|---|
 | `enabled` | `1` | `0` = init script does nothing at boot. |
-| `port` | `5000` | Websocket control port (bound on 0.0.0.0; CLI `-p`). |
+| `port` | `5000` | Websocket control port (CLI `-p`). |
+| `ws_address` | `127.0.0.1` | Websocket bind address (CLI `-a`). The WS API has **no authentication**: the product binds loopback so only local tools (web UI, preset daemon) can reach it; the dev rig overrides to `0.0.0.0` for the forwarded port. |
 | `logspec` | `warn,camillalib…=error` | flexi_logger spec passed as `--custom_log_spec` (camilladsp ignores `RUST_LOG`). Default silences the inferno PCM short-read warnings. |
 | `samplerate` | `44100` | Pipeline sample rate (Hz). |
 | `channels` | `2` | Capture channel count. |
@@ -125,6 +126,7 @@ special modes. With no nodes, capture passes straight to playback.
 |---|---|---|---|
 | `gain` | Gain | `gain` | — |
 | `conv` | Conv (Raw TEXT) | `filename` | — |
+| `limiter` | Limiter | `clip_limit` | — |
 | `hp` / `lp` | Biquad High/Lowpass | `f` | `q=0.707` |
 | `lrhp` / `lrlp` | BiquadCombo LinkwitzRiley HP/LP | `f` | `order=4` |
 | `hs` / `ls` | Biquad High/Lowshelf | `f`, `gain` | `q=0.707` or give `slope` |
@@ -134,10 +136,15 @@ special modes. With no nodes, capture passes straight to playback.
 ### `config mixer` + `config mixroute` — routing matrix
 
 A `mixer` node (`name`, `in`, `out`) transforms `in` channels into `out`
-channels. Each `mixroute` section is one contribution: `option mixer` (which
-mixer), `dest` (output channel), `source` (input channel), `gain` (**linear**,
-default 1.0), optional `inverted`/`mute` (`1`). Several mixroutes with the
-same `dest` sum into that output. Unrouted outputs are silent.
+channels. `option user_gains '1'` marks the mixer's route **gains as
+free user state** (source-mix selection via the websocket — 100% ch0 /
+100% ch1 / (ch0+ch1)/2 are just gain presets); without it, or without a
+protected pipeline, the mixer is fully locked by the manifest.
+Each `mixroute` section is one contribution: `option mixer` (which
+mixer), `dest` (output channel), `source` (input channel), `gain`
+(**linear**, default 1.0), optional `inverted`/`mute` (`1`). Several
+mixroutes with the same `dest` sum into that output. Unrouted outputs
+are silent.
 
 Per sample the mixer computes:
 
@@ -177,7 +184,10 @@ flowchart LR
 
 Notes:
 
-- mixer `gain` is **linear** (0.5 = −6 dB), unlike filter `gain` which is in dB;
+- mixer `gain` in uci is **linear** (0.5 = −6 dB, default 1.0). CamillaDSP
+  v4 interprets a bare mixer `gain` as **dB**, so genconf always renders
+  an explicit `scale: linear` next to every route gain — uci semantics
+  stay linear no matter what;
 - a `Mixer` step **renumbers the bus**: following `Filter` steps address the
   mixer's *output* channels;
 - a mixer with `out` &lt; `in` downmixes, `out` &gt; `in` upmixes/routes to
@@ -190,14 +200,64 @@ Notes:
 | Option | Description |
 |---|---|
 | `index` | Execution order (sorted numerically; gaps fine). |
-| `type` | `Filter` or `Mixer`. |
+| `subchain` | Sub chain this step belongs to (required when `subchain` sections exist). For an *editable* slot (policy `child`/`free`) the step is a bare slot declaration — no `type`/`names`: genconf renders a transparent `user_slot_<name>` placeholder there. |
+| `type` | `Filter` or `Mixer` (locked sub chains only). |
 | `channels` (list, Filter) | Input channels of the step. Omit = all. |
 | `names` (list, Filter) | Filters applied **in series** to those channels. |
 | `name` (Mixer) | Which mixer node to apply. |
 
-The future web UI inserts EQ etc. at runtime via websocket as additional
-Filter steps between the routing mixer and the crossover — the static UCI
-chain below is the base audio path.
+### `config subchain` — protected pipeline (sub chains)
+
+`config subchain` partitions the pipeline into logical groups, each with
+a policy (full design: `plan/protected-xover-pipeline.md`; working
+example: `configs/camilladsp_protected_2way.*`):
+
+| Option | Values | Description |
+|---|---|---|
+| `name` | string | Unique sub chain name. |
+| `policy` | `locked` / `child` / `free` | `locked`: content + position pinned. `child`: contents editable within constraints, position fixed. `free`: like `child` but the whole run may relocate (`list allowed_after` names locked anchors). |
+| `channels` | `0 1 …` | (editable) bus channels the slot owns. |
+| `allow` | uci filter types | (editable) allowed user filter types (`gain peak hs ls notch ap conv delay …`). |
+| `max_steps` | number | (editable, default 8) max user steps in the slot. |
+
+Rules (genconf refuses to render on violation): every step must be
+classified; sub chains are contiguous by step index; the **last** sub
+chain must be locked (nothing may follow the protection tail); locked
+conv filters must point under `/usr/share/camilladsp/coeffs/` (vendor
+read-only path); editable slots are declared by one bare step and
+render a transparent `user_slot_<name>` Gain-0 dB anchor that user
+effects are spliced after.
+
+Rendering + enforcement chain:
+
+```
+camilladsp-genconf (uci) ─► /tmp/camilladsp.yml        (plain config)
+                          └► /tmp/camilladsp.policy    (partition spec)
+camilladsp /tmp/camilladsp.yml --make-manifest /tmp/camilladsp.policy \
+                          ─► /tmp/camilladsp.manifest  (hashes + anchors)
+camilladsp /tmp/camilladsp.yml --manifest /tmp/camilladsp.manifest
+```
+
+With `--manifest` active, **every** config-apply path — startup (abort
+on mismatch: exit non-zero, procd respawns to silence), websocket
+`SetConfig`/`SetConfigJson`/`PatchConfig`/`SetConfigValue`/`Reload`/
+`SetConfigFilePath` (rejected, running config kept), `--check`, SIGHUP —
+validates the candidate against the manifest: locked sub chains and the
+devices section must hash identically; user steps are only
+accepted inside their slot, after the placeholder, from the allow list,
+on owned channels, within `max_steps`. The mixers region is locked as a
+**structure**: route **gains are free user state** — but only for mixers
+marked `user_gains '1'` (source-mix
+selection: 100% ch0 / 100% ch1 / (ch0+ch1)/2 is a pure gain preset) —
+while channels, dests, source routes and their flags stay pinned; mixers
+not marked are fully locked, gains included.
+Without `--manifest` the daemon
+behaves exactly like upstream (feature is opt-in). Runtime user edits
+are memory-only: a uci reload or reboot resets the slots to
+placeholders. `service camilladsp reload` regenerates yml, policy and
+manifest: if the manifest is unchanged the daemon just SIGHUPs (no
+interruption); if the vendor (locked) content changed, the manifest
+changed too and the service restarts to load it.
 
 ### Example — 2-way speaker (stereo in → Mix → LR4 crossover @1.8 kHz)
 
