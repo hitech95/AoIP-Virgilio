@@ -45,7 +45,7 @@ flowchart LR
 | | |
 |---|---|
 | Version | v4.1.3 pin (`05e9cfc`), git |
-| Features | default (`websocket`) + `32bit` (float32 processing — recommended on 32-bit CPUs); ALSA backend always built on Linux |
+| Features | default (`websocket`) + `32bit` (float32 processing — recommended on 32-bit CPUs) + `ubus` (native ubus status object, patch 0004); ALSA backend always built on Linux |
 | Toolchain | Buildroot cargo infra, rustc ≥ 1.90; target `armv7-unknown-linux-musleabihf` |
 | CPU tuning | `RUSTFLAGS -C target-cpu=cortex-a7 -C target-feature=+neon` (the armv7 rust target does **not** enable NEON by default); dynamic musl linking (`-crt-static`) |
 | Vendoring | disabled (no `Cargo.lock` in the tag → network build) |
@@ -516,6 +516,47 @@ above; requires statime + a PTP network — docs/inferno.md):
 option capture 'Inferno'
 option channels '8'
 ```
+
+## ubus status object
+
+Patch `0004-add-ubus-status-object.patch` adds a native ubus provider
+(built on the pure-Rust `ubus-zero` crate, git-rev pinned) running in
+parallel with the websocket server in its own thread. It reads the same
+shared status the WS serves — no WS round trip — and reconnects with
+backoff, so the object survives ubusd restarts (and boot ordering).
+Enabled via the `ubus` cargo feature (on in our build); socket discovery
+probes the common paths, `--ubus-socket <path>` overrides, `off`
+disables.
+
+```
+ubus call camilladsp status       # snapshot
+ubus call camilladsp volume_get
+ubus call camilladsp volume_set '{"volume": -10}'   # and/or "mute": true|false
+ubus call camilladsp mute_toggle                   # race-free flip
+```
+
+`status` reply fields (all cheap lock/atomic reads):
+
+| field | meaning |
+|---|---|
+| `state` | `Running / Paused / Inactive / Starting / Stalled` |
+| `stop_reason`, `stop_detail` | last stop cause (+ error message / new rate) |
+| `config_path` | active config file (or null) |
+| `capture_rate` | measured capture samplerate |
+| `rate_adjust` | async resampler adjustment factor |
+| `buffer_level` | playback buffer level (0 when rate adjust is off) |
+| `clipped_samples` | clipped-sample counter since config load (closest thing to an xrun counter) |
+| `processing_load`, `resampler_load` | CPU utilization % |
+| `volume`, `mute` | Main fader |
+| `version` | camilladsp version |
+
+Scope: quick polling for the banner, watchdog/LED policy and the future
+gateway. Everything deeper (signal levels, spectrum, config editing)
+stays on the websocket API. `volume_set` accepts integers as the ubus
+CLI encodes JSON numbers, clamps to −150..+50 dB and fires the statefile
+save like the WS commands. There is deliberately **no** `reload`
+(`/etc/init.d/camilladsp reload` owns that: uci → genconf → manifest →
+SIGHUP) and no `stop`/`exit` (procd owns the lifecycle).
 
 ## Autoboot
 
