@@ -1,0 +1,47 @@
+config camilladsp 'main'
+	option samplerate '48000'
+	option channels '2'
+	option capture 'Alsa:hw:CARD=Loopback,DEV=1'
+	option playback 'Alsa:hw:CARD=Loopback,DEV=0'
+	option format 'S16_LE'
+config mixer
+	option name 'srcmix'
+	option in '2'
+	option out '2'
+config mixroute
+	option mixer 'srcmix'
+	option dest '0'
+	option source '0'
+	option gain '0.5'
+config mixroute
+	option mixer 'srcmix'
+	option dest '0'
+	option source '1'
+config mixroute
+	option mixer 'srcmix'
+	option dest '1'
+	option source '0'
+	option gain '0.5'
+config mixroute
+	option mixer 'srcmix'
+	option dest '1'
+	option source '1'
+config filter
+	option name 'woofer_level'
+	option type 'gain'
+	option gain '-2.0'
+config filter
+	option name 'woofer_lp'
+	option type 'lrlp'
+	option f '1800'
+	option order '4'
+config step
+	option index '10'
+	option type 'Mixer'
+	option name 'srcmix'
+config step
+	option index '20'
+	option type 'Filter'
+	list channels '0'
+	list names 'woofer_level'
+	list names 'woofer_lp'

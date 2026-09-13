@@ -1,0 +1,132 @@
+# test uci tree: protected 2-way speaker (mirrors the shipped overlay
+# example). Devices match configs/camilladsp_protected_2way.yaml.
+
+config camilladsp 'main'
+	option enabled '1'
+	option port '5000'
+	option logspec 'warn,camillalib::alsa_backend::device=error'
+	option samplerate '48000'
+	option channels '2'
+	option output_channels ''
+	option chunksize '1024'
+	option format 'S16_LE'
+	option wav_header '1'
+	option capture 'Inferno'
+	option playback 'Inferno'
+
+config subchain
+	option name 'user_in0'
+	option policy 'child'
+	option channels '0'
+	option allow 'gain peak hs ls notch ap conv delay'
+	option max_steps '8'
+
+config subchain
+	option name 'user_in1'
+	option policy 'child'
+	option channels '1'
+	option allow 'gain peak hs ls notch ap conv delay'
+	option max_steps '8'
+
+config subchain
+	option name 'src_sel'
+	option policy 'locked'
+
+config subchain
+	option name 'wf_tail'
+	option policy 'locked'
+
+config subchain
+	option name 'tw_tail'
+	option policy 'locked'
+
+config mixer
+	option name 'srcmix'
+	option user_gains '1'
+	option in '2'
+	option out '2'
+
+config mixroute                # woofer feed = (L+R)/2
+	option mixer 'srcmix'
+	option dest '0'
+	option source '0'
+	option gain '0.5'
+config mixroute
+	option mixer 'srcmix'
+	option dest '0'
+	option source '1'
+	option gain '0.5'
+config mixroute                # tweeter feed = (L+R)/2
+	option mixer 'srcmix'
+	option dest '1'
+	option source '0'
+	option gain '0.5'
+config mixroute
+	option mixer 'srcmix'
+	option dest '1'
+	option source '1'
+	option gain '0.5'
+
+config filter
+	option name 'wf_lp'
+	option type 'lrlp'
+	option f '2300'
+	option order '4'
+config filter
+	option name 'wf_fir'
+	option type 'conv'
+	option filename '/usr/share/camilladsp/coeffs/wf_fir.txt'
+config filter
+	option name 'wf_limit'
+	option type 'limiter'
+	option clip_limit '0.9'
+config filter
+	option name 'tw_hp'
+	option type 'lrhp'
+	option f '1900'
+	option order '4'
+config filter
+	option name 'tw_notch10k'
+	option type 'notch'
+	option f '10000'
+	option q '2.0'
+config filter
+	option name 'tw_peak17k'
+	option type 'peak'
+	option f '17000'
+	option gain '-3.0'
+	option q '2.0'
+config filter
+	option name 'tw_limit'
+	option type 'limiter'
+	option clip_limit '0.8'
+
+config step
+	option index '10'
+	option subchain 'user_in0'
+config step
+	option index '15'
+	option subchain 'user_in1'
+config step
+	option index '20'
+	option subchain 'src_sel'
+	option type 'Mixer'
+	option name 'srcmix'
+	option user_gains '1'
+config step
+	option index '30'
+	option subchain 'wf_tail'
+	option type 'Filter'
+	list channels '0'
+	list names 'wf_lp'
+	list names 'wf_fir'
+	list names 'wf_limit'
+config step
+	option index '40'
+	option subchain 'tw_tail'
+	option type 'Filter'
+	list channels '1'
+	list names 'tw_hp'
+	list names 'tw_notch10k'
+	list names 'tw_peak17k'
+	list names 'tw_limit'
