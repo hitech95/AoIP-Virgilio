@@ -30,6 +30,26 @@ else
 	echo "    ptp  : no monitor"
 fi
 
+# camilladsp pipeline status from its native ubus object (patch 0004).
+# One line: state, capture rate when measured, main fader. Deep detail
+# stays on the websocket API.
+if _cdsp=$(ubus call camilladsp status 2>/dev/null); then
+	_state=$(echo "$_cdsp" | sed -n 's/.*"state": "\([A-Za-z]*\)".*/\1/p')
+	_rate=$(echo "$_cdsp" | sed -n 's/.*"capture_rate": \([0-9]*\).*/\1/p')
+	_vol=$(echo "$_cdsp" | sed -n 's/.*"volume": \(-\{0,1\}[0-9.]*\).*/\1/p')
+	_mute=$(echo "$_cdsp" | sed -n 's/.*"mute": \([a-z]*\).*/\1/p')
+	_line="${_state:-unknown}"
+	[ -n "$_rate" ] && [ "$_rate" != "0" ] && _line="${_line}@${_rate}"
+	[ -n "$_vol" ] && _vol=$(printf '%.1f' "$_vol" 2>/dev/null || echo "$_vol")
+	[ -n "$_vol" ] && _line="${_line} vol=${_vol}dB"
+	[ "$_mute" = "true" ] && _line="${_line} [muted]"
+	echo "    cdsp : $_line"
+elif pidof camilladsp >/dev/null 2>&1; then
+	echo "    cdsp : no ubus object (old binary?)"
+else
+	echo "    cdsp : stopped"
+fi
+
 # Audio chain services
 _svcs="statime camilladsp aoip-bridge mpd"
 _out=""
@@ -42,4 +62,4 @@ for _s in $_svcs; do
 	fi
 done
 [ -n "$_out" ] && echo "    svc  : $_out"
-unset _board _model _if _ip _ptp _lock _ppm _svcs _out _s
+unset _board _model _if _ip _ptp _lock _ppm _cdsp _state _rate _vol _mute _line _svcs _out _s
