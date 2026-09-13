@@ -1,0 +1,1218 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 6f15567..815d092 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,3 +1,16 @@
++# Unreleased
++New features:
++- Built-in FFT spectrum analyzer, replacing the external "filter bank" hack.
++  Computes averaged log-spaced spectrum levels of the source (capture side)
++  and destination (playback side) of the pipeline in a dedicated thread at
++  10 Hz, and serves them via the websocket commands `GetSpectrumLevels`,
++  `GetSpectrumConfig`, `SetSpectrumEnabled`, `SetSpectrumChannel`,
++  `SetSpectrumBins`, `SetSpectrumSmoothing`, `SetSpectrumFftSize` and
++  `SetSpectrumInterval`. Disabled by default, and near zero cost while
++  disabled. FFT size (1024-8192, default 2048) and update interval
++  (50-1000 ms, default 100 ms) are runtime tradeable between accuracy
++  and CPU cost.
++
+ # 4.1.3
+ Bugfixes:
+ - Increased capture ringbuffer sizes in CoreAudio, WASAPI, ASIO, and threaded ALSA
+diff --git a/src/bin.rs b/src/bin.rs
+index 6c6852e..09b385a 100644
+--- a/src/bin.rs
++++ b/src/bin.rs
+@@ -68,6 +68,7 @@ use camillalib::config;
+ use camillalib::processing;
+ #[cfg(feature = "websocket")]
+ use camillalib::socketserver;
++use camillalib::spectrum;
+ use camillalib::statefile;
+ use camillalib::utils::countertimer;
+ #[cfg(feature = "websocket")]
+@@ -171,6 +172,7 @@ fn run(
+         rx_cap,
+         rx_pipeconf,
+         status_structs.processing.clone(),
++        status_structs.spectrum.clone(),
+     );
+ 
+     // Playback thread
+@@ -1121,11 +1123,18 @@ fn main_process() -> i32 {
+         stop_reason: StopReason::None,
+     }));
+ 
++    // Spectrum analyzer, runs in its own thread and is fed from the
++    // processing thread. Idle (near zero cost) while disabled.
++    let (spectrum_params, rx_spectrum) = spectrum::SpectrumParameters::new();
++    let spectrum_status = Arc::new(RwLock::new(spectrum::SpectrumData::default()));
++    spectrum::start_analyzer(spectrum_params.clone(), rx_spectrum, spectrum_status.clone());
++
+     let status_structs = StatusStructs {
+         capture: capture_status.clone(),
+         playback: playback_status.clone(),
+         processing: processing_params.clone(),
+         status: processing_status.clone(),
++        spectrum: spectrum_params.clone(),
+     };
+     let active_config = Arc::new(Mutex::new(None));
+     let previous_config = Arc::new(Mutex::new(None));
+@@ -1157,6 +1166,8 @@ fn main_process() -> i32 {
+                 state_change_notify: tx_state,
+                 state_file_path: statefilename.clone(),
+                 unsaved_state_change: unsaved_state_changes.clone(),
++                spectrum_params: spectrum_params.clone(),
++                spectrum_status: spectrum_status.clone(),
+             };
+             let server_params = socketserver::ServerParameters {
+                 port: serverport,
+diff --git a/src/lib.rs b/src/lib.rs
+index 8dd7285..fb1aeea 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -62,6 +62,8 @@ use std::sync::{
+     atomic::{AtomicBool, AtomicU32, Ordering},
+ };
+ 
++use crate::spectrum::SpectrumParameters;
++
+ // Logging macros to give extra logs
+ // when the "debug" feature is enabled.
+ #[allow(unused)]
+@@ -137,6 +139,7 @@ pub mod processors;
+ pub mod pulse_backend;
+ #[cfg(feature = "websocket")]
+ pub mod socketserver;
++pub mod spectrum;
+ pub mod statefile;
+ pub mod utils;
+ #[cfg(target_os = "windows")]
+@@ -400,6 +403,7 @@ pub struct StatusStructs {
+     pub playback: Arc<RwLock<PlaybackStatus>>,
+     pub processing: Arc<ProcessingParameters>,
+     pub status: Arc<RwLock<ProcessingStatus>>,
++    pub spectrum: Arc<SpectrumParameters>,
+ }
+ 
+ pub struct SharedConfigs {
+diff --git a/src/processing.rs b/src/processing.rs
+index 14a31dc..a4c7a82 100644
+--- a/src/processing.rs
++++ b/src/processing.rs
+@@ -18,6 +18,7 @@ use crate::ProcessingParameters;
+ use crate::audiodevice::*;
+ use crate::config;
+ use crate::pipeline;
++use crate::spectrum::{SpectrumParameters, TapSource};
+ use audio_thread_priority::{
+     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+ };
+@@ -31,10 +32,12 @@ pub fn run_processing(
+     rx_cap: crossbeam_channel::Receiver<AudioMessage>,
+     rx_pipeconf: crossbeam_channel::Receiver<(config::ConfigChange, config::Configuration)>,
+     processing_params: Arc<ProcessingParameters>,
++    spectrum_params: Arc<SpectrumParameters>,
+ ) -> thread::JoinHandle<()> {
+     thread::spawn(move || {
+         let chunksize = conf_proc.devices.chunksize;
+         let samplerate = conf_proc.devices.samplerate;
++        spectrum_params.set_samplerate(samplerate);
+         let multithreaded = conf_proc.devices.multithreaded();
+         let nbr_threads = conf_proc.devices.worker_threads();
+         let hw_threads = std::thread::available_parallelism()
+@@ -116,7 +119,12 @@ pub fn run_processing(
+             match rx_cap.recv() {
+                 Ok(AudioMessage::Audio(mut chunk)) => {
+                     //trace!("AudioMessage::Audio received");
++                    // Tap the source side before processing, and the
++                    // destination side after. No-ops while the
++                    // spectrum analyzer is disabled.
++                    spectrum_params.tap_chunk(TapSource::Capture, &chunk);
+                     chunk = pipeline.process_chunk(chunk);
++                    spectrum_params.tap_chunk(TapSource::Playback, &chunk);
+                     let msg = AudioMessage::Audio(chunk);
+                     if tx_pb.send(msg).is_err() {
+                         info!("Playback thread has already stopped.");
+diff --git a/src/socketserver.rs b/src/socketserver.rs
+index 90908f6..98a57ca 100644
+--- a/src/socketserver.rs
++++ b/src/socketserver.rs
+@@ -37,6 +37,9 @@ use tungstenite::accept;
+ 
+ use crate::ProcessingState;
+ use crate::Res;
++use crate::spectrum::{
++    FFT_SIZES, SpectrumData, SpectrumParameters, TapSource, MAX_BINS, MAX_CHANNEL, MIN_BINS,
++};
+ use crate::utils::decibels::linear_to_db_inplace;
+ use crate::{
+     CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus, StopReason,
+@@ -57,6 +60,8 @@ pub struct SharedData {
+     pub state_change_notify: crossbeam_channel::Sender<()>,
+     pub state_file_path: Option<String>,
+     pub unsaved_state_change: Arc<AtomicBool>,
++    pub spectrum_params: Arc<SpectrumParameters>,
++    pub spectrum_status: Arc<RwLock<SpectrumData>>,
+ }
+ 
+ #[derive(Debug, Clone)]
+@@ -124,6 +129,14 @@ enum WsCommand {
+     GetSignalLevelsSinceLast,
+     GetSignalPeaksSinceStart,
+     ResetSignalPeaksSinceStart,
++    GetSpectrumConfig,
++    GetSpectrumLevels,
++    SetSpectrumEnabled(bool),
++    SetSpectrumChannel(TapSource, usize),
++    SetSpectrumBins(usize),
++    SetSpectrumSmoothing(f32),
++    SetSpectrumFftSize(usize),
++    SetSpectrumInterval(usize),
+     GetChannelLabels,
+     GetCaptureRate,
+     GetUpdateInterval,
+@@ -344,6 +357,32 @@ enum WsReply {
+     ResetSignalPeaksSinceStart {
+         result: WsResult,
+     },
++    GetSpectrumConfig {
++        result: WsResult,
++        value: crate::spectrum::SpectrumConfig,
++    },
++    GetSpectrumLevels {
++        result: WsResult,
++        value: SpectrumData,
++    },
++    SetSpectrumEnabled {
++        result: WsResult,
++    },
++    SetSpectrumChannel {
++        result: WsResult,
++    },
++    SetSpectrumBins {
++        result: WsResult,
++    },
++    SetSpectrumSmoothing {
++        result: WsResult,
++    },
++    SetSpectrumFftSize {
++        result: WsResult,
++    },
++    SetSpectrumInterval {
++        result: WsResult,
++    },
+     GetChannelLabels {
+         result: WsResult,
+         value: ChannelLabels,
+@@ -854,6 +893,93 @@ fn handle_command(
+             };
+             Some(result)
+         }
++        WsCommand::GetSpectrumConfig => Some(WsReply::GetSpectrumConfig {
++            result: WsResult::Ok,
++            value: shared_data_inst.spectrum_params.config(),
++        }),
++        WsCommand::GetSpectrumLevels => Some(WsReply::GetSpectrumLevels {
++            result: WsResult::Ok,
++            value: shared_data_inst.spectrum_status.read().clone(),
++        }),
++        WsCommand::SetSpectrumEnabled(enable) => {
++            shared_data_inst.spectrum_params.enable(enable);
++            if !enable {
++                // Drop the old levels so no stale spectrum is served.
++                shared_data_inst.spectrum_status.write().clear();
++            }
++            Some(WsReply::SetSpectrumEnabled {
++                result: WsResult::Ok,
++            })
++        }
++        WsCommand::SetSpectrumChannel(tap, channel) => {
++            if channel > MAX_CHANNEL {
++                return Some(WsReply::SetSpectrumChannel {
++                    result: WsResult::InvalidValueError(format!(
++                        "Channel must be 0 to {MAX_CHANNEL}"
++                    )),
++                });
++            }
++            shared_data_inst.spectrum_params.set_channel(tap, channel);
++            Some(WsReply::SetSpectrumChannel {
++                result: WsResult::Ok,
++            })
++        }
++        WsCommand::SetSpectrumBins(bins) => {
++            if !(MIN_BINS..=MAX_BINS).contains(&bins) {
++                return Some(WsReply::SetSpectrumBins {
++                    result: WsResult::InvalidValueError(format!(
++                        "Number of bins must be {MIN_BINS} to {MAX_BINS}"
++                    )),
++                });
++            }
++            shared_data_inst.spectrum_params.set_bins(bins);
++            Some(WsReply::SetSpectrumBins {
++                result: WsResult::Ok,
++            })
++        }
++        WsCommand::SetSpectrumSmoothing(smoothing) => {
++            if !(0.0..=0.99).contains(&smoothing) {
++                return Some(WsReply::SetSpectrumSmoothing {
++                    result: WsResult::InvalidValueError(
++                        "Smoothing must be 0.0 to 0.99".to_string(),
++                    ),
++                });
++            }
++            shared_data_inst.spectrum_params.set_smoothing(smoothing);
++            Some(WsReply::SetSpectrumSmoothing {
++                result: WsResult::Ok,
++            })
++        }
++        WsCommand::SetSpectrumFftSize(fftsize) => {
++            if !crate::spectrum::FFT_SIZES.contains(&fftsize) {
++                return Some(WsReply::SetSpectrumFftSize {
++                    result: WsResult::InvalidValueError(format!(
++                        "FFT size must be one of {FFT_SIZES:?}"
++                    )),
++                });
++            }
++            shared_data_inst.spectrum_params.set_fftsize(fftsize);
++            Some(WsReply::SetSpectrumFftSize {
++                result: WsResult::Ok,
++            })
++        }
++        WsCommand::SetSpectrumInterval(interval_ms) => {
++            if !(crate::spectrum::MIN_INTERVAL_MS..=crate::spectrum::MAX_INTERVAL_MS)
++                .contains(&interval_ms)
++            {
++                return Some(WsReply::SetSpectrumInterval {
++                    result: WsResult::InvalidValueError(format!(
++                        "Interval must be {} to {} ms",
++                        crate::spectrum::MIN_INTERVAL_MS,
++                        crate::spectrum::MAX_INTERVAL_MS
++                    )),
++                });
++            }
++            shared_data_inst.spectrum_params.set_interval_ms(interval_ms);
++            Some(WsReply::SetSpectrumInterval {
++                result: WsResult::Ok,
++            })
++        }
+         WsCommand::GetChannelLabels => {
+             let optional_config = shared_data_inst.active_config.lock();
+             Some(WsReply::GetChannelLabels {
+@@ -1874,6 +2000,7 @@ fn capture_signal_rms(shared_data: &SharedData) -> Vec<f32> {
+ #[cfg(test)]
+ mod tests {
+     use crate::socketserver::{WsCommand, parse_command};
++    use crate::spectrum::TapSource;
+     use tungstenite::Message;
+ 
+     #[test]
+@@ -1890,5 +2017,14 @@ mod tests {
+         let cmd = Message::text("{\"SetConfigFilePath\": \"somefile\"}");
+         let res = parse_command(cmd).unwrap();
+         assert_eq!(res, WsCommand::SetConfigFilePath("somefile".to_string()));
++        let cmd = Message::text("{\"SetSpectrumEnabled\": true}");
++        let res = parse_command(cmd).unwrap();
++        assert_eq!(res, WsCommand::SetSpectrumEnabled(true));
++        let cmd = Message::text("{\"SetSpectrumChannel\": [\"playback\", 2]}");
++        let res = parse_command(cmd).unwrap();
++        assert_eq!(
++            res,
++            WsCommand::SetSpectrumChannel(TapSource::Playback, 2)
++        );
+     }
+ }
+diff --git a/src/spectrum.rs b/src/spectrum.rs
+new file mode 100644
+index 0000000..c4082f9
+--- /dev/null
++++ b/src/spectrum.rs
+@@ -0,0 +1,825 @@
++// CamillaDSP - A flexible tool for processing audio
++// Copyright (C) 2026 Henrik Enquist
++//
++// This file is part of CamillaDSP.
++//
++// CamillaDSP is free software; you can redistribute it and/or modify it
++// under the terms of either:
++//
++// a) the GNU General Public License version 3,
++//    or
++// b) the Mozilla Public License Version 2.0.
++//
++// You should have received copies of the GNU General Public License and the
++// Mozilla Public License along with this program. If not, see
++// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
++
++//! Real-time FFT spectrum analyzer, exposed via the websocket interface.
++//!
++//! This replaces the "filter bank hack" used by external tools (which inject
++//! a log-spaced bank of bandpass filters and read back their output levels)
++//! with a proper FFT running in its own thread:
++//!
++//! - The processing thread taps the audio at two points, the capture side
++//!   (before the pipeline, i.e. the source) and the playback side (after the
++//!   pipeline, i.e. the destination), and hands copies of one selected
++//!   channel per tap to the analyzer thread.
++//! - The analyzer thread runs at about 10 Hz (configurable). It keeps a
++//!   rolling buffer of FFT samples per tap, applies a Hann window,
++//!   transforms with a real FFT, sums the power into log-spaced bins
++//!   covering the whole spectrum, applies exponential smoothing in dB
++//!   domain, and publishes the result to a shared status structure that
++//!   the websocket server reads.
++//! - Everything can be enabled and configured at runtime. While disabled,
++//!   the tap returns immediately and no memory is copied or allocated.
++//!
++//! The whole thing is intentionally an approximation fit for a graphical
++//! equalizer display: FFT size, bin count, smoothing and update rate are
++//! runtime tradeable knobs between accuracy and CPU cost.
++
++use crate::audiochunk::AudioChunk;
++use crossbeam_channel::{Receiver, RecvTimeoutError};
++use num_complex::Complex;
++use parking_lot::RwLock;
++use realfft::{RealFftPlanner, RealToComplex};
++use serde::{Deserialize, Serialize};
++use std::sync::Arc;
++use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
++use std::thread;
++use std::time::Duration;
++
++/// Allowed FFT lengths, powers of two. 2048 gives ~23 Hz resolution at
++/// 48 kHz which is plenty for a graphical equalizer display.
++pub const FFT_SIZES: [usize; 4] = [1024, 2048, 4096, 8192];
++/// Default FFT length. Half the work of 4096, and the log bins of a
++/// graphic EQ display are mostly wider than the resolution it gives.
++pub const DEFAULT_FFT_SIZE: usize = 2048;
++/// Default analyzer update rate in ms, approximately 10 Hz.
++pub const DEFAULT_INTERVAL_MS: usize = 100;
++pub const MIN_INTERVAL_MS: usize = 50;
++pub const MAX_INTERVAL_MS: usize = 1000;
++/// Capacity of the channel from the audio threads to the analyzer.
++const CHANNEL_CAPACITY: usize = 64;
++/// Lower limit for published levels, in dB.
++const DB_FLOOR: f32 = -150.0;
++/// A tap goes inactive after 1 second without new data.
++const INACTIVE_TICKS: u32 = 10;
++/// Smoothing (EMA factor in dB domain), 0.0 = none.
++const DEFAULT_SMOOTHING: f32 = 0.7;
++const DEFAULT_BINS: usize = 31;
++pub const MIN_BINS: usize = 8;
++pub const MAX_BINS: usize = 256;
++pub const MAX_CHANNEL: usize = 63;
++
++/// The two tap points of the pipeline.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "lowercase")]
++pub enum TapSource {
++    /// Source side, before the pipeline.
++    Capture,
++    /// Destination side, after the pipeline.
++    Playback,
++}
++
++/// One chunk of samples handed from a tap to the analyzer thread.
++#[derive(Debug)]
++pub struct TapMessage {
++    tap: TapSource,
++    samples: Vec<f32>,
++}
++
++/// Published spectrum of a single tap.
++#[derive(Clone, Debug, PartialEq, Serialize)]
++pub struct TapSpectrum {
++    /// False when no audio has been seen for the last second.
++    pub active: bool,
++    /// Samplerate the levels refer to.
++    pub samplerate: usize,
++    /// FFT length used.
++    pub fftsize: usize,
++    /// Smoothed level of each bin, in dBFS.
++    pub levels: Vec<f32>,
++    /// Center frequency of each bin, in Hz.
++    pub frequencies: Vec<f32>,
++}
++
++impl Default for TapSpectrum {
++    fn default() -> Self {
++        Self {
++            active: false,
++            samplerate: 0,
++            fftsize: DEFAULT_FFT_SIZE,
++            levels: Vec::new(),
++            frequencies: Vec::new(),
++        }
++    }
++}
++
++/// Published spectra of both taps.
++#[derive(Clone, Debug, PartialEq, Serialize, Default)]
++pub struct SpectrumData {
++    pub capture: TapSpectrum,
++    pub playback: TapSpectrum,
++}
++
++impl SpectrumData {
++    /// Clear all levels, used when the analyzer is disabled at runtime.
++    pub fn clear(&mut self) {
++        self.capture = TapSpectrum::default();
++        self.playback = TapSpectrum::default();
++    }
++}
++
++/// Runtime configuration of the analyzer, reported by GetSpectrumConfig.
++#[derive(Clone, Debug, PartialEq, Serialize)]
++pub struct SpectrumConfig {
++    pub enabled: bool,
++    pub fftsize: usize,
++    pub bins: usize,
++    pub smoothing: f32,
++    pub capture_channel: usize,
++    pub playback_channel: usize,
++    pub interval_ms: u64,
++}
++
++/// Shared runtime parameters of the spectrum analyzer.
++///
++/// The setters are called from the websocket thread, the getters are called
++/// from the audio threads (only cheap atomic loads) and the analyzer thread.
++pub struct SpectrumParameters {
++    enabled: AtomicBool,
++    capture_channel: AtomicUsize,
++    playback_channel: AtomicUsize,
++    bins: AtomicUsize,
++    smoothing: AtomicU32,
++    fftsize: AtomicUsize,
++    interval_ms: AtomicUsize,
++    samplerate: AtomicUsize,
++    tx: crossbeam_channel::Sender<TapMessage>,
++}
++
++impl std::fmt::Debug for SpectrumParameters {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("SpectrumParameters")
++            .field("enabled", &self.enabled())
++            .field("bins", &self.bins())
++            .field("smoothing", &self.smoothing())
++            .field("fftsize", &self.fftsize())
++            .field("interval_ms", &self.interval_ms())
++            .field("capture_channel", &self.channel(TapSource::Capture))
++            .field("playback_channel", &self.channel(TapSource::Playback))
++            .field("samplerate", &self.samplerate())
++            .finish_non_exhaustive()
++    }
++}
++
++impl SpectrumParameters {
++    /// Create new parameters, and the receiving end of the tap channel.
++    /// The receiver must be passed to `start_analyzer`.
++    pub fn new() -> (Arc<Self>, Receiver<TapMessage>) {
++        let (tx, rx) = crossbeam_channel::bounded(CHANNEL_CAPACITY);
++        let params = Self {
++            enabled: AtomicBool::new(false),
++            capture_channel: AtomicUsize::new(0),
++            playback_channel: AtomicUsize::new(0),
++            bins: AtomicUsize::new(DEFAULT_BINS),
++            smoothing: AtomicU32::new(DEFAULT_SMOOTHING.to_bits()),
++            fftsize: AtomicUsize::new(DEFAULT_FFT_SIZE),
++            interval_ms: AtomicUsize::new(DEFAULT_INTERVAL_MS),
++            samplerate: AtomicUsize::new(0),
++            tx,
++        };
++        (Arc::new(params), rx)
++    }
++
++    pub fn enable(&self, enable: bool) {
++        self.enabled.store(enable, Ordering::Relaxed);
++    }
++
++    pub fn enabled(&self) -> bool {
++        self.enabled.load(Ordering::Relaxed)
++    }
++
++    pub fn set_channel(&self, tap: TapSource, channel: usize) {
++        match tap {
++            TapSource::Capture => self.capture_channel.store(channel, Ordering::Relaxed),
++            TapSource::Playback => self.playback_channel.store(channel, Ordering::Relaxed),
++        }
++    }
++
++    pub fn channel(&self, tap: TapSource) -> usize {
++        match tap {
++            TapSource::Capture => self.capture_channel.load(Ordering::Relaxed),
++            TapSource::Playback => self.playback_channel.load(Ordering::Relaxed),
++        }
++    }
++
++    pub fn set_bins(&self, bins: usize) {
++        self.bins.store(bins, Ordering::Relaxed);
++    }
++
++    pub fn bins(&self) -> usize {
++        self.bins.load(Ordering::Relaxed)
++    }
++
++    pub fn set_smoothing(&self, smoothing: f32) {
++        self.smoothing.store(smoothing.to_bits(), Ordering::Relaxed);
++    }
++
++    pub fn smoothing(&self) -> f32 {
++        f32::from_bits(self.smoothing.load(Ordering::Relaxed))
++    }
++
++    /// FFT length, one of FFT_SIZES. Smaller is cheaper and gives
++    /// coarser frequency resolution.
++    pub fn set_fftsize(&self, fftsize: usize) {
++        self.fftsize.store(fftsize, Ordering::Relaxed);
++    }
++
++    pub fn fftsize(&self) -> usize {
++        self.fftsize.load(Ordering::Relaxed)
++    }
++
++    /// Update interval in ms. Larger is cheaper.
++    pub fn set_interval_ms(&self, interval_ms: usize) {
++        self.interval_ms.store(interval_ms, Ordering::Relaxed);
++    }
++
++    pub fn interval_ms(&self) -> usize {
++        self.interval_ms.load(Ordering::Relaxed)
++    }
++
++    /// Samplerate of the processed chunks, set by the processing thread.
++    pub fn set_samplerate(&self, samplerate: usize) {
++        self.samplerate.store(samplerate, Ordering::Relaxed);
++    }
++
++    pub fn samplerate(&self) -> usize {
++        self.samplerate.load(Ordering::Relaxed)
++    }
++
++    pub fn config(&self) -> SpectrumConfig {
++        SpectrumConfig {
++            enabled: self.enabled(),
++            fftsize: self.fftsize(),
++            bins: self.bins(),
++            smoothing: self.smoothing(),
++            capture_channel: self.channel(TapSource::Capture),
++            playback_channel: self.channel(TapSource::Playback),
++            interval_ms: self.interval_ms() as u64,
++        }
++    }
++
++    /// Copy one channel of a chunk and hand it to the analyzer thread.
++    ///
++    /// This is called from the real-time processing thread and must never
++    /// block. While the analyzer is disabled this returns immediately after
++    /// a single atomic load, so the overhead is negligible. If the analyzer
++    /// lags behind, updates are dropped instead of queued up.
++    pub fn tap_chunk(&self, tap: TapSource, chunk: &AudioChunk) {
++        if !self.enabled.load(Ordering::Relaxed) {
++            return;
++        }
++        let waveforms = &chunk.waveforms;
++        if waveforms.is_empty() {
++            return;
++        }
++        // Clamp the selected channel to what this tap actually has.
++        let channel = self.channel(tap).min(waveforms.len() - 1);
++        let waveform = &waveforms[channel];
++        if waveform.is_empty() {
++            return;
++        }
++        let samples: Vec<f32> = waveform.iter().map(|value| *value as f32).collect();
++        // Drop the update if the analyzer can't keep up, never wait.
++        let _ = self.tx.try_send(TapMessage { tap, samples });
++    }
++}
++
++/// Compute log-spaced output bins covering the whole spectrum.
++///
++/// Returns the center frequency of each bin, and the inclusive range of
++/// FFT bins (indices into the real FFT output, 1..=fft_len/2) that each
++/// output bin aggregates. Each range has at least one FFT bin.
++fn log_bin_mapping(
++    bins: usize,
++    samplerate: usize,
++    fft_len: usize,
++) -> (Vec<f32>, Vec<(usize, usize)>) {
++    let half = fft_len / 2;
++    let bin_hz = samplerate as f32 / fft_len as f32;
++    let f_lo = bin_hz;
++    let f_hi = samplerate as f32 / 2.0 - bin_hz / 2.0;
++    let ratio = (f_hi / f_lo).powf(1.0 / bins as f32);
++    let mut frequencies = Vec::with_capacity(bins);
++    let mut ranges = Vec::with_capacity(bins);
++    let mut edge = f_lo;
++    for _ in 0..bins {
++        let next_edge = edge * ratio;
++        let center = (edge * next_edge).sqrt();
++        let j_lo = ((edge / bin_hz).ceil() as usize).clamp(1, half);
++        let j_hi = ((next_edge / bin_hz).floor() as usize).clamp(1, half);
++        let range = if j_hi >= j_lo {
++            (j_lo, j_hi)
++        } else {
++            // The log bin is narrower than the FFT resolution,
++            // use the single closest FFT bin.
++            let nearest = ((center / bin_hz).round() as usize).clamp(1, half);
++            (nearest, nearest)
++        };
++        frequencies.push(center);
++        ranges.push(range);
++        edge = next_edge;
++    }
++    (frequencies, ranges)
++}
++
++/// Per-tap state of the analyzer engine.
++struct TapState {
++    /// Rolling buffer of the latest fft_len samples.
++    ring: Vec<f32>,
++    write: usize,
++    filled: usize,
++    /// Ticks since the last chunk arrived, a tap goes inactive when this
++    /// reaches INACTIVE_TICKS.
++    ticks_since_data: u32,
++    /// Smoothed level per output bin, in dB.
++    smoothed: Vec<f32>,
++    initialized: bool,
++}
++
++impl TapState {
++    fn new(fft_len: usize) -> Self {
++        Self {
++            ring: vec![0.0; fft_len],
++            write: 0,
++            filled: 0,
++            ticks_since_data: INACTIVE_TICKS,
++            smoothed: Vec::new(),
++            initialized: false,
++        }
++    }
++
++    fn push(&mut self, samples: &[f32]) {
++        self.ticks_since_data = 0;
++        let fft_len = self.ring.len();
++        for &sample in samples {
++            self.ring[self.write] = sample;
++            self.write = (self.write + 1) % fft_len;
++            if self.filled < fft_len {
++                self.filled += 1;
++            }
++        }
++    }
++
++    fn reset_smoothing(&mut self, bins: usize) {
++        self.smoothed = vec![DB_FLOOR; bins];
++        self.initialized = false;
++    }
++
++    fn active(&self) -> bool {
++        self.initialized && self.ticks_since_data < INACTIVE_TICKS
++    }
++}
++
++/// The FFT parts that depend on the FFT length.
++struct FftParts {
++    fft_len: usize,
++    fft: Arc<dyn RealToComplex<f32>>,
++    scratch: Vec<Complex<f32>>,
++    window: Vec<f32>,
++    window_sum: f32,
++    input: Vec<f32>,
++    spectrum: Vec<Complex<f32>>,
++}
++
++impl FftParts {
++    fn new(fft_len: usize) -> Self {
++        let mut planner = RealFftPlanner::<f32>::new();
++        let fft = planner.plan_fft_forward(fft_len);
++        let scratch = fft.make_scratch_vec();
++        // sin^2 window == Hann window
++        let window: Vec<f32> = (0..fft_len)
++            .map(|i| {
++                (std::f32::consts::PI * i as f32 / (fft_len - 1) as f32)
++                    .sin()
++                    .powi(2)
++            })
++            .collect();
++        let window_sum: f32 = window.iter().sum();
++        let input = fft.make_input_vec();
++        let spectrum = fft.make_output_vec();
++        Self {
++            fft_len,
++            fft,
++            scratch,
++            window,
++            window_sum,
++            input,
++            spectrum,
++        }
++    }
++}
++
++/// The FFT engine, owned by the analyzer thread.
++pub struct SpectrumEngine {
++    parts: FftParts,
++    capture: TapState,
++    playback: TapState,
++    cached_fftsize: usize,
++    cached_bins: usize,
++    cached_samplerate: usize,
++    frequencies: Vec<f32>,
++    ranges: Vec<(usize, usize)>,
++}
++
++impl Default for SpectrumEngine {
++    fn default() -> Self {
++        Self::new(DEFAULT_FFT_SIZE)
++    }
++}
++
++impl SpectrumEngine {
++    pub fn new(fft_len: usize) -> Self {
++        Self {
++            parts: FftParts::new(fft_len),
++            capture: TapState::new(fft_len),
++            playback: TapState::new(fft_len),
++            cached_fftsize: fft_len,
++            cached_bins: 0,
++            cached_samplerate: 0,
++            frequencies: Vec::new(),
++            ranges: Vec::new(),
++        }
++    }
++
++    /// Add new samples to the rolling buffer of a tap.
++    pub fn push(&mut self, tap: TapSource, samples: &[f32]) {
++        match tap {
++            TapSource::Capture => self.capture.push(samples),
++            TapSource::Playback => self.playback.push(samples),
++        }
++    }
++
++    /// Forget all buffered audio and smoothed levels. Used when the
++    /// analyzer is disabled at runtime, so no stale levels are served
++    /// if it is enabled again later.
++    pub fn reset(&mut self) {
++        self.capture = TapState::new(self.parts.fft_len);
++        self.playback = TapState::new(self.parts.fft_len);
++        self.cached_bins = 0;
++        self.cached_samplerate = 0;
++        self.frequencies = Vec::new();
++        self.ranges = Vec::new();
++    }
++
++    /// Recompute levels for taps with fresh data, and publish the result.
++    /// Called once per tick (default ~10 Hz) from the analyzer thread,
++    /// but only while the analyzer is enabled.
++    pub fn update(&mut self, params: &SpectrumParameters, status: &Arc<RwLock<SpectrumData>>) {
++        let bins = params.bins();
++        let samplerate = params.samplerate();
++        let fftsize = params.fftsize();
++        if !(MIN_BINS..=MAX_BINS).contains(&bins)
++            || samplerate == 0
++            || !FFT_SIZES.contains(&fftsize)
++        {
++            return;
++        }
++        if fftsize != self.cached_fftsize {
++            debug!("Spectrum analyzer: changing FFT length to {fftsize}");
++            self.parts = FftParts::new(fftsize);
++            self.capture = TapState::new(fftsize);
++            self.playback = TapState::new(fftsize);
++            self.cached_fftsize = fftsize;
++            // Force the bin mapping to be rebuilt as well.
++            self.cached_bins = 0;
++            self.cached_samplerate = 0;
++        }
++        if bins != self.cached_bins || samplerate != self.cached_samplerate {
++            debug!("Spectrum analyzer: {bins} bins at {samplerate} Hz");
++            self.cached_bins = bins;
++            self.cached_samplerate = samplerate;
++            let (frequencies, ranges) = log_bin_mapping(bins, samplerate, fftsize);
++            self.frequencies = frequencies;
++            self.ranges = ranges;
++            self.capture.reset_smoothing(bins);
++            self.playback.reset_smoothing(bins);
++        }
++        let fft_len = self.parts.fft_len;
++        let smoothing = params.smoothing();
++        let fresh_capture = self.capture.ticks_since_data == 0;
++        let fresh_playback = self.playback.ticks_since_data == 0;
++        if fresh_capture && self.capture.filled >= fft_len {
++            compute_tap(&mut self.parts, &self.ranges, &mut self.capture, smoothing);
++        }
++        if fresh_playback && self.playback.filled >= fft_len {
++            compute_tap(&mut self.parts, &self.ranges, &mut self.playback, smoothing);
++        }
++        self.capture.ticks_since_data = self.capture.ticks_since_data.saturating_add(1);
++        self.playback.ticks_since_data = self.playback.ticks_since_data.saturating_add(1);
++        // Publishing is best-effort, skip if a websocket client holds the lock.
++        if let Some(mut data) = status.try_write() {
++            data.capture = self.tap_result(&self.capture);
++            data.playback = self.tap_result(&self.playback);
++        }
++    }
++
++    fn tap_result(&self, state: &TapState) -> TapSpectrum {
++        TapSpectrum {
++            active: state.active(),
++            samplerate: self.cached_samplerate,
++            fftsize: self.cached_fftsize,
++            levels: state.smoothed.clone(),
++            frequencies: self.frequencies.clone(),
++        }
++    }
++}
++
++/// Window, transform, aggregate into log bins and smooth one tap.
++/// Free function so the engine fields can be borrowed disjointly.
++fn compute_tap(
++    parts: &mut FftParts,
++    ranges: &[(usize, usize)],
++    state: &mut TapState,
++    smoothing: f32,
++) {
++    let fft_len = parts.fft_len;
++    for i in 0..fft_len {
++        let index = (state.write + i) % fft_len;
++        parts.input[i] = state.ring[index] * parts.window[i];
++    }
++    if parts
++        .fft
++        .process_with_scratch(&mut parts.input, &mut parts.spectrum, &mut parts.scratch)
++        .is_err()
++    {
++        return;
++    }
++    // Scale so a full-scale sine gives 0 dBFS.
++    let scale = 2.0 / parts.window_sum;
++    // On the first update there is nothing to average with.
++    let first_update = !state.initialized;
++    for (bin, (j_lo, j_hi)) in ranges.iter().enumerate() {
++        // Sum the power of all FFT bins inside the band. A single tone
++        // then shows its true level regardless of the band width.
++        let mut power_sum = 0.0f32;
++        for value in &parts.spectrum[*j_lo..=*j_hi] {
++            let real = value.re * scale;
++            let imag = value.im * scale;
++            power_sum += real * real + imag * imag;
++        }
++        let level = (10.0 * power_sum.log10()).max(DB_FLOOR);
++        if first_update {
++            state.smoothed[bin] = level;
++        } else {
++            state.smoothed[bin] = smoothing * state.smoothed[bin] + (1.0 - smoothing) * level;
++        }
++    }
++    state.initialized = true;
++}
++
++/// Start the spectrum analyzer thread.
++///
++/// The thread owns the receiving end of the tap channel and the shared
++/// status. It runs at normal priority and terminates when all tap senders
++/// are dropped (at program exit).
++pub fn start_analyzer(
++    params: Arc<SpectrumParameters>,
++    rx: Receiver<TapMessage>,
++    status: Arc<RwLock<SpectrumData>>,
++) -> thread::JoinHandle<()> {
++    thread::spawn(move || {
++        debug!("Spectrum analyzer thread started");
++        let mut engine = SpectrumEngine::new(DEFAULT_FFT_SIZE);
++        let mut was_enabled = params.enabled();
++        loop {
++            let tick = Duration::from_millis(params.interval_ms().max(1) as u64);
++            match rx.recv_timeout(tick) {
++                Ok(msg) => {
++                    engine.push(msg.tap, &msg.samples);
++                    while let Ok(msg) = rx.try_recv() {
++                        engine.push(msg.tap, &msg.samples);
++                    }
++                }
++                Err(RecvTimeoutError::Timeout) => {}
++                Err(RecvTimeoutError::Disconnected) => {
++                    debug!("Spectrum analyzer channel closed, stopping");
++                    break;
++                }
++            }
++            let enabled = params.enabled();
++            if was_enabled && !enabled {
++                debug!("Spectrum analyzer disabled, resetting state");
++                engine.reset();
++                // Also clear the published levels, the websocket
++                // handler normally does this but may have been too slow.
++                status.write().clear();
++            }
++            was_enabled = enabled;
++            if enabled {
++                engine.update(&params, &status);
++            }
++        }
++        debug!("Spectrum analyzer thread stopped");
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::audiochunk::AudioChunk;
++    use std::f32::consts::PI;
++
++    #[test]
++    fn tap_is_silent_when_disabled() {
++        let (params, rx) = SpectrumParameters::new();
++        let waveforms = vec![vec![0.5; 128]];
++        let chunk = AudioChunk::new(waveforms, 1.0, -1.0, 128, 128);
++        params.tap_chunk(TapSource::Capture, &chunk);
++        assert!(rx.try_recv().is_err());
++        params.enable(true);
++        params.tap_chunk(TapSource::Capture, &chunk);
++        let msg = rx.recv_timeout(Duration::from_millis(100)).unwrap();
++        assert_eq!(msg.tap, TapSource::Capture);
++        assert_eq!(msg.samples.len(), 128);
++    }
++
++    #[test]
++    fn tap_channel_is_clamped() {
++        let (params, rx) = SpectrumParameters::new();
++        params.enable(true);
++        params.set_channel(TapSource::Capture, 5);
++        let waveforms = vec![vec![0.1; 64], vec![0.5; 64]];
++        let chunk = AudioChunk::new(waveforms, 1.0, -1.0, 64, 64);
++        params.tap_chunk(TapSource::Capture, &chunk);
++        let msg = rx.recv_timeout(Duration::from_millis(100)).unwrap();
++        assert!(msg.samples.iter().all(|&value| (value - 0.5).abs() < 1e-6));
++    }
++
++    #[test]
++    fn log_bin_mapping_covers_spectrum() {
++        let (frequencies, ranges) = log_bin_mapping(31, 48000, 4096);
++        assert_eq!(frequencies.len(), 31);
++        assert_eq!(ranges.len(), 31);
++        for pair in frequencies.windows(2) {
++            assert!(pair[0] < pair[1]);
++        }
++        assert!(frequencies[0] > 11.0);
++        assert!(frequencies[30] < 24000.0);
++        for (j_lo, j_hi) in ranges {
++            assert!(j_lo >= 1);
++            assert!(j_lo <= j_hi);
++            assert!(j_hi <= 4096 / 2);
++        }
++    }
++
++    #[test]
++    fn log_bin_mapping_many_bins() {
++        // More output bins than FFT bins must not panic or produce
++        // empty ranges.
++        let (frequencies, ranges) = log_bin_mapping(256, 44100, 2048);
++        assert_eq!(frequencies.len(), 256);
++        for (j_lo, j_hi) in ranges {
++            assert!(j_lo <= j_hi);
++        }
++    }
++
++    #[test]
++    fn sine_spectrum() {
++        let (params, _rx) = SpectrumParameters::new();
++        params.set_samplerate(48000);
++        params.set_fftsize(4096);
++        let status = Arc::new(RwLock::new(SpectrumData::default()));
++        let mut engine = SpectrumEngine::new(4096);
++        // 1 kHz sine at -6 dBFS
++        let sine: Vec<f32> = (0..4096)
++            .map(|i| (2.0 * PI * 1000.0 * i as f32 / 48000.0).sin() * 0.5)
++            .collect();
++        engine.push(TapSource::Capture, &sine);
++        engine.update(&params, &status);
++
++        let data = status.read();
++        assert!(data.capture.active);
++        assert_eq!(data.capture.levels.len(), 31);
++        assert_eq!(data.capture.frequencies.len(), 31);
++        // Find the bins nearest 1 kHz and 10 kHz
++        let mut peak_bin = 0;
++        let mut far_bin = 0;
++        for (index, &frequency) in data.capture.frequencies.iter().enumerate() {
++            if (frequency - 1000.0).abs()
++                < (data.capture.frequencies[peak_bin] - 1000.0).abs()
++            {
++                peak_bin = index;
++            }
++            if (frequency - 10000.0).abs() < (data.capture.frequencies[far_bin] - 10000.0).abs() {
++                far_bin = index;
++            }
++        }
++        // Total band power of the tone is close to amplitude^2 = -6 dB,
++        // plus a little leakage overcount from the wide log band.
++        assert!(data.capture.levels[peak_bin] > -8.0);
++        assert!(data.capture.levels[peak_bin] < -2.0);
++        assert!(data.capture.levels[far_bin] < -30.0);
++        // Playback tap has no data
++        assert!(!data.playback.active);
++    }
++
++    #[test]
++    fn smoothing_averages_levels() {
++        let (params, _rx) = SpectrumParameters::new();
++        params.set_samplerate(48000);
++        params.set_fftsize(4096);
++        params.set_smoothing(0.5);
++        let status = Arc::new(RwLock::new(SpectrumData::default()));
++        let mut engine = SpectrumEngine::new(4096);
++        let sine = |amplitude: f32| -> Vec<f32> {
++            (0..4096)
++                .map(|i| (2.0 * PI * 1000.0 * i as f32 / 48000.0).sin() * amplitude)
++                .collect()
++        };
++
++        engine.push(TapSource::Capture, &sine(0.1));
++        engine.update(&params, &status);
++        let first = status.read().capture.levels.clone();
++        let mut peak_bin = 0;
++        for (index, &frequency) in status.read().capture.frequencies.iter().enumerate() {
++            if (frequency - 1000.0).abs()
++                < (status.read().capture.frequencies[peak_bin] - 1000.0).abs()
++            {
++                peak_bin = index;
++            }
++        }
++
++        // With smoothing 0.5 the level moves halfway towards the new level
++        // in dB domain. Tone levels measure within ~0.5 dB of the ideal
++        // power, and the scalloping error is the same for both amplitudes.
++        engine.push(TapSource::Capture, &sine(0.8));
++        engine.update(&params, &status);
++        let second = status.read().capture.levels.clone();
++        let first_level = first[peak_bin];
++        let ideal_quiet = 10.0 * (0.1f32 * 0.1 / 2.0).log10();
++        let ideal_loud = 10.0 * (0.8f32 * 0.8 / 2.0).log10();
++        let loud_estimate = first_level + (ideal_loud - ideal_quiet);
++        let expected = first_level + 0.5 * (loud_estimate - first_level);
++        assert!(
++            (second[peak_bin] - expected).abs() < 1.0,
++            "second={} expected={expected}",
++            second[peak_bin]
++        );
++        assert!(second[peak_bin] > first_level);
++    }
++
++    #[test]
++    fn fftsize_can_change_at_runtime() {
++        let (params, _rx) = SpectrumParameters::new();
++        params.set_samplerate(48000);
++        let status = Arc::new(RwLock::new(SpectrumData::default()));
++        let mut engine = SpectrumEngine::new(2048);
++        let sine_1024 = |amplitude: f32| -> Vec<f32> {
++            (0..1024)
++                .map(|i| (2.0 * PI * 1000.0 * i as f32 / 48000.0).sin() * amplitude)
++                .collect()
++        };
++
++        // Fill with 2048-based config
++        for _ in 0..2 {
++            engine.push(TapSource::Capture, &sine_1024(0.5));
++        }
++        engine.update(&params, &status);
++        assert_eq!(status.read().capture.fftsize, 2048);
++        assert!(status.read().capture.active);
++
++        // Shrink to 1024 mid-flight: the first update after the change
++        // rebuilds the buffers (samples pushed before it are dropped,
++        // matching the analyzer thread flow), then the spectrum resumes.
++        params.set_fftsize(1024);
++        engine.update(&params, &status);
++        engine.push(TapSource::Capture, &sine_1024(0.5));
++        engine.update(&params, &status);
++        let data = status.read();
++        assert_eq!(data.capture.fftsize, 1024);
++        assert!(data.capture.active);
++        assert_eq!(data.capture.levels.len(), 31);
++        // Peak still in the 1 kHz band
++        let mut peak_bin = 0;
++        for (index, &frequency) in data.capture.frequencies.iter().enumerate() {
++            if (frequency - 1000.0).abs()
++                < (data.capture.frequencies[peak_bin] - 1000.0).abs()
++            {
++                peak_bin = index;
++            }
++        }
++        assert!(data.capture.levels[peak_bin] > -9.0);
++    }
++
++    #[test]
++    fn default_config_is_cheap() {
++        let (params, _rx) = SpectrumParameters::new();
++        let config = params.config();
++        assert!(!config.enabled);
++        assert_eq!(config.fftsize, DEFAULT_FFT_SIZE);
++        assert_eq!(config.interval_ms, DEFAULT_INTERVAL_MS as u64);
++        assert_eq!(config.bins, 31);
++    }
++}
+diff --git a/websocket.md b/websocket.md
+index 89be916..a1bfaa4 100644
+--- a/websocket.md
++++ b/websocket.md
+@@ -174,6 +174,58 @@ These are intended for display, for example in VU meters, and are not used by Ca
+ - `GetChannelLabels` : Get the playback and capture channel labels.
+   The labels are returned as a json object with keys `playback` and `capture`.
+ 
++#### Spectrum analyzer commands
++
++CamillaDSP includes a built-in FFT spectrum analyzer. It runs in its own
++thread, taps the audio at the capture side (before the pipeline, the source)
++and the playback side (after the pipeline, the destination), and publishes
++averaged log-spaced levels for the whole spectrum at a fixed rate of 10 Hz.
++This is a replacement for the "filter bank" hack used by some tools, where a
++bank of bandpass filters was injected into the config to get similar data.
++
++The analyzer is disabled by default. While disabled, the cost is a single
++atomic load per audio chunk, and no memory is copied. When enabled the cost
++is small (of the order of one percent of a single CPU core on typical
++hardware), and can be reduced further with a smaller FFT size and a longer
++interval.
++
++- `GetSpectrumConfig` : read the current analyzer configuration.
++  Returns a json object with keys `enabled`, `fftsize`, `bins`, `smoothing`,
++  `capture_channel`, `playback_channel` and `interval_ms`.
++- `SetSpectrumEnabled` : enable or disable the analyzer. Takes a boolean.
++  Disabling also clears the published levels.
++- `GetSpectrumLevels` : read the current spectrum of both taps.
++  Returns a json object with keys `capture` and `playback`, each containing
++  an object with:
++  * `active`: false when no audio has been seen for the last second.
++  * `samplerate`: the sample rate the levels refer to.
++  * `fftsize`: the FFT length used, see `SetSpectrumFftSize`.
++  * `frequencies`: center frequency in Hz of each bin.
++  * `levels`: smoothed level of each bin in dBFS. A full-scale sine gives 0 dB.
++  
++  The bins are log-spaced over the whole spectrum, from the first FFT bin up
++  to Nyquist. Poll this command at the configured interval to get all updates.
++- `SetSpectrumChannel` : select which channel to analyze for a tap.
++  Takes the tap (`"capture"` or `"playback"`) and the channel index.
++  The channel is clamped to the number of channels actually available.
++  Capture channels are counted before the pipeline (the source channels),
++  playback channels after it (the destination channels).
++- `SetSpectrumBins` : change the number of log-spaced output bins.
++  Takes an integer in the range 8 to 256. Default is 31.
++- `SetSpectrumSmoothing` : change the exponential averaging of the levels.
++  Takes a float in the range 0.0 (no smoothing, instantaneous) to 0.99
++  (very slow). The averaging is done in dB domain, which gives a
++  display-friendly linear decay. Default is 0.7.
++- `SetSpectrumFftSize` : change the FFT length. One of 1024, 2048, 4096 or
++  8192. Smaller is cheaper but gives coarser frequency resolution.
++  Default is 2048, which gives about 23 Hz resolution at 48 kHz. Since the
++  display bins are much wider than that except at the lowest frequencies,
++  this is the recommended setting for a graphical equalizer display. On
++  very weak hardware, 1024 plus a longer interval brings the cost down
++  further.
++- `SetSpectrumInterval` : change the analyzer update interval in ms,
++  in the range 50 to 1000. Default is 100 (10 Hz).
++
+ 
+ ### Volume control
+ 
