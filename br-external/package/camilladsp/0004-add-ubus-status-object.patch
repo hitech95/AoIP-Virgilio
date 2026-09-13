@@ -1,0 +1,743 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 62039ff..2f27743 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -20,6 +20,7 @@ asio-backend = ["asio-sys"]
+ bench = []
+ websocket = ["tungstenite"]
+ secure-websocket = ["websocket", "native-tls", "tungstenite/native-tls"]
++ubus = ["dep:ubus", "websocket"]
+ debug = []
+ 
+ [lib]
+@@ -36,6 +37,8 @@ alsa-sys = "0.3.1"
+ nix = { version = "0.30", features = ["poll", "signal"] }
+ zbus = { version = "5.7.0", optional = true }
+ pipewire = { version = "0.9", optional = true }
++# Not published on crates.io: pinned git revision (same as validated by rbctl-dsl).
++ubus = { package = "ubus-zero", git = "https://github.com/pawelchcki/ubus-zero", rev = "68b55de7", optional = true, default-features = false }
+ 
+ [target.'cfg(target_os="macos")'.dependencies]
+ coreaudio-rs = "0.13.0"
+diff --git a/src/bin.rs b/src/bin.rs
+index 09b385a..9d71929 100644
+--- a/src/bin.rs
++++ b/src/bin.rs
+@@ -70,6 +70,8 @@ use camillalib::processing;
+ use camillalib::socketserver;
+ use camillalib::spectrum;
+ use camillalib::statefile;
++#[cfg(feature = "ubus")]
++use camillalib::ubusserver;
+ use camillalib::utils::countertimer;
+ #[cfg(feature = "websocket")]
+ use std::net::IpAddr;
+@@ -792,6 +794,16 @@ fn main_process() -> i32 {
+                 .action(ArgAction::Set)
+                 .requires("port"),
+         );
++    #[cfg(feature = "ubus")]
++    let clapapp = clapapp.arg(
++        Arg::new("ubus_socket")
++            .help("Unix socket of ubusd for the ubus status object ('off' disables it; default probes the common paths)")
++            .long("ubus-socket")
++            .value_name("SOCKET")
++            .display_order(220)
++            .action(ArgAction::Set)
++            .value_parser(clap::builder::StringValueParser::new()),
++    );
+     let matches = clapapp.get_matches();
+ 
+     let mut loglevel = match matches.get_count("verbosity") {
+@@ -1139,13 +1151,41 @@ fn main_process() -> i32 {
+     let active_config = Arc::new(Mutex::new(None));
+     let previous_config = Arc::new(Mutex::new(None));
+ 
++    // State-change notification channel, shared by the websocket server and
++    // the ubus provider: fires the statefile saver thread below.
++    #[cfg(feature = "websocket")]
++    let (tx_state, rx_state) = crossbeam_channel::bounded(1);
+     #[cfg(feature = "websocket")]
++    let unsaved_state_changes = Arc::new(AtomicBool::new(false));
++
++    #[cfg(feature = "ubus")]
+     {
+-        let (tx_state, rx_state) = crossbeam_channel::bounded(1);
++        // None = probe the common ubus socket paths; "off" disables.
++        let ubus_socket = matches.get_one::<String>("ubus_socket").cloned();
++        if ubus_socket.as_deref() != Some("off") {
++            let shared_data = socketserver::SharedData {
++                active_config: active_config.clone(),
++                active_config_path: active_config_path.clone(),
++                previous_config: previous_config.clone(),
++                command_sender: tx_command.clone(),
++                capture_status: capture_status.clone(),
++                playback_status: playback_status.clone(),
++                processing_params: processing_params.clone(),
++                processing_status: processing_status.clone(),
++                state_change_notify: tx_state.clone(),
++                state_file_path: statefilename.clone(),
++                unsaved_state_change: unsaved_state_changes.clone(),
++                spectrum_params: spectrum_params.clone(),
++                spectrum_status: spectrum_status.clone(),
++            };
++            ubusserver::start(ubus_socket, shared_data);
++        }
++    }
+ 
++    #[cfg(feature = "websocket")]
++    {
+         let processing_params_clone = processing_params.clone();
+         let active_config_path_clone = active_config_path.clone();
+-        let unsaved_state_changes = Arc::new(AtomicBool::new(false));
+ 
+         if let Some(port) = matches.get_one::<usize>("port") {
+             let serveraddress = matches
+diff --git a/src/lib.rs b/src/lib.rs
+index fb1aeea..740e1aa 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -139,6 +139,8 @@ pub mod processors;
+ pub mod pulse_backend;
+ #[cfg(feature = "websocket")]
+ pub mod socketserver;
++#[cfg(all(target_os = "linux", feature = "ubus"))]
++pub mod ubusserver;
+ pub mod spectrum;
+ pub mod statefile;
+ pub mod utils;
+diff --git a/src/ubusserver.rs b/src/ubusserver.rs
+new file mode 100644
+index 0000000..13b5b04
+--- /dev/null
++++ b/src/ubusserver.rs
+@@ -0,0 +1,629 @@
++// CamillaDSP - A flexible tool for processing audio
++// Copyright (C) 2026 Henrik Enquist
++//
++// This file is part of CamillaDSP.
++//
++// CamillaDSP is free software; you can redistribute it and/or modify it
++// under the terms of either:
++//
++// a) the GNU General Public License version 3,
++//    or
++// b) the Mozilla Public License Version 2.0.
++//
++// You should have received copies of the GNU General Public License and the
++// Mozilla Public License along with this program. If not, see
++// <https://www.gnu.org/licenses/> or <https://www.mozilla.org/MPL/2.0/>.
++
++//! ubus status object for OpenWrt-style systems.
++//!
++//! Registers a `camilladsp` object on the local ubusd and serves a small
++//! read-mostly status surface in parallel with the websocket server, reading
++//! the same shared state:
++//! - `status` — one-shot snapshot (state, stop reason, rates, loads,
++//!   clipped samples, volume/mute, version)
++//! - `volume_get` — main fader volume and mute
++//! - `volume_set` — set main fader volume and/or mute (args optional)
++//! - `mute_toggle` — race-free mute flip of the main fader
++//!
++//! Everything deeper (signal levels, spectrum, config editing) stays on the
++//! websocket interface. The provider runs in its own thread and reconnects
++//! with backoff so it survives ubusd restarts.
++
++use std::io::{self, Read, Write};
++use std::os::unix::io::AsFd;
++use std::os::unix::net::UnixStream;
++use std::path::Path;
++use std::sync::atomic::Ordering;
++use std::thread;
++use std::time::{Duration, Instant};
++
++use log::{debug, info, warn};
++use nix::errno::Errno;
++use nix::poll::{poll, PollFd, PollFlags};
++use ubus::blobmsg::{self, BlobBuilder};
++use ubus::error::UbusError;
++use ubus::server::{DispatchOutcome, UbusConnection, UbusObject};
++use ubus::transport::Transport;
++use ubus::wire::{Codec, Frame, MAX_MSG_LEN};
++
++use crate::socketserver::SharedData;
++use crate::{ProcessingState, StopReason};
++
++/// Park timeout for `wait_recv`; keeps the reconnect loop responsive.
++const POLL_WAIT_MS: u16 = 250;
++/// Reconnect backoff bounds.
++const BACKOFF_MIN: Duration = Duration::from_millis(500);
++const BACKOFF_MAX: Duration = Duration::from_secs(30);
++/// Send deadline for a single frame.
++const SEND_TIMEOUT: Duration = Duration::from_secs(5);
++
++/// Candidate ubusd sockets, tried in order when no path is given
++/// explicitly (the default varies between OpenWrt versions and buildroot).
++const UBUS_SOCKET_PATHS: &[&str] = &[
++    "/var/run/ubus.sock",
++    "/var/run/ubus/ubus.sock",
++    "/tmp/run/ubus.sock",
++    "/tmp/run/ubus/ubus.sock",
++];
++
++/// Probe the candidate ubus sockets; the first one accepting a connection
++/// wins. Called on every connection attempt, so a late-starting ubusd is
++/// picked up by the reconnect loop.
++fn find_socket() -> Option<String> {
++    UBUS_SOCKET_PATHS
++        .iter()
++        .find(|path| UnixStream::connect(path).is_ok())
++        .map(|path| (*path).to_string())
++}
++
++// ── transport ──────────────────────────────────────────────────────────────
++
++/// Non-blocking AF_UNIX transport for ubus-zero over the ubusd socket.
++///
++/// Frame (de)serialisation is delegated to `ubus::wire::Codec`; this struct
++/// only owns the byte pipe, the partial-frame buffer, and the poll-based
++/// park between non-blocking receive attempts.
++struct UnixUbusTransport {
++    stream: UnixStream,
++    rx_buf: Vec<u8>,
++}
++
++impl UnixUbusTransport {
++    /// Connect to a ubusd listening Unix socket (normally /var/run/ubus.sock).
++    fn connect(path: impl AsRef<Path>) -> Result<Self, UbusError> {
++        let stream = UnixStream::connect(path).map_err(io_err)?;
++        // Non-blocking: ubus-zero's recv() returns Ok(None) when no full
++        // frame is buffered, and its loops call wait_recv() between polls.
++        stream.set_nonblocking(true).map_err(io_err)?;
++        Ok(Self {
++            stream,
++            rx_buf: Vec::with_capacity(4096),
++        })
++    }
++
++    /// Drain the kernel socket buffer into `rx_buf`. Returns `true` on EOF.
++    fn fill_rx(&mut self) -> Result<bool, UbusError> {
++        const RX_BUF_CAP: usize = MAX_MSG_LEN * 2;
++        let mut chunk = [0u8; 4096];
++        loop {
++            match self.stream.read(&mut chunk) {
++                Ok(0) => return Ok(true), // EOF
++                Ok(n) => {
++                    if self.rx_buf.len().saturating_add(n) > RX_BUF_CAP {
++                        self.rx_buf.clear();
++                        return Err(UbusError::Malformed("rx buffer exceeded cap"));
++                    }
++                    self.rx_buf.extend_from_slice(&chunk[..n]);
++                }
++                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(false),
++                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
++                Err(e) => return Err(io_err(e)),
++            }
++        }
++    }
++}
++
++impl Transport for UnixUbusTransport {
++    fn send(&mut self, frame: &Frame) -> Result<(), UbusError> {
++        let bytes = Codec::write_frame(frame);
++        let deadline = Instant::now() + SEND_TIMEOUT;
++        let mut sent = 0;
++        while sent < bytes.len() {
++            match self.stream.write(&bytes[sent..]) {
++                Ok(0) => return Err(UbusError::Closed),
++                Ok(n) => sent += n,
++                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
++                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
++                    if Instant::now() >= deadline {
++                        return Err(UbusError::Io("send timed out".into()));
++                    }
++                    thread::sleep(Duration::from_millis(1));
++                }
++                Err(e) => return Err(io_err(e)),
++            }
++        }
++        Ok(())
++    }
++
++    fn recv(&mut self) -> Result<Option<Frame>, UbusError> {
++        let closed = match self.fill_rx() {
++            Ok(c) => c,
++            Err(e) => {
++                self.rx_buf.clear();
++                return Err(e);
++            }
++        };
++        match Codec::read_frame(&self.rx_buf) {
++            Ok((frame, consumed)) => {
++                self.rx_buf.drain(..consumed);
++                Ok(Some(frame))
++            }
++            Err(UbusError::Short { .. }) if closed => Err(UbusError::Closed),
++            Err(UbusError::Short { .. }) => Ok(None), // no full frame yet
++            Err(e) => {
++                self.rx_buf.clear();
++                Err(e)
++            }
++        }
++    }
++
++    fn wait_recv(&mut self) {
++        // Park until the socket is readable instead of spinning: this
++        // thread spends its life inside poll_one().
++        let mut fds = [PollFd::new(self.stream.as_fd(), PollFlags::POLLIN)];
++        loop {
++            match poll(&mut fds, POLL_WAIT_MS) {
++                Ok(_) => return,
++                Err(Errno::EINTR) => continue,
++                Err(_) => {
++                    thread::sleep(Duration::from_millis(POLL_WAIT_MS as u64));
++                    return;
++                }
++            }
++        }
++    }
++}
++
++fn io_err(e: io::Error) -> UbusError {
++    UbusError::Io(e.to_string())
++}
++
++// ── value formatting helpers (pure, unit-tested) ──────────────────────────
++
++/// Processing state as the strings used by the websocket API.
++fn state_str(state: ProcessingState) -> &'static str {
++    match state {
++        ProcessingState::Running => "Running",
++        ProcessingState::Paused => "Paused",
++        ProcessingState::Inactive => "Inactive",
++        ProcessingState::Starting => "Starting",
++        ProcessingState::Stalled => "Stalled",
++    }
++}
++
++/// Stop reason split into its websocket-style name and optional detail
++/// (error message, or the new samplerate for format changes).
++fn stop_reason_parts(reason: &StopReason) -> (&'static str, Option<String>) {
++    match reason {
++        StopReason::None => ("None", None),
++        StopReason::Done => ("Done", None),
++        StopReason::CaptureError(msg) => ("CaptureError", Some(msg.clone())),
++        StopReason::PlaybackError(msg) => ("PlaybackError", Some(msg.clone())),
++        StopReason::UnknownError(msg) => ("UnknownError", Some(msg.clone())),
++        StopReason::CaptureFormatChange(rate) => {
++            ("CaptureFormatChange", Some(rate.to_string()))
++        }
++        StopReason::PlaybackFormatChange(rate) => {
++            ("PlaybackFormatChange", Some(rate.to_string()))
++        }
++    }
++}
++
++/// Clamp to the same -150..+50 dB range as the websocket volume commands.
++fn clamped_volume(vol: f32) -> f32 {
++    let mut new_vol = vol;
++    if new_vol < -150.0 {
++        new_vol = -150.0;
++        warn!("UBUS: clamped volume at -150 dB");
++    } else if new_vol > 50.0 {
++        new_vol = 50.0;
++        warn!("UBUS: clamped volume at +50 dB");
++    }
++    new_vol
++}
++
++/// Numeric coercion for a blobmsg attribute. The ubus CLI encodes JSON
++/// integers as Int32 (never Double), so a plain `as_f64()` would reject
++/// `ubus call ... volume_set '{"volume":-10}'`.
++fn arg_number(attr: ubus::blobmsg::BlobRef) -> Option<f64> {
++    use ubus::blobmsg::BlobValue;
++    match attr.value() {
++        Ok(BlobValue::Double(n)) => Some(n),
++        Ok(BlobValue::Int64(n)) => Some(n as f64),
++        Ok(BlobValue::Int32(n)) => Some(n as f64),
++        Ok(BlobValue::Int16(n)) => Some(n as f64),
++        Ok(BlobValue::Int8(n)) => Some(n as f64),
++        _ => None,
++    }
++}
++
++/// Flag the statefile for an update, like the websocket volume commands do.
++fn notify_state_change(shared: &SharedData) {
++    shared.unsaved_state_change.store(true, Ordering::Relaxed);
++    shared.state_change_notify.try_send(()).unwrap_or(());
++}
++
++// ── object ─────────────────────────────────────────────────────────────────
++
++/// Build the `camilladsp` ubus object. Must be called on the thread that
++/// will serve it: the method handlers are `FnMut` closures and not `Send`.
++fn build_object(shared_data: &SharedData) -> UbusObject {
++    let st_status = shared_data.clone();
++    let st_get = shared_data.clone();
++    let st_set = shared_data.clone();
++    let st_toggle = shared_data.clone();
++
++    UbusObject::new("camilladsp")
++        .method("status", move |_req| {
++            let capture = st_status.capture_status.read();
++            let playback = st_status.playback_status.read();
++            let processing = st_status.processing_status.read();
++            let (stop_reason, stop_detail) = stop_reason_parts(&processing.stop_reason);
++            let config_path = st_status.active_config_path.lock().clone();
++
++            let mut bb = BlobBuilder::new();
++            bb.open_table(None);
++            bb.put_str(Some("state"), state_str(capture.state));
++            bb.put_str(Some("stop_reason"), stop_reason);
++            if let Some(detail) = stop_detail.as_deref() {
++                bb.put_str(Some("stop_detail"), detail);
++            }
++            match config_path.as_deref() {
++                Some(path) => bb.put_str(Some("config_path"), path),
++                None => bb.put_null(Some("config_path")),
++            }
++            bb.put_i32(Some("capture_rate"), capture.measured_samplerate as i32);
++            bb.put_double(Some("rate_adjust"), capture.rate_adjust as f64);
++            bb.put_i32(Some("buffer_level"), playback.buffer_level as i32);
++            bb.put_i64(Some("clipped_samples"), playback.clipped_samples as i64);
++            bb.put_double(
++                Some("processing_load"),
++                st_status.processing_params.processing_load() as f64,
++            );
++            bb.put_double(
++                Some("resampler_load"),
++                st_status.processing_params.resampler_load() as f64,
++            );
++            bb.put_double(
++                Some("volume"),
++                st_status.processing_params.target_volume(0) as f64,
++            );
++            bb.put_bool(Some("mute"), st_status.processing_params.is_mute(0));
++            bb.put_str(Some("version"), env!("CARGO_PKG_VERSION"));
++            bb.close_table();
++            Ok(bb.finish_table())
++        })
++        .method("volume_get", move |_req| {
++            let mut bb = BlobBuilder::new();
++            bb.open_table(None);
++            bb.put_double(
++                Some("volume"),
++                st_get.processing_params.target_volume(0) as f64,
++            );
++            bb.put_bool(Some("mute"), st_get.processing_params.is_mute(0));
++            bb.close_table();
++            Ok(bb.finish_table())
++        })
++        .method("volume_set", move |req| {
++            let new_volume = blobmsg::lookup(req, "volume").and_then(arg_number);
++            let new_mute = blobmsg::lookup(req, "mute").and_then(|v| v.as_bool());
++            if new_volume.is_none() && new_mute.is_none() {
++                return Err(UbusError::Method(
++                    "volume_set needs a 'volume' and/or 'mute' argument".into(),
++                ));
++            }
++            if let Some(vol) = new_volume {
++                st_set
++                    .processing_params
++                    .set_target_volume(0, clamped_volume(vol as f32));
++            }
++            if let Some(mute) = new_mute {
++                st_set.processing_params.set_mute(0, mute);
++            }
++            notify_state_change(&st_set);
++            let mut bb = BlobBuilder::new();
++            bb.open_table(None);
++            bb.put_double(
++                Some("volume"),
++                st_set.processing_params.target_volume(0) as f64,
++            );
++            bb.put_bool(Some("mute"), st_set.processing_params.is_mute(0));
++            bb.close_table();
++            Ok(bb.finish_table())
++        })
++        .method("mute_toggle", move |_req| {
++            // fetch_xor returns the OLD value, the reply carries the new one.
++            let was_muted = st_toggle.processing_params.toggle_mute(0);
++            notify_state_change(&st_toggle);
++            let mut bb = BlobBuilder::new();
++            bb.open_table(None);
++            bb.put_bool(Some("mute"), !was_muted);
++            bb.close_table();
++            Ok(bb.finish_table())
++        })
++}
++
++// ── server thread ──────────────────────────────────────────────────────────
++
++/// Spawn the ubus provider thread. Reconnects with backoff so the object
++/// survives ubusd restarts and boot ordering; logs failures and keeps
++/// retrying quietly. `socket_path` selects the ubusd socket explicitly;
++/// `None` probes the common candidate paths on every attempt.
++pub fn start(socket_path: Option<String>, shared_data: SharedData) {
++    let spawned = thread::Builder::new()
++        .name("ubusserver".to_string())
++        .spawn(move || run_loop(socket_path.as_deref(), shared_data));
++    if let Err(e) = spawned {
++        warn!("UBUS: could not spawn server thread: {e}");
++    }
++}
++
++fn run_loop(socket_arg: Option<&str>, shared_data: SharedData) {
++    let mut backoff = BACKOFF_MIN;
++    loop {
++        let socket_path = match socket_arg {
++            Some(path) => Some(path.to_string()),
++            None => find_socket(),
++        };
++        match socket_path
++            .as_deref()
++            .and_then(|path| UnixUbusTransport::connect(path).ok().map(|t| (t, path)))
++        {
++            Some((transport, path)) => {
++                let object = build_object(&shared_data);
++                match UbusConnection::connect_and_register(transport, object) {
++                    Ok(mut conn) => {
++                        info!("UBUS: object 'camilladsp' registered on {path}");
++                        backoff = BACKOFF_MIN;
++                        loop {
++                            match conn.poll_one() {
++                                Ok(DispatchOutcome::HandlerErr(e)) => {
++                                    warn!("UBUS: method handler error: {e}");
++                                }
++                                Ok(_) => {}
++                                Err(e) => {
++                                    debug!("UBUS: connection lost: {e}");
++                                    break;
++                                }
++                            }
++                        }
++                    }
++                    Err(e) => {
++                        debug!("UBUS: handshake with ubusd failed: {e}");
++                    }
++                }
++            }
++            None => {
++                debug!("UBUS: no ubusd socket available");
++            }
++        }
++        thread::sleep(backoff);
++        backoff = (backoff * 2).min(BACKOFF_MAX);
++    }
++}
++
++// ── tests ──────────────────────────────────────────────────────────────────
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::spectrum;
++    use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, ProcessingStatus};
++    use parking_lot::{Mutex, RwLock};
++    use std::sync::Arc;
++    use ubus::blobmsg::BlobMsgTable;
++
++    fn fixture_shared_data() -> (SharedData, crossbeam_channel::Receiver<()>) {
++        let (command_sender, _command_rx) = crossbeam_channel::bounded(1);
++        let (state_change_notify, state_rx) = crossbeam_channel::bounded(1);
++        let (spectrum_params, _spectrum_rx) = spectrum::SpectrumParameters::new();
++        let shared = SharedData {
++            active_config: Arc::new(Mutex::new(None)),
++            active_config_path: Arc::new(Mutex::new(Some("/tmp/camilladsp.yml".to_string()))),
++            previous_config: Arc::new(Mutex::new(None)),
++            command_sender,
++            capture_status: Arc::new(RwLock::new(CaptureStatus {
++                measured_samplerate: 48000,
++                update_interval: 1000,
++                signal_range: 0.0,
++                rate_adjust: 1.0,
++                state: ProcessingState::Running,
++                signal_rms: crate::utils::countertimer::ValueHistory::new(1024, 2),
++                signal_peak: crate::utils::countertimer::ValueHistory::new(1024, 2),
++                used_channels: Vec::new(),
++            })),
++            playback_status: Arc::new(RwLock::new(PlaybackStatus {
++                buffer_level: 8000,
++                clipped_samples: 3,
++                update_interval: 1000,
++                signal_rms: crate::utils::countertimer::ValueHistory::new(1024, 2),
++                signal_peak: crate::utils::countertimer::ValueHistory::new(1024, 2),
++            })),
++            processing_params: Arc::new(ProcessingParameters::new(&[-12.5, 0.0, 0.0, 0.0, 0.0], &[
++                false, false, false, false, false,
++            ])),
++            processing_status: Arc::new(RwLock::new(ProcessingStatus {
++                stop_reason: StopReason::None,
++            })),
++            state_change_notify,
++            state_file_path: None,
++            unsaved_state_change: Arc::new(std::sync::atomic::AtomicBool::new(false)),
++            spectrum_params,
++            spectrum_status: Arc::new(RwLock::new(spectrum::SpectrumData::default())),
++        };
++        (shared, state_rx)
++    }
++
++    fn call_method(object: &mut UbusObject, name: &str, args: &[u8]) -> BlobMsgTable {
++        let method = object
++            .methods
++            .iter_mut()
++            .find(|m| m.name == name)
++            .unwrap_or_else(|| panic!("no method {name}"));
++        (method.handler)(args).expect("handler failed")
++    }
++
++    #[test]
++    fn status_reply_carries_shared_state() {
++        let (shared, _state_rx) = fixture_shared_data();
++        let mut object = build_object(&shared);
++        let reply = call_method(&mut object, "status", &[]);
++        let fields = reply.contents();
++        assert_eq!(
++            blobmsg::lookup(fields, "state").and_then(|v| v.as_str()),
++            Some("Running")
++        );
++        assert_eq!(
++            blobmsg::lookup(fields, "stop_reason").and_then(|v| v.as_str()),
++            Some("None")
++        );
++        assert!(blobmsg::lookup(fields, "stop_detail").is_none());
++        assert_eq!(
++            blobmsg::lookup(fields, "config_path").and_then(|v| v.as_str()),
++            Some("/tmp/camilladsp.yml")
++        );
++        assert_eq!(
++            blobmsg::lookup(fields, "capture_rate").and_then(|v| v.as_i32()),
++            Some(48000)
++        );
++        assert_eq!(
++            blobmsg::lookup(fields, "clipped_samples").and_then(|v| v.as_i32()),
++            Some(3)
++        );
++        assert_eq!(
++            blobmsg::lookup(fields, "volume").and_then(|v| v.as_f64()),
++            Some(-12.5)
++        );
++        assert_eq!(
++            blobmsg::lookup(fields, "mute").and_then(|v| v.as_bool()),
++            Some(false)
++        );
++        assert_eq!(
++            blobmsg::lookup(fields, "version").and_then(|v| v.as_str()),
++            Some(env!("CARGO_PKG_VERSION"))
++        );
++    }
++
++    #[test]
++    fn volume_set_without_args_fails() {
++        let (shared, _state_rx) = fixture_shared_data();
++        let mut object = build_object(&shared);
++        let result = call_method_result(&mut object, "volume_set", &[]);
++        assert!(result.is_err());
++    }
++
++    fn call_method_result(
++        object: &mut UbusObject,
++        name: &str,
++        args: &[u8],
++    ) -> Result<BlobMsgTable, UbusError> {
++        let method = object
++            .methods
++            .iter_mut()
++            .find(|m| m.name == name)
++            .unwrap_or_else(|| panic!("no method {name}"));
++        (method.handler)(args)
++    }
++
++    #[test]
++    fn volume_set_updates_state_and_notifies() {
++        let (shared, state_rx) = fixture_shared_data();
++        let mut object = build_object(&shared);
++        // args table: {"volume": -20.0}
++        let args = BlobMsgTable::build(|bb| {
++            bb.put_double(Some("volume"), -20.0);
++        });
++        let reply = call_method(&mut object, "volume_set", args.contents());
++        assert_eq!(
++            blobmsg::lookup(reply.contents(), "volume").and_then(|v| v.as_f64()),
++            Some(-20.0)
++        );
++        assert_eq!(shared.processing_params.target_volume(0), -20.0);
++        // statefile side effects fired
++        assert!(shared.unsaved_state_change.load(Ordering::Relaxed));
++        assert!(state_rx.try_recv().is_ok());
++    }
++
++    #[test]
++    fn volume_set_accepts_int32_encoding_from_ubus_cli() {
++        // The ubus CLI encodes JSON integers as INT32, not DOUBLE.
++        let (shared, _state_rx) = fixture_shared_data();
++        let mut object = build_object(&shared);
++        let args = BlobMsgTable::build(|bb| {
++            bb.put_i32(Some("volume"), -10);
++            bb.put_bool(Some("mute"), true);
++        });
++        let reply = call_method(&mut object, "volume_set", args.contents());
++        assert_eq!(
++            blobmsg::lookup(reply.contents(), "volume").and_then(|v| v.as_f64()),
++            Some(-10.0)
++        );
++        assert_eq!(shared.processing_params.target_volume(0), -10.0);
++        assert!(shared.processing_params.is_mute(0));
++    }
++
++    #[test]
++    fn mute_toggle_flips_and_notifies() {
++        let (shared, state_rx) = fixture_shared_data();
++        let mut object = build_object(&shared);
++        let reply = call_method(&mut object, "mute_toggle", &[]);
++        assert_eq!(
++            blobmsg::lookup(reply.contents(), "mute").and_then(|v| v.as_bool()),
++            Some(true)
++        );
++        assert!(shared.processing_params.is_mute(0));
++        assert!(state_rx.try_recv().is_ok());
++        let reply = call_method(&mut object, "mute_toggle", &[]);
++        assert_eq!(
++            blobmsg::lookup(reply.contents(), "mute").and_then(|v| v.as_bool()),
++            Some(false)
++        );
++        assert!(!shared.processing_params.is_mute(0));
++    }
++
++    #[test]
++    fn state_strings_match_websocket_names() {
++        assert_eq!(state_str(ProcessingState::Running), "Running");
++        assert_eq!(state_str(ProcessingState::Paused), "Paused");
++        assert_eq!(state_str(ProcessingState::Inactive), "Inactive");
++        assert_eq!(state_str(ProcessingState::Starting), "Starting");
++        assert_eq!(state_str(ProcessingState::Stalled), "Stalled");
++    }
++
++    #[test]
++    fn stop_reason_without_detail() {
++        assert_eq!(stop_reason_parts(&StopReason::None), ("None", None));
++        assert_eq!(stop_reason_parts(&StopReason::Done), ("Done", None));
++    }
++
++    #[test]
++    fn stop_reason_with_message() {
++        let (name, detail) = stop_reason_parts(&StopReason::PlaybackError("oops".to_string()));
++        assert_eq!(name, "PlaybackError");
++        assert_eq!(detail.as_deref(), Some("oops"));
++    }
++
++    #[test]
++    fn stop_reason_format_change_carries_rate() {
++        let (name, detail) = stop_reason_parts(&StopReason::CaptureFormatChange(48000));
++        assert_eq!(name, "CaptureFormatChange");
++        assert_eq!(detail.as_deref(), Some("48000"));
++    }
++
++    #[test]
++    fn volume_clamped_to_websocket_range() {
++        assert_eq!(clamped_volume(-12.5), -12.5);
++        assert_eq!(clamped_volume(-200.0), -150.0);
++        assert_eq!(clamped_volume(100.0), 50.0);
++    }
++}

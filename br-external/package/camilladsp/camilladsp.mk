@@ -1,7 +1,8 @@
 # camilladsp - flexible audio DSP engine (IIR/FIR, crossovers, room correction)
 # Pinned to v4.1.3 (musl, edition 2024, rust-version 1.90). Buildroot 2026.05.2
 # ships rust 1.96, so no downgrade needed.
-# Features: ALSA backend always built on Linux; websocket for runtime control.
+# Features: ALSA backend always built on Linux; websocket for runtime control;
+# ubus for the native OpenWrt status object (patch 0004, ubus-zero git dep).
 # 32bit feature (float32 processing) is enabled: recommended on 32-bit CPUs.
 # Config is NOT shipped: it is generated at runtime from uci into /tmp
 # (see M6 config-generator integration).
@@ -23,7 +24,7 @@ CAMILLADSP_CARGO_ENV = \
 	CARGO_TARGET_$(call UPPERCASE,$(RUSTC_TARGET_NAME))_RUSTFLAGS="--remap-path-prefix=$(HOST_DIR)=/usr -Clink-arg=-Wl,--allow-multiple-definition -C target-cpu=cortex-a7 -C target-feature=+neon -C target-feature=-crt-static" \
 	RUSTFLAGS="-C target-cpu=cortex-a7 -C target-feature=+neon -C target-feature=-crt-static"
 
-CAMILLADSP_CARGO_BUILD_OPTS = --features 32bit
+CAMILLADSP_CARGO_BUILD_OPTS = --features 32bit,ubus
 
 define CAMILLADSP_BUILD_CMDS
 	cd $(@D) && \
