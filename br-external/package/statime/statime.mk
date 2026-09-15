@@ -9,6 +9,19 @@
 # grandmaster never exports and local inferno instances starve. The patch
 # re-sends the last overlay at 1 Hz while any port is Master so a lone
 # (or leading) node is a valid clock source too.
+#
+# 0003-ptpv1-master.patch: PTPv1 master TX (the fork ships v1 slave only).
+# Adds v1 Sync/Follow_Up/Delay_Resp constructors next to the existing
+# parsers (incl. a fix: the v1 Follow_Up serializer wrote its fields at
+# the wrong offsets and never round-tripped), fills the master.rs stubs
+# (two-step Sync + Follow_Up on TX timestamp, Delay_Resp answering
+# Delay_Req, announce timer re-arm only — v1 has no Announce), and wires
+# the v1 Delay_Req receive path. Identity fields mirror from_v1_header so
+# statime slaves lock onto us (unit-tested with an in-process
+# master<->slave exchange). Stratum 3 / "DFLT" / preferred=priority1<128
+# are unverified Dante dialect facts pending a hardware capture.
+# Regenerate via: git -C deps/statime diff > this file (fuzz 0 applies
+# clean on the pin); drop when the fork merges the upstream PR.
 
 STATIME_VERSION = 244f20a56c173b1881f2e5e83652bb8b8209b2ab
 STATIME_SITE = https://github.com/teodly/statime

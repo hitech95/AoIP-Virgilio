@@ -1,0 +1,1112 @@
+diff --git a/statime/src/datastructures/messages_v1/follow_up.rs b/statime/src/datastructures/messages_v1/follow_up.rs
+index a8d82c2..c13268c 100644
+--- a/statime/src/datastructures/messages_v1/follow_up.rs
++++ b/statime/src/datastructures/messages_v1/follow_up.rs
+@@ -9,9 +9,10 @@ impl FollowUpMessage {
+         12
+     }
+     pub(crate) fn serialize_content(&self, buffer: &mut [u8]) -> Result<(), WireFormatError> {
+-        buffer[0..2].copy_from_slice(&self.associated_sequence_id.to_be_bytes());
++        buffer[0..2].fill(0);
++        buffer[2..4].copy_from_slice(&self.associated_sequence_id.to_be_bytes());
+         self.precise_origin_timestamp
+-            .serialize(&mut buffer[2..10])?;
++            .serialize(&mut buffer[4..12])?;
+         Ok(())
+     }
+     pub(crate) fn deserialize_content(buffer: &[u8]) -> Result<Self, WireFormatError> {
+@@ -22,4 +23,4 @@ impl FollowUpMessage {
+             precise_origin_timestamp,
+         })
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/statime/src/datastructures/messages_v1/mod.rs b/statime/src/datastructures/messages_v1/mod.rs
+index 26fd90d..1a7f144 100644
+--- a/statime/src/datastructures/messages_v1/mod.rs
++++ b/statime/src/datastructures/messages_v1/mod.rs
+@@ -1,11 +1,17 @@
+ //! PTPv1 network messages
+-pub(crate) use sync_or_delay_req::*;
++use crate::PtpInstanceState;
+ pub(crate) use delay_resp::*;
+ pub(crate) use follow_up::*;
+ pub use header::*;
+-use crate::PtpInstanceState;
++pub(crate) use sync_or_delay_req::*;
++
++use crate::time::Time;
+ 
+-use super::{common::{PortIdentity, WireTimestampV1}, datasets::{InternalDefaultDS, InternalParentDS}, messages::EnumConversionError, WireFormatError};
++use super::{
++    common::{GrandmasterPropertiesV1, PortIdentity, WireTimestampV1, V2_COMPAT_PRIORITY1},
++    messages::EnumConversionError,
++    WireFormatError,
++};
+ /* use self::{
+     management::ManagementMessage,
+ }; */
+@@ -13,8 +19,8 @@ use super::{common::{PortIdentity, WireTimestampV1}, datasets::{InternalDefaultD
+     WireFormatError,
+ };
+ use crate::config::ClockIdentity; */
+-mod sync_or_delay_req;
+ mod control_field;
++mod sync_or_delay_req;
+ use control_field::ControlField;
+ mod delay_resp;
+ mod follow_up;
+@@ -26,17 +32,15 @@ mod header;
+ /// `statime`.
+ pub const MAX_DATA_LEN: usize = 255;
+ 
+-
+ /// Checks whether message is PTPv1
+ pub fn is_compatible(buffer: &[u8]) -> bool {
+     // this ensures that versionPTP in the header is 1
+     (buffer.len() >= 2) && (buffer[0] == 0) && (buffer[1] == 1)
+ }
+ 
+-
+ /// Type of message, used to differentiate low-delay and other messages.
+ /// `Event` is low-delay.
+-/// 
++///
+ /// To avoid confusion with PTPv2 MessageType which is functionally equivalent
+ /// to ControlField in PTPv1, PTPv1's messageType is called here PortType
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+@@ -57,7 +61,6 @@ impl TryFrom<u8> for PortType {
+     }
+ }
+ 
+-
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub(crate) struct Message {
+     pub(crate) header: Header,
+@@ -117,7 +120,9 @@ impl MessageBody {
+         buffer: &[u8],
+     ) -> Result<Self, super::WireFormatError> {
+         let body = match message_type {
+-            ControlField::Sync => MessageBody::Sync(SyncMessage::deserialize_content(*header, buffer)?),
++            ControlField::Sync => {
++                MessageBody::Sync(SyncMessage::deserialize_content(*header, buffer)?)
++            }
+             ControlField::DelayReq => {
+                 MessageBody::DelayReq(DelayReqMessage::deserialize_content(*header, buffer)?)
+             }
+@@ -126,20 +131,15 @@ impl MessageBody {
+             }
+             ControlField::DelayResp => {
+                 MessageBody::DelayResp(DelayRespMessage::deserialize_content(buffer)?)
+-            }
+-            /* ControlField::Management => {
+-                MessageBody::Management(ManagementMessage::deserialize_content(buffer)?)
+-            } */
++            } /* ControlField::Management => {
++                  MessageBody::Management(ManagementMessage::deserialize_content(buffer)?)
++              } */
+         };
+         Ok(body)
+     }
+ }
+ 
+-fn base_header(
+-    _default_ds: &InternalDefaultDS,
+-    port_identity: PortIdentity,
+-    sequence_id: u16,
+-) -> Header {
++fn base_header(port_identity: PortIdentity, sequence_id: u16) -> Header {
+     Header {
+         source_uuid: port_identity.clock_identity.0[0..6].try_into().unwrap(),
+         source_port_id: port_identity.port_number,
+@@ -148,6 +148,15 @@ fn base_header(
+     }
+ }
+ 
++// Clock stratum and identifier we advertise for ourselves in master
++// messages. PTPv1 conveys clock quality mainly through these fields; the
++// values are unverified Dante dialect facts (no capture of a real Dante
++// master available yet, see the plan): statime's own v1 master comparison
++// maps the v1 fields onto the v2 comparison and ignores both, so they only
++// matter against native IEEE 1588-2002 implementations.
++const CLOCK_STRATUM: u8 = 3;
++const CLOCK_IDENTIFIER: [u8; 4] = *b"DFLT";
++
+ impl Message {
+     pub(crate) fn header(&self) -> &Header {
+         &self.header
+@@ -163,11 +172,7 @@ impl Message {
+         let (header, rest) = buffer.split_at_mut(40);
+         let (body, _tlv) = rest.split_at_mut(self.body.wire_size());
+         self.header
+-            .serialize_header(
+-                self.body.content_type(),
+-                self.body.wire_size(),
+-                header,
+-            )
++            .serialize_header(self.body.content_type(), self.body.wire_size(), header)
+             .unwrap();
+         self.body.serialize(body).unwrap();
+         Ok(self.wire_size())
+@@ -185,11 +190,8 @@ impl Message {
+         let content_buffer = buffer
+             .get(40..buffer.len())
+             .ok_or(WireFormatError::BufferTooShort)?;
+-        let body = MessageBody::deserialize(
+-            header_data.control,
+-            &header_data.header,
+-            content_buffer,
+-        )?;
++        let body =
++            MessageBody::deserialize(header_data.control, &header_data.header, content_buffer)?;
+         Ok(Message {
+             header: header_data.header,
+             body,
+@@ -202,7 +204,7 @@ impl Message {
+         sequence_id: u16,
+     ) -> Self {
+         let header = Header {
+-            ..base_header(&global.default_ds, port_identity, sequence_id)
++            ..base_header(port_identity, sequence_id)
+         };
+ 
+         Message {
+@@ -213,15 +215,21 @@ impl Message {
+                 epoch_number: 0, // FIXME
+                 current_utc_offset: global.time_properties_ds.current_utc_offset.unwrap_or(0),
+                 // FIXME: what if grandmaster is acquired via PTPv2?
+-                grandmaster: global.parent_ds.grandmaster_v1.expect("parent_ds.grandmaster_v1 not filled but trying to send DelayReq"),
++                grandmaster: global
++                    .parent_ds
++                    .grandmaster_v1
++                    .expect("parent_ds.grandmaster_v1 not filled but trying to send DelayReq"),
+                 sync_interval: 0x7f,
+                 // TODO really? looks like Dante does it this way but is it correct?
+-                local_clock_variance: global.default_ds.clock_quality.offset_scaled_log_variance as i16,
++                local_clock_variance: global.default_ds.clock_quality.offset_scaled_log_variance
++                    as i16,
+                 local_steps_removed: global.current_ds.steps_removed,
+                 local_clock_stratum: 255, // TODO but enough for slave-only
+                 local_clock_identifier: *b"DFLT", // FIXME
+                 parent_communication_technology: 1,
+-                parent_uuid: global.parent_ds.parent_port_identity.clock_identity.0[0..6].try_into().unwrap(),
++                parent_uuid: global.parent_ds.parent_port_identity.clock_identity.0[0..6]
++                    .try_into()
++                    .unwrap(),
+                 parent_port_field: global.parent_ds.parent_port_identity.port_number,
+                 estimated_master_variance: 0,
+                 estimated_master_drift: 0,
+@@ -229,4 +237,264 @@ impl Message {
+             }),
+         }
+     }
++
++    /// Create a Sync message for a port in the master state.
++    ///
++    /// In PTPv1 the Sync message doubles as the PTPv2 Announce: it carries
++    /// the clock quality and grandmaster data the v1 master election runs
++    /// on. The identity fields are filled so that
++    /// [`PortIdentity::from_v1_header`] on the receiving side reconstructs
++    /// our own port identity, and the grandmaster data is taken from the
++    /// parent dataset, mirroring `Message::announce` for PTPv2.
++    ///
++    /// The message is always two-step: `ptp_assist` is set and the precise
++    /// transmit timestamp is delivered in a Follow_Up message (see
++    /// [`Message::follow_up`]).
++    pub(crate) fn sync(
++        global: &PtpInstanceState,
++        port_identity: PortIdentity,
++        sequence_id: u16,
++        sync_interval_log_2: i8,
++    ) -> Self {
++        let header = Header {
++            ptp_assist: true,
++            ..base_header(port_identity, sequence_id)
++        };
++
++        let time_properties_ds = &global.time_properties_ds;
++        let parent_ds = &global.parent_ds;
++
++        Message {
++            header,
++            body: MessageBody::Sync(SyncMessage {
++                header,
++                origin_timestamp: WireTimestampV1::default(),
++                epoch_number: 0, // PTPv1 epoch of a u32 seconds counter: always 0
++                current_utc_offset: time_properties_ds.current_utc_offset.unwrap_or(0),
++                // While sending as master we are the grandmaster ourselves
++                // (parent_ds mirrors default_ds after the M1/M2 decision),
++                // so describing ourselves here is the v1 equivalent of the
++                // grandmaster fields of a v2 Announce.
++                grandmaster: GrandmasterPropertiesV1 {
++                    communication_technology: 1,
++                    clock_uuid: parent_ds.grandmaster_identity.0[0..6].try_into().unwrap(),
++                    port_id: port_identity.port_number,
++                    sequence_id,
++                    clock_stratum: CLOCK_STRATUM,
++                    clock_identifier: CLOCK_IDENTIFIER,
++                    clock_variance: parent_ds
++                        .grandmaster_clock_quality
++                        .offset_scaled_log_variance as i16,
++                    // The v1 wire format has a single `preferred` bit where
++                    // v2 has priority_1; mirror the split point used by the
++                    // v2-compat mapping applied on receive (preferred maps
++                    // to 64, non-preferred to 128).
++                    preferred: parent_ds.grandmaster_priority_1 < V2_COMPAT_PRIORITY1,
++                    is_boundary_clock: false,
++                },
++                sync_interval: sync_interval_log_2,
++                local_clock_variance: global.default_ds.clock_quality.offset_scaled_log_variance
++                    as i16,
++                local_steps_removed: global.current_ds.steps_removed,
++                local_clock_stratum: CLOCK_STRATUM,
++                local_clock_identifier: CLOCK_IDENTIFIER,
++                parent_communication_technology: 1,
++                parent_uuid: parent_ds.parent_port_identity.clock_identity.0[0..6]
++                    .try_into()
++                    .unwrap(),
++                parent_port_field: parent_ds.parent_port_identity.port_number,
++                estimated_master_variance: 0,
++                estimated_master_drift: 0,
++                utc_reasonable: time_properties_ds.current_utc_offset.is_some(),
++            }),
++        }
++    }
++
++    /// Create a Follow_Up message carrying the transmit timestamp of the
++    /// Sync message with the given sequence id.
++    ///
++    /// The PTPv1 timestamp format has nanosecond resolution, so any
++    /// sub-nanosecond part of `timestamp` is dropped.
++    pub(crate) fn follow_up(
++        port_identity: PortIdentity,
++        sequence_id: u16,
++        timestamp: Time,
++    ) -> Self {
++        let header = base_header(port_identity, sequence_id);
++
++        Message {
++            header,
++            body: MessageBody::FollowUp(FollowUpMessage {
++                associated_sequence_id: sequence_id,
++                precise_origin_timestamp: timestamp.into(),
++            }),
++        }
++    }
++
++    /// Create a Delay_Resp message answering a received Delay_Req.
++    ///
++    /// `request_header` is the header of the received Delay_Req; the
++    /// requester identity fields required by PTPv1 are echoed from it so
++    /// the requesting port can match the response to its request.
++    pub(crate) fn delay_resp(
++        request_header: &Header,
++        port_identity: PortIdentity,
++        timestamp: Time,
++    ) -> Self {
++        let header = base_header(port_identity, request_header.sequence_id);
++
++        Message {
++            header,
++            body: MessageBody::DelayResp(DelayRespMessage {
++                receive_timestamp: timestamp.into(),
++                requesting_source_communication_technology: request_header
++                    .source_communication_technology,
++                requesting_source_uuid: request_header.source_uuid,
++                requesting_source_port_id: request_header.source_port_id,
++                requesting_source_sequence_id: request_header.sequence_id,
++            }),
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::{
++        config::InstanceConfig,
++        datastructures::datasets::{InternalDefaultDS, InternalParentDS, PathTraceDS},
++    };
++
++    fn test_state() -> PtpInstanceState {
++        let default_ds = InternalDefaultDS::new(InstanceConfig {
++            clock_identity: crate::config::ClockIdentity([
++                0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0, 1,
++            ]),
++            priority_1: 10,
++            priority_2: 128,
++            domain_number: 0,
++            slave_only: false,
++            sdo_id: Default::default(),
++            path_trace: false,
++        });
++
++        PtpInstanceState {
++            parent_ds: InternalParentDS::new(default_ds),
++            default_ds,
++            current_ds: Default::default(),
++            time_properties_ds: Default::default(),
++            path_trace_ds: PathTraceDS::new(false),
++        }
++    }
++
++    fn test_identity() -> PortIdentity {
++        // The v1 wire format only carries a 6 byte UUID, so identities with
++        // non-zero trailing bytes do not round-trip (statime-linux derives
++        // MAC-based identities which always have zero tails).
++        PortIdentity {
++            clock_identity: crate::config::ClockIdentity([
++                0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0, 0,
++            ]),
++            port_number: 7,
++        }
++    }
++
++    #[test]
++    fn roundtrip_sync() {
++        let message = Message::sync(&test_state(), test_identity(), 4711, -3);
++
++        let mut buffer = [0; MAX_DATA_LEN];
++        let len = message.serialize(&mut buffer).unwrap();
++        assert_eq!(len, 40 + 84);
++
++        let parsed = Message::deserialize(&buffer[..len]).unwrap();
++        assert_eq!(parsed, message);
++    }
++
++    #[test]
++    fn sync_carries_master_data() {
++        let message = Message::sync(&test_state(), test_identity(), 4711, -3);
++
++        // A statime slave must reconstruct our port identity from the header
++        assert_eq!(
++            PortIdentity::from_v1_header(&message.header),
++            test_identity()
++        );
++        // Two-step: the precise timestamp arrives in a follow up
++        assert!(message.header.ptp_assist);
++
++        let MessageBody::Sync(sync) = &message.body else {
++            panic!("wrong message type");
++        };
++        // Election data: us as grandmaster
++        assert_eq!(
++            sync.grandmaster.clock_uuid,
++            [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc]
++        );
++        assert!(sync.grandmaster.preferred); // priority_1 = 10 < 128
++        assert_eq!(sync.sync_interval, -3);
++        assert_eq!(sync.local_steps_removed, 0);
++    }
++
++    #[test]
++    fn roundtrip_follow_up() {
++        let timestamp = Time::from_micros(1_234_567);
++        let message = Message::follow_up(test_identity(), 815, timestamp);
++
++        let mut buffer = [0; MAX_DATA_LEN];
++        let len = message.serialize(&mut buffer).unwrap();
++        assert_eq!(len, 40 + 12);
++
++        let parsed = Message::deserialize(&buffer[..len]).unwrap();
++        assert_eq!(parsed, message);
++    }
++
++    #[test]
++    fn follow_up_timestamp_resolution() {
++        // sub-nanosecond parts do not survive the v1 wire format
++        use fixed::types::U96F32;
++        let timestamp =
++            Time::from_fixed_nanos(U96F32::from_bits((1_234_567_891_u128 << 32) + (1 << 16)));
++        let message = Message::follow_up(test_identity(), 815, timestamp);
++
++        let MessageBody::FollowUp(follow_up) = &message.body else {
++            panic!("wrong message type");
++        };
++        assert_eq!(follow_up.precise_origin_timestamp.seconds, 1);
++        assert_eq!(follow_up.precise_origin_timestamp.nanos, 234_567_891);
++        assert_ne!(Time::from(follow_up.precise_origin_timestamp), timestamp);
++    }
++
++    #[test]
++    fn roundtrip_delay_resp() {
++        let request_header = Header {
++            source_communication_technology: 1,
++            source_uuid: [0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54],
++            source_port_id: 33,
++            sequence_id: 999,
++            ..Default::default()
++        };
++        let timestamp = Time::from_micros(7_654_321);
++        let message = Message::delay_resp(&request_header, test_identity(), timestamp);
++
++        let mut buffer = [0; MAX_DATA_LEN];
++        let len = message.serialize(&mut buffer).unwrap();
++        assert_eq!(len, 40 + 20);
++
++        let parsed = Message::deserialize(&buffer[..len]).unwrap();
++        assert_eq!(parsed, message);
++
++        let MessageBody::DelayResp(resp) = &parsed.body else {
++            panic!("wrong message type");
++        };
++        // requester identity is echoed so the slave can match the response
++        assert_eq!(
++            resp.requesting_source_uuid,
++            [0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54]
++        );
++        assert_eq!(resp.requesting_source_port_id, 33);
++        assert_eq!(resp.requesting_source_sequence_id, 999);
++        assert_eq!(resp.receive_timestamp.seconds, 7);
++        assert_eq!(resp.receive_timestamp.nanos, 654_321_000);
++    }
+ }
+diff --git a/statime/src/port/master.rs b/statime/src/port/master.rs
+index b34c374..f53abef 100644
+--- a/statime/src/port/master.rs
++++ b/statime/src/port/master.rs
+@@ -1,55 +1,97 @@
+ use arrayvec::ArrayVec;
+-use log::warn;
+ 
+ use super::{state::PortState, ForwardedTLVProvider, Port, PortActionIterator, Running};
+ use crate::{
+-    config::ProtocolVersion, datastructures::{
++    config::ProtocolVersion,
++    datastructures::{
+         common::{PortIdentity, Tlv, TlvSetBuilder, TlvType},
+         messages::{DelayReqMessage, Header, Message, MAX_DATA_LEN},
+-    }, filters::Filter, port::{actions::TimestampContextInner, PortAction, TimestampContext}, ptp_instance::PtpInstanceStateMutex, time::Time
++        messages_v1::{self, Message as MessageV1},
++    },
++    filters::Filter,
++    port::{actions::TimestampContextInner, PortAction, TimestampContext},
++    ptp_instance::PtpInstanceStateMutex,
++    time::Time,
+ };
+ 
+ impl<A, C, F: Filter, R, S: PtpInstanceStateMutex> Port<'_, Running, A, R, C, F, S> {
+     pub(super) fn send_sync(&mut self) -> PortActionIterator {
+-        if self.config.protocol_version==ProtocolVersion::PTPv1 {
+-            // TODO
+-            return actions![];
+-        }
+         if matches!(self.port_state, PortState::Master) {
+-            log::trace!("sending sync message");
+-
+-            let seq_id = self.sync_seq_ids.generate();
+-            let packet_length = match self
+-                .instance_state
+-                .with_ref(|state| {
+-                    Message::sync(
+-                        &state.default_ds,
+-                        self.port_identity,
+-                        seq_id,
+-                        self.config.minor_ptp_version.into(),
+-                    )
+-                })
+-                .serialize(&mut self.packet_buffer)
+-            {
+-                Ok(message) => message,
+-                Err(error) => {
+-                    log::error!("Statime bug: Could not serialize sync: {:?}", error);
+-                    return actions![];
+-                }
+-            };
++            if self.config.protocol_version == ProtocolVersion::PTPv1 {
++                log::trace!("sending v1 sync message");
+ 
+-            actions![
+-                PortAction::ResetSyncTimer {
+-                    duration: self.config.sync_interval.as_core_duration(),
+-                },
+-                PortAction::SendEvent {
+-                    context: TimestampContext {
+-                        inner: TimestampContextInner::Sync { id: seq_id },
++                let seq_id = self.sync_seq_ids.generate();
++                let packet_length = match self
++                    .instance_state
++                    .with_ref(|state| {
++                        MessageV1::sync(
++                            state,
++                            self.port_identity,
++                            seq_id,
++                            self.config.sync_interval.as_log_2(),
++                        )
++                    })
++                    .serialize(&mut self.packet_buffer)
++                {
++                    Ok(message) => message,
++                    Err(error) => {
++                        log::error!("Statime bug: Could not serialize v1 sync: {:?}", error);
++                        return actions![];
++                    }
++                };
++
++                // In PTPv1 the Sync message doubles as the Announce of
++                // PTPv2 (master election runs on it), so no separate
++                // announce is sent; the announce timer is still re-armed
++                // by send_announce.
++                actions![
++                    PortAction::ResetSyncTimer {
++                        duration: self.config.sync_interval.as_core_duration(),
+                     },
+-                    data: &self.packet_buffer[..packet_length],
+-                    link_local: false,
+-                }
+-            ]
++                    PortAction::SendEvent {
++                        context: TimestampContext {
++                            inner: TimestampContextInner::Sync { id: seq_id },
++                        },
++                        data: &self.packet_buffer[..packet_length],
++                        link_local: false,
++                    }
++                ]
++            } else {
++                log::trace!("sending sync message");
++
++                let seq_id = self.sync_seq_ids.generate();
++                let packet_length = match self
++                    .instance_state
++                    .with_ref(|state| {
++                        Message::sync(
++                            &state.default_ds,
++                            self.port_identity,
++                            seq_id,
++                            self.config.minor_ptp_version.into(),
++                        )
++                    })
++                    .serialize(&mut self.packet_buffer)
++                {
++                    Ok(message) => message,
++                    Err(error) => {
++                        log::error!("Statime bug: Could not serialize sync: {:?}", error);
++                        return actions![];
++                    }
++                };
++
++                actions![
++                    PortAction::ResetSyncTimer {
++                        duration: self.config.sync_interval.as_core_duration(),
++                    },
++                    PortAction::SendEvent {
++                        context: TimestampContext {
++                            inner: TimestampContextInner::Sync { id: seq_id },
++                        },
++                        data: &self.packet_buffer[..packet_length],
++                        link_local: false,
++                    }
++                ]
++            }
+         } else {
+             actions![]
+         }
+@@ -57,19 +99,24 @@ impl<A, C, F: Filter, R, S: PtpInstanceStateMutex> Port<'_, Running, A, R, C, F,
+ 
+     pub(super) fn handle_sync_timestamp(&mut self, id: u16, timestamp: Time) -> PortActionIterator {
+         if matches!(self.port_state, PortState::Master) {
+-            let packet_length = match self
+-                .instance_state
+-                .with_ref(|state| {
+-                    Message::follow_up(
+-                        &state.default_ds,
+-                        self.port_identity,
+-                        id,
+-                        timestamp,
+-                        self.config.minor_ptp_version.into(),
+-                    )
+-                })
+-                .serialize(&mut self.packet_buffer)
+-            {
++            let packet_length = match self.config.protocol_version {
++                ProtocolVersion::PTPv1 => MessageV1::follow_up(self.port_identity, id, timestamp)
++                    .serialize(&mut self.packet_buffer),
++                ProtocolVersion::PTPv2 => self
++                    .instance_state
++                    .with_ref(|state| {
++                        Message::follow_up(
++                            &state.default_ds,
++                            self.port_identity,
++                            id,
++                            timestamp,
++                            self.config.minor_ptp_version.into(),
++                        )
++                    })
++                    .serialize(&mut self.packet_buffer),
++            };
++
++            let packet_length = match packet_length {
+                 Ok(length) => length,
+                 Err(error) => {
+                     log::error!(
+@@ -93,13 +140,18 @@ impl<A, C, F: Filter, R, S: PtpInstanceStateMutex> Port<'_, Running, A, R, C, F,
+         &mut self,
+         tlv_provider: &mut impl ForwardedTLVProvider,
+     ) -> PortActionIterator {
+-        if self.config.protocol_version==ProtocolVersion::PTPv1 {
+-            // TODO
+-            warn!("trying to act as master in PTPv1, not implemented yet");
++        if self.config.protocol_version == ProtocolVersion::PTPv1 {
++            // PTPv1 does not have separate announce, master metadata is
++            // carried in Sync messages (see send_sync). Only re-arm the
++            // announce timer so the port task keeps cycling like in PTPv2.
++            if matches!(self.port_state, PortState::Master) {
++                return actions![PortAction::ResetAnnounceTimer {
++                    duration: self.config.announce_interval.as_core_duration(),
++                }];
++            }
+             return actions![];
+         }
+-        // PTPv1 does not have separate announce, master metadata is carried in Sync message
+-        if matches!(self.port_state, PortState::Master) && matches!(self.config.protocol_version, ProtocolVersion::PTPv2) {
++        if matches!(self.port_state, PortState::Master) {
+             log::trace!("sending announce message");
+ 
+             let mut tlv_buffer = [0; MAX_DATA_LEN];
+@@ -224,6 +276,32 @@ impl<A, C, F: Filter, R, S: PtpInstanceStateMutex> Port<'_, Running, A, R, C, F,
+         }
+     }
+ 
++    pub(super) fn handle_delay_req_v1(
++        &mut self,
++        header: messages_v1::Header,
++        timestamp: Time,
++    ) -> PortActionIterator {
++        if matches!(self.port_state, PortState::Master) {
++            log::debug!("Received v1 DelayReq");
++            let delay_resp_message = MessageV1::delay_resp(&header, self.port_identity, timestamp);
++
++            let packet_length = match delay_resp_message.serialize(&mut self.packet_buffer) {
++                Ok(length) => length,
++                Err(error) => {
++                    log::error!("Could not serialize v1 delay response: {:?}", error);
++                    return actions![];
++                }
++            };
++
++            actions![PortAction::SendGeneral {
++                data: &self.packet_buffer[..packet_length],
++                link_local: false,
++            }]
++        } else {
++            actions![]
++        }
++    }
++
+     pub(super) fn handle_pdelay_req(
+         &mut self,
+         header: Header,
+@@ -318,7 +396,6 @@ mod tests {
+         let mut port = setup_test_port(&state);
+ 
+         port.set_forced_port_state(PortState::Master);
+-
+         port.config.delay_mechanism = DelayMechanism::E2E {
+             interval: Interval::from_log_2(2),
+         };
+@@ -751,4 +828,379 @@ mod tests {
+         assert!(actions.next().is_none());
+         drop(actions);
+     }
++
++    fn setup_test_port_v1(
++        state: &std::cell::RefCell<crate::PtpInstanceState>,
++    ) -> Port<
++        '_,
++        Running,
++        crate::config::AcceptAnyMaster,
++        rand::rngs::mock::StepRng,
++        crate::port::tests::TestClock,
++        crate::filters::BasicFilter,
++    > {
++        let mut port = setup_test_port(state);
++        port.config.protocol_version = ProtocolVersion::PTPv1;
++        port
++    }
++
++    #[test]
++    fn test_sync_v1() {
++        let state = setup_test_state();
++
++        let mut port = setup_test_port_v1(&state);
++
++        // in slave state a v1 port must not send syncs
++        port.set_forced_port_state(PortState::Slave(crate::port::state::SlaveState::new(
++            PortIdentity::default(),
++        )));
++        let mut actions = port.send_sync();
++        assert!(actions.next().is_none());
++        drop(actions);
++
++        port.set_forced_port_state(PortState::Master);
++
++        let mut actions = port.send_sync();
++
++        assert!(matches!(
++            actions.next(),
++            Some(PortAction::ResetSyncTimer { .. })
++        ));
++        let Some(PortAction::SendEvent {
++            context,
++            data,
++            link_local: false,
++        }) = actions.next()
++        else {
++            panic!("Unexpected action");
++        };
++        assert!(actions.next().is_none());
++        drop(actions);
++
++        let sync = MessageV1::deserialize(data).unwrap();
++        assert_eq!(
++            PortIdentity::from_v1_header(&sync.header),
++            port.port_identity
++        );
++        // two step: the follow up carries the actual send timestamp
++        assert!(sync.header.ptp_assist);
++        let messages_v1::MessageBody::Sync(sync_body) = &sync.body else {
++            panic!("Unexpected message type");
++        };
++        // master data: ourselves as grandmaster
++        assert_eq!(
++            sync_body.grandmaster.clock_uuid,
++            port.port_identity.clock_identity.0[0..6]
++        );
++        assert_eq!(sync_body.sync_interval, 0); // from the test config: 1s
++
++        let TimestampContextInner::Sync { id } = context.inner else {
++            panic!("Wrong type of context");
++        };
++        assert_eq!(id, sync.header.sequence_id);
++
++        // transmit timestamp comes back -> follow up with same sequence id
++        let timestamp = Time::from_micros(601);
++        let mut actions = port.handle_sync_timestamp(id, timestamp);
++
++        let Some(PortAction::SendGeneral {
++            data,
++            link_local: false,
++        }) = actions.next()
++        else {
++            panic!("Unexpected action");
++        };
++        assert!(actions.next().is_none());
++        drop(actions);
++
++        let follow_up = MessageV1::deserialize(data).unwrap();
++        assert_eq!(follow_up.header.sequence_id, sync.header.sequence_id);
++        let messages_v1::MessageBody::FollowUp(follow_up_body) = &follow_up.body else {
++            panic!("Unexpected message type");
++        };
++        assert_eq!(follow_up_body.associated_sequence_id, id);
++        assert_eq!(
++            Time::from(follow_up_body.precise_origin_timestamp),
++            timestamp
++        );
++
++        // next sync gets a fresh sequence id
++        let mut actions = port.send_sync();
++        assert!(matches!(
++            actions.next(),
++            Some(PortAction::ResetSyncTimer { .. })
++        ));
++        let Some(PortAction::SendEvent { data, .. }) = actions.next() else {
++            panic!("Unexpected action");
++        };
++        drop(actions);
++
++        let sync2 = MessageV1::deserialize(data).unwrap();
++        assert_ne!(sync2.header.sequence_id, sync.header.sequence_id);
++    }
++
++    #[test]
++    fn test_announce_v1() {
++        let state = setup_test_state();
++
++        let mut port = setup_test_port_v1(&state);
++
++        port.set_forced_port_state(PortState::Master);
++
++        // PTPv1 has no announce: only the timer must be re-armed
++        let mut actions = port.send_announce(&mut NoForwardedTLVs);
++
++        assert!(matches!(
++            actions.next(),
++            Some(PortAction::ResetAnnounceTimer { .. })
++        ));
++        assert!(actions.next().is_none());
++    }
++
++    #[test]
++    fn test_delay_response_v1() {
++        let state = setup_test_state();
++
++        let mut port = setup_test_port_v1(&state);
++
++        port.set_forced_port_state(PortState::Master);
++
++        let request_header = messages_v1::Header {
++            source_communication_technology: 1,
++            source_uuid: [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
++            source_port_id: 21,
++            sequence_id: 4711,
++            ..Default::default()
++        };
++
++        let timestamp = Time::from_micros(1234);
++        let mut action = port.handle_delay_req_v1(request_header, timestamp);
++
++        let Some(PortAction::SendGeneral {
++            data,
++            link_local: false,
++        }) = action.next()
++        else {
++            panic!("Unexpected resulting action");
++        };
++        assert!(action.next().is_none());
++        drop(action);
++
++        let msg = MessageV1::deserialize(data).unwrap();
++
++        // the response identifies us as its source
++        assert_eq!(
++            PortIdentity::from_v1_header(&msg.header),
++            port.port_identity
++        );
++
++        let messages_v1::MessageBody::DelayResp(msg) = msg.body else {
++            panic!("Unexpected message type");
++        };
++
++        // requester identity is echoed from the delay request header
++        assert_eq!(
++            msg.requesting_source_uuid,
++            [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]
++        );
++        assert_eq!(msg.requesting_source_port_id, 21);
++        assert_eq!(msg.requesting_source_sequence_id, 4711);
++        assert_eq!(Time::from(msg.receive_timestamp), timestamp);
++
++        // a non-master port never answers delay requests
++        port.set_forced_port_state(PortState::Slave(crate::port::state::SlaveState::new(
++            PortIdentity::default(),
++        )));
++        let mut action = port.handle_delay_req_v1(request_header, timestamp);
++        assert!(action.next().is_none());
++    }
++
++    // Capturing filter so tests can inspect the measurements the port
++    // produces (same pattern as the slave tests).
++    struct TestFilter {
++        last_measurement: Option<crate::port::Measurement>,
++    }
++
++    impl crate::filters::Filter for TestFilter {
++        type Config = ();
++
++        fn new(_config: Self::Config) -> Self {
++            Self {
++                last_measurement: None,
++            }
++        }
++
++        fn measurement<C: crate::Clock>(
++            &mut self,
++            m: crate::port::Measurement,
++            _clock: &mut C,
++        ) -> crate::filters::FilterUpdate {
++            self.last_measurement = Some(m);
++            if let Some(delay) = m.delay {
++                crate::filters::FilterUpdate {
++                    next_update: None,
++                    mean_delay: Some(delay),
++                    ..Default::default()
++                }
++            } else {
++                Default::default()
++            }
++        }
++
++        fn demobilize<C: crate::Clock>(self, _clock: &mut C) {
++            Default::default()
++        }
++
++        fn update<C: crate::Clock>(&mut self, _clock: &mut C) -> crate::filters::FilterUpdate {
++            Default::default()
++        }
++
++        fn current_estimates(&self) -> crate::filters::FilterEstimate {
++            unimplemented!()
++        }
++    }
++
++    /// Full PTPv1 exchange between a master port and a slave port through
++    /// their public receive entry points: Sync + Follow_Up produce a sync
++    /// measurement on the slave, Delay_Req + Delay_Resp produce the delay
++    /// measurement. This is the in-process equivalent of the two-guest rig.
++    #[test]
++    fn test_v1_master_slave_exchange() {
++        use crate::port::state::SlaveState;
++        use crate::port::tests::{setup_test_port_custom_filter, setup_test_port_custom_identity};
++        use crate::time::Duration;
++        use std::borrow::ToOwned;
++
++        let master_identity = PortIdentity {
++            clock_identity: crate::config::ClockIdentity([1, 2, 3, 4, 5, 6, 0, 0]),
++            port_number: 1,
++        };
++
++        // master instance with datasets as they look after the M1 master
++        // decision (parent = self)
++        let master_state = setup_test_state();
++        {
++            let mut state = master_state.borrow_mut();
++            state.default_ds.clock_identity = master_identity.clock_identity;
++            state.parent_ds.parent_port_identity = master_identity;
++            state.parent_ds.grandmaster_identity = master_identity.clock_identity;
++        }
++
++        let mut master_port = setup_test_port_custom_identity(&master_state, master_identity);
++        master_port.config.protocol_version = ProtocolVersion::PTPv1;
++        master_port.set_forced_port_state(PortState::Master);
++
++        // slave instance that already selected the master
++        let slave_state = setup_test_state();
++        {
++            let mut state = slave_state.borrow_mut();
++            state.parent_ds.parent_port_identity = master_identity;
++        }
++
++        let mut slave_port = setup_test_port_custom_filter::<TestFilter>(&slave_state, ());
++        slave_port.config.protocol_version = ProtocolVersion::PTPv1;
++        slave_port.set_forced_port_state(PortState::Slave(SlaveState::new(master_identity)));
++
++        // symmetric 500us path between the two
++        let t_sync_send = Time::from_micros(1_000_000);
++        let t_sync_recv = Time::from_micros(1_000_500);
++
++        // ---- Sync (event) ----
++        let mut actions = master_port.send_sync();
++        assert!(matches!(
++            actions.next(),
++            Some(PortAction::ResetSyncTimer { .. })
++        ));
++        let Some(PortAction::SendEvent { context, data, .. }) = actions.next() else {
++            panic!("Unexpected action");
++        };
++        let sync_packet = data.to_owned();
++        let TimestampContextInner::Sync { id: sync_id } = context.inner else {
++            panic!("Wrong type of context");
++        };
++        drop(actions);
++
++        // slave receives it: registers the master (announce data rides
++        // along) and stores the receive time, expecting a follow up
++        let mut actions = slave_port.handle_event_receive(&sync_packet, t_sync_recv);
++        assert!(matches!(
++            actions.next(),
++            Some(PortAction::ResetAnnounceReceiptTimer { .. })
++        ));
++        assert!(actions.next().is_none());
++        drop(actions);
++
++        // ---- Follow_Up (general), carrying the sync send timestamp ----
++        let mut actions = master_port.handle_sync_timestamp(sync_id, t_sync_send);
++        let Some(PortAction::SendGeneral { data, .. }) = actions.next() else {
++            panic!("Unexpected action");
++        };
++        let follow_up_packet = data.to_owned();
++        assert!(actions.next().is_none());
++        drop(actions);
++
++        let mut actions = slave_port.handle_general_receive(&follow_up_packet);
++        assert!(actions.next().is_none());
++        drop(actions);
++
++        // sync measurement: raw offset +500us, no delay known yet
++        assert_eq!(
++            slave_port.filter.last_measurement.take(),
++            Some(crate::port::Measurement {
++                event_time: t_sync_recv,
++                offset: None,
++                delay: None,
++                peer_delay: None,
++                raw_sync_offset: Some(Duration::from_micros(500)),
++                raw_delay_offset: None,
++            })
++        );
++
++        // ---- Delay_Req (event, from slave) ----
++        let t_delay_send = Time::from_micros(2_000_000);
++        let t_delay_recv = Time::from_micros(2_000_500);
++
++        let mut actions = slave_port.send_delay_request();
++        assert!(matches!(
++            actions.next(),
++            Some(PortAction::ResetDelayRequestTimer { .. })
++        ));
++        let Some(PortAction::SendEvent { context, data, .. }) = actions.next() else {
++            panic!("Unexpected action");
++        };
++        let delay_req_packet = data.to_owned();
++        drop(actions);
++
++        // master answers with a Delay_Resp echoing the requester identity
++        let mut actions = master_port.handle_event_receive(&delay_req_packet, t_delay_recv);
++        let Some(PortAction::SendGeneral { data, .. }) = actions.next() else {
++            panic!("Unexpected action");
++        };
++        let delay_resp_packet = data.to_owned();
++        assert!(actions.next().is_none());
++        drop(actions);
++
++        // slave learns its own delay request send time, then the response
++        let mut actions = slave_port.handle_send_timestamp(context, t_delay_send);
++        assert!(actions.next().is_none());
++        drop(actions);
++
++        let mut actions = slave_port.handle_general_receive(&delay_resp_packet);
++        assert!(actions.next().is_none());
++        drop(actions);
++
++        // delay measurement: path delay 500us
++        assert_eq!(
++            slave_port.filter.last_measurement.take(),
++            Some(crate::port::Measurement {
++                event_time: t_delay_send,
++                offset: None,
++                delay: Some(Duration::from_micros(500)),
++                peer_delay: None,
++                raw_sync_offset: None,
++                raw_delay_offset: Some(Duration::from_micros(-500)),
++            })
++        );
++        assert_eq!(slave_port.mean_delay, Some(Duration::from_micros(500)));
++    }
+ }
+diff --git a/statime/src/port/mod.rs b/statime/src/port/mod.rs
+index d9a5461..faeb29c 100644
+--- a/statime/src/port/mod.rs
++++ b/statime/src/port/mod.rs
+@@ -8,7 +8,6 @@ pub use actions::{
+     ForwardedTLV, ForwardedTLVProvider, NoForwardedTLVs, PortAction, PortActionIterator,
+     TimestampContext,
+ };
+-use log::warn;
+ pub use measurement::Measurement;
+ use rand::Rng;
+ use state::PortState;
+@@ -540,10 +539,7 @@ impl<'a, A: AcceptableMasterList, C: Clock, F: Filter, R: Rng, S: PtpInstanceSta
+                         actions1.concat(actions2)
+                     },
+                     MessageBodyV1::DelayReq(_delay_request) => {
+-                        // TODO
+-                        warn!("got DelayReq, master operation not implemented yet for PTPv1");
+-                        //self.handle_delay_req(message.header, delay_request, timestamp)
+-                        actions![]
++                        self.handle_delay_req_v1(message.header, timestamp)
+                     }
+                     _ => self.handle_general_internal_v1(message),
+                 }
