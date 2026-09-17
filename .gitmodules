@@ -5,6 +5,10 @@
 	path = deps/inferno
 	url = https://github.com/teodly/inferno.git
 	branch = dev
+[submodule "deps/oui"]
+	path = deps/oui
+	url = https://github.com/zhaojh329/oui.git
+
 [submodule "buildroot"]
 	path = buildroot
 	url = https://github.com/buildroot/buildroot.git
