@@ -159,6 +159,13 @@ if [ -n "${NO_MGMT:-}" ]; then
   MGMT_ARGS=()
 fi
 
+# simple mode marker: the single eth0 IS the management NIC (slirp DHCP +
+# internet). single-nic-fixup reads it at START=05 to keep network.lan on
+# DHCP instead of demoting it (which would only be right for --no-mgmt
+# rig boots, where the single NIC is the Dante segment).
+APPEND_EXTRA=""
+[ "$NET" = "user" ] && APPEND_EXTRA=" virgilio-net=slirp"
+
 DISPLAY_ARGS=(-nographic)
 case "${CONSOLE}" in
   stdio) : ;;
@@ -170,7 +177,7 @@ esac
 exec qemu-system-arm \
   -M virt,highmem=off -cpu cortex-a7 -smp "${SMP}" -m "${MEM}M" -snapshot "${DISPLAY_ARGS[@]}" \
   -kernel "${IMAGES}/zImage" \
-  -append "console=ttyAMA0,115200 rw rootwait root=/dev/vda" \
+  -append "console=ttyAMA0,115200 rw rootwait root=/dev/vda${APPEND_EXTRA}" \
   "${MGMT_ARGS[@]}" \
   "${NET_ARGS[@]}" \
   -drive file="${IMAGES}/rootfs.ext4",if=none,format=raw,id=hd0 \

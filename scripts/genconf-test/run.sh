@@ -102,12 +102,40 @@ rc=0; out=$(UCI_CONFIG_DIR="$WORK/neg" "$WORK/genconf" "$WORK/neg.yml" 2>&1) || 
 	|| bad "non-contiguous subchains (rc=$rc: $out)"
 
 # slot step carrying a type
-neg "slot step with type" "no type/filters" \
+neg "slot step with type" "must have no type" \
 	sh -c "python3 -c \"import sys; p='camilladsp'; s=open(p).read(); s=s.replace(\\\"option index '10'\\\\n\\\\toption subchain 'user_in0'\\\", \\\"option index '10'\\\\n\\\\toption subchain 'user_in0'\\\\n\\\\toption type 'Filter'\\\"); open(p,'w').write(s)\""
 
 # free subchain with a non-locked anchor
 neg "free with non-locked anchor" "not locked" \
 	sh -c 'printf "\nconfig subchain\n\toption name '\''user_x'\''\n\toption policy '\''free'\''\n\toption channels '\''0'\''\n\toption allow '\''gain'\''\n\tlist allowed_after '\''user_in0'\''\nconfig step\n\toption index '\''12'\''\n\toption subchain '\''user_x'\''\n" >> camilladsp'
+
+# ---- 2b. user steps in editable slots (webui filters page) ------------------
+rm -rf "$WORK/user"; mkdir -p "$WORK/user"; cp "$T/protected-2way.uci" "$WORK/user/camilladsp"
+(
+	cd "$WORK/user"
+	printf "\nconfig filter\n\toption name 'u_eq100'\n\toption type 'peak'\n\toption f '100'\n\toption gain '3.0'\n\toption q '1.0'\nconfig filter\n\toption name 'u_pad'\n\toption type 'gain'\n\toption gain '-2.0'\n" >> camilladsp
+	sed -i "s|option subchain 'user_in0'|option subchain 'user_in0'\n\tlist names 'u_eq100'\n\tlist names 'u_pad'|" camilladsp
+)
+rc=0; out=$(UCI_CONFIG_DIR="$WORK/user" "$WORK/genconf" "$WORK/user.yml" 2>&1) || rc=$?
+if [ "$rc" -eq 0 ] && grep -q "names: \[user_slot_user_in0, u_eq100, u_pad\]" "$WORK/user.yml"; then
+	ok "user steps render after placeholder"
+else
+	bad "user steps render (rc=$rc: $(echo "$out" | head -1))"
+fi
+if [ "$rc" -eq 0 ] && grep -q "u_eq100" "$WORK/user.policy" 2>/dev/null; then
+	bad "user steps must not leak into the policy"
+else
+	ok "policy unchanged by user steps"
+fi
+
+neg "user filter type not allowed" "not in allow list" \
+	sh -c "printf \"\nconfig filter\n\toption name 'u_lp'\n\toption type 'lrlp'\n\toption f '100'\n\" >> camilladsp && sed -i \"s|option subchain 'user_in0'|option subchain 'user_in0'\n\tlist names 'u_lp'|\" camilladsp"
+
+neg "user steps exceed max_steps" "exceed max_steps" \
+	sh -c "for i in 1 2 3 4 5 6 7 8 9; do printf \"\nconfig filter\n\toption name 'u_g\$i'\n\toption type 'gain'\n\toption gain '0'\n\" >> camilladsp; printf \"\tlist names 'u_g\$i'\n\" >> /dev/null; done; sed -i \"s|option subchain 'user_in0'|option subchain 'user_in0'\n\tlist names 'u_g1'\n\tlist names 'u_g2'\n\tlist names 'u_g3'\n\tlist names 'u_g4'\n\tlist names 'u_g5'\n\tlist names 'u_g6'\n\tlist names 'u_g7'\n\tlist names 'u_g8'\n\tlist names 'u_g9'|\" camilladsp"
+
+neg "user filter undefined" "is not defined" \
+	sed -i "s|option subchain 'user_in0'|option subchain 'user_in0'\n\tlist names 'u_ghost'|" camilladsp
 
 # ---- 3. legacy: no subchains ------------------------------------------------
 rm -rf "$WORK/legacy"; mkdir -p "$WORK/legacy"
