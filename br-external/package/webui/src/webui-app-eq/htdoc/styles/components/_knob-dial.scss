@@ -1,0 +1,29 @@
+// KnobDial.vue
+.knob-dial {
+  display: block;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.knob-dial.dragging {
+  cursor: ns-resize;
+}
+
+.knob-dial .knob-body {
+  fill: var(--el-fill-color-dark);
+  stroke: var(--el-border-color);
+  stroke-width: 1;
+}
+
+.knob-dial .knob-arc {
+  stroke: var(--knob-arc, var(--el-color-primary));
+  stroke-linecap: butt;
+  fill: none;
+  opacity: 0.95;
+  transition: opacity 0.15s ease;
+}
+
+.knob-dial:hover .knob-arc {
+  opacity: 1;
+}

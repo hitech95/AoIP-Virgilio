@@ -1,0 +1,208 @@
+// Response plot: labels, graph surface, gain scale, and draggable band tokens.
+
+$plot-label-gutter: 40px;
+$plot-cell-gap: 4px;
+
+.eq-page {
+  .plot-card {
+    /* The aside reserves the accordion height first; this receives only the
+       remaining space and can shrink below the graph's intrinsic dimensions. */
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    > .plot-card__layout {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+    }
+
+    &__layout {
+      min-width: 0;
+    }
+
+    &__labels {
+      /* Same fixed height as the filter-card headers: keeps the slider zone
+         vertically aligned with the plot area. */
+      flex: 0 0 var(--eq-align-head);
+      height: var(--eq-align-head);
+      box-sizing: border-box;
+      padding: 0 $plot-label-gutter 1px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    &__main {
+      /* Element Plus el-main defaults to overflow:auto. The aside is the
+         vertical scroll owner; this pane only constrains the scalable plot.
+         The top gap mirrors the fader cards so slider and plot stay aligned. */
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      padding: var(--eq-fader-gap) 0 0;
+      overflow: hidden;
+    }
+
+    &__axis {
+      flex: 0 0 var(--eq-axis-h);
+      height: var(--eq-axis-h);
+      min-height: 0;
+      padding: 4px var(--eq-gainscale-w) 0 0;
+    }
+  }
+
+  .octaves,
+  .regions {
+    display: grid;
+    gap: $plot-cell-gap;
+  }
+
+  .cell {
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 3px;
+    background: var(--el-fill-color);
+    color: var(--el-text-color-secondary);
+
+    &.spacer {
+      background: transparent;
+      border-color: transparent;
+    }
+  }
+
+  .freq-track {
+    position: relative;
+    height: 100%;
+  }
+
+  .freq-label {
+    position: absolute;
+    transform: translateX(-50%);
+    font-size: var(--el-font-size-extra-small);
+    color: var(--el-text-color-secondary);
+    white-space: nowrap;
+  }
+
+  .eq-plot-area {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr var(--eq-gainscale-w);
+  }
+
+  .eq-plot {
+    position: relative;
+    height: 100%;
+    min-height: 0;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 4px;
+    background: var(--eq-plot-bg);
+
+    svg.eq-plot-svg {
+      position: relative;
+      z-index: 1;
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  }
+
+  .eq-spectrum-canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    border-radius: 3px;
+  }
+
+  .eq-gainscale {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .gain-label {
+    position: absolute;
+    width: 100%;
+    transform: translateY(-50%);
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--el-text-color-secondary);
+    text-align: center;
+    white-space: nowrap;
+
+    &-zero {
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+    }
+  }
+
+  .tokens {
+    .token-group {
+      transition: opacity 0.2s ease;
+
+      &.dimmed { opacity: 0.3; }
+    }
+
+    .token-halo { transition: opacity 0.2s ease; }
+    .token-arc { transition: opacity 0.15s ease; }
+
+    .token-index {
+      fill: var(--el-text-color-primary);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      user-select: none;
+    }
+
+    .token-label-freq {
+      font-size: 14px;
+      font-weight: 600;
+      user-select: none;
+
+      .freq-number { fill: var(--band-color); }
+
+      .freq-unit {
+        fill: color-mix(in srgb, var(--band-color) 70%, transparent);
+        font-size: 14px;
+      }
+    }
+
+    .token-label-q {
+      fill: color-mix(in srgb, var(--band-color) 70%, transparent);
+      font-size: 14px;
+      font-weight: 500;
+      user-select: none;
+    }
+
+    .token-labels { transition: transform 120ms ease-out; }
+    .band-token-ring { transition: stroke-width 0.15s ease; }
+
+    .band-token-hitarea {
+      cursor: grab;
+      touch-action: none;
+
+      &.shift-mode { cursor: ns-resize; }
+      &:hover + .band-token-ring { stroke-width: 4; }
+      &:active { cursor: grabbing; }
+      &.shift-mode:active { cursor: ns-resize; }
+      &[data-selected='true'] {
+        filter: drop-shadow(0 0 6px color-mix(in srgb, currentColor 45%, transparent));
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+// eq.scss — EQ page stylesheet (Element Plus theme aware).
+// All colors resolve from Element Plus CSS variables so the page follows the
+// Oui light/dark theme automatically.
+
+@use './variables';
+@use './layout';
+@use './plot';
+@use './bands';
+@use './vizbar';
+@use './components/knob-dial';
+@use './components/band-order-icon';

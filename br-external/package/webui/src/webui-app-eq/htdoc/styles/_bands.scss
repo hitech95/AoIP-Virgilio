@@ -1,0 +1,430 @@
+// Filter controls: preamp/band cards and their picker/settings popovers.
+
+$band-card-width: 75px;
+$preamp-card-width: 75px;
+$control-transition: 0.15s ease;
+
+.eq-page {
+  .band-card,
+  .preamp-card {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+
+    > .el-card__body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    > .el-card__footer {
+      box-sizing: border-box;
+      flex: 0 0 var(--eq-align-foot);
+      height: var(--eq-align-foot);
+      min-height: 0;
+      padding: 0;
+    }
+
+    /* Same fixed height as the chart labels header: keeps the slider zone
+       aligned with the plot area so 0 dB sits on the chart 0 dB line.
+       Narrow cards stack the header controls in two compact rows. */
+    > .el-card__header {
+      box-sizing: border-box;
+      flex: 0 0 var(--eq-align-head);
+      height: var(--eq-align-head);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      padding: 0 4px;
+    }
+
+    /* Fader zone: flex-fills the space between header and foot so it is
+       geometrically identical to the chart plot area; the top gap mirrors
+       the plot pane's gap so the slider matches the chart edges. */
+    .gain-slider {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 4px;
+    }
+
+    .gain-area {
+      height: 100%;
+
+      &.dim {
+        opacity: 0.35;
+        pointer-events: none;
+      }
+    }
+
+    .el-slider.is-vertical {
+      height: 100%;
+    }
+
+    /* The full runway maps exactly to the chart's full ±24 dB area. */
+    .el-slider__runway {
+      margin: 0 !important;
+      height: 100% !important;
+    }
+
+    /* Fader accent follows the band color shared with the graph tokens and
+       the selected-card border. */
+    .el-slider__bar {
+      background: var(--band-color);
+    }
+
+    .el-slider__button {
+      border-color: var(--band-color);
+    }
+
+    /* Gain scale dots (6 dB steps); labels hidden, marks never grab input. */
+    .el-slider__marks {
+      pointer-events: none;
+    }
+
+    .el-slider__marks-stop {
+      width: 4px;
+      height: 4px;
+      border: none;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      background: var(--el-text-color-secondary);
+      opacity: 0.55;
+    }
+
+    .el-slider__marks-text {
+      display: none;
+    }
+
+    /* Foot zone: matches chart axis row + accordion height. Unlabeled
+       Gain/Hz/Q steppers; the preamp footer holds the row labels. */
+    .card-foot {
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      gap: 4px;
+      padding: 0 4px 8px;
+    }
+
+    .f-row {
+      min-height: 24px;
+      display: flex;
+      align-items: center;
+    }
+
+    /* Matches the mute-switch row in the band cards so the preamp labels
+       keep aligning with the steppers below it. */
+    .f-spacer {
+      height: 20px;
+    }
+
+    .f-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--el-text-color-secondary);
+    }
+
+    /* Mute switch row: sits between the gain and frequency steppers. */
+    .switch-row {
+      display: flex;
+      justify-content: center;
+
+      .el-switch {
+        --el-switch-on-color: var(--band-color);
+      }
+    }
+
+    /* Compact stepper: value field + stacked +/− buttons. */
+    .f-stepper {
+      display: flex;
+      align-items: stretch;
+      gap: 2px;
+      height: 24px;
+      min-width: 0;
+    }
+
+    .f-input {
+      flex: 1;
+      width: 100%;
+      min-width: 0;
+      height: 24px;
+
+      .el-input__inner {
+        height: 24px;
+        line-height: 24px;
+        padding: 0 2px;
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+      }
+    }
+
+    .f-btns {
+      flex: 0 0 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .f-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 3px;
+      background: var(--el-fill-color-blank);
+      color: var(--el-text-color-regular);
+      font-size: 10px;
+      line-height: 1;
+      cursor: pointer;
+
+      &:hover:not(:disabled) {
+        border-color: var(--el-color-primary);
+        color: var(--el-color-primary);
+      }
+
+      &:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  .preamp-card {
+    flex: 0 0 auto;
+    width: $preamp-card-width;
+    opacity: 0.85;
+
+    > .el-card__body {
+      justify-content: flex-start;
+      padding: 0;
+    }
+
+    .card-head {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--el-text-color-secondary);
+    }
+
+    .body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      /* Mirrors the band cards' header-to-fader gap. */
+      padding-top: var(--eq-fader-gap);
+    }
+  }
+
+  .band-card {
+    flex: 0 0 auto;
+    width: $band-card-width;
+
+    > .el-card__body { padding: 0; }
+
+    &.selected {
+      /* Paint on the card's own border + an inset ring: an outside
+         box-shadow gets clipped by the rail's scroll edges. */
+      border-color: var(--band-color);
+      box-shadow: inset 0 0 0 1px var(--band-color);
+    }
+    &.muted { opacity: 0.6; }
+
+    /* Solo editing keeps the active card readable. */
+    &.solo-dim {
+      opacity: 0.25;
+      pointer-events: none;
+      transition: opacity $control-transition;
+    }
+
+    .card-head,
+    .head-icons {
+      display: flex;
+      align-items: center;
+    }
+
+    .card-head {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .head-icons {
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .order-icon {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      color: var(--band-color);
+    }
+
+    .type-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 5px;
+      background: transparent;
+      color: var(--band-color);
+      cursor: pointer;
+      transition: all $control-transition;
+
+      .icon {
+        width: 16px;
+        height: 16px;
+      }
+
+      &:not(:disabled):hover {
+        border-color: var(--band-color);
+        background: var(--el-fill-color-light);
+      }
+
+      &:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+    }
+
+    .band-body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      /* Breathing room between header and fader; mirrored on the plot pane
+         so the slider and chart edges stay aligned. */
+      padding-top: var(--eq-fader-gap);
+    }
+  }
+}
+
+.filter-type-picker {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+
+  .filter-option.el-button {
+    margin: 0;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    padding: 6px 2px;
+  }
+
+  .f-opt {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .opt-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .opt-label {
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.1;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .opt-subtitle {
+    font-size: 9px;
+    line-height: 1.1;
+    text-align: center;
+    white-space: normal;
+    color: var(--el-text-color-secondary);
+  }
+
+  /* Hover/focus follows the owning band's accent, never Element Plus blue. */
+  .filter-option.el-button:not(.is-current):hover,
+  .filter-option.el-button:not(.is-current):focus {
+    border-color: color-mix(in srgb, var(--band-color) 45%, var(--el-bg-color));
+    background: color-mix(in srgb, var(--band-color) 12%, var(--el-bg-color));
+    color: var(--band-color);
+  }
+
+  .filter-option.el-button:not(.is-current):hover .opt-subtitle {
+    color: var(--band-color);
+    opacity: 0.75;
+  }
+
+  /* Current type: band-accent tints, slightly stronger than hover. */
+  .filter-option.is-current {
+    border-color: color-mix(in srgb, var(--band-color) 45%, var(--el-bg-color));
+    background: color-mix(in srgb, var(--band-color) 12%, var(--el-bg-color));
+    color: var(--band-color);
+
+    &:hover,
+    &:focus {
+      border-color: var(--band-color);
+      background: color-mix(in srgb, var(--band-color) 20%, var(--el-bg-color));
+      color: var(--band-color);
+    }
+
+    .opt-subtitle {
+      color: var(--band-color);
+      opacity: 0.75;
+    }
+  }
+}
+
+.heatmap-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  .section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .knob-row {
+    display: grid;
+    grid-template-columns: 56px 1fr 38px;
+    align-items: center;
+  }
+
+  .label,
+  .val {
+    font-size: 12px;
+  }
+
+  .label { color: var(--el-text-color-secondary); }
+
+  .val {
+    font-variant-numeric: tabular-nums;
+    color: var(--el-text-color-regular);
+    text-align: right;
+  }
+}

@@ -1,0 +1,77 @@
+// Custom design tokens for the EQ page: plot grid alphas, band palette and
+// accent colors. Everything else comes from Element Plus vars.
+
+.eq-page {
+  /* Shared vertical alignment tokens.
+     The band sliders align 0 dB with the chart 0 dB line:
+     card header == chart header, card foot == axis row + accordion height.
+     --eq-fader-gap is applied above BOTH the plot surface and the fader so
+     the slider keeps matching the chart edges with visible breathing room. */
+  --eq-align-head: 35px;
+  --eq-axis-h: 24px;
+  --eq-vizbar-h: 120px;
+  --eq-align-foot: calc(var(--eq-axis-h) + var(--eq-vizbar-h));
+  --eq-fader-gap: 16px;
+
+  /* Gain scale column width (right of the plot). Other styles (e.g. the
+     visualization bar margin) reference this so they stay in sync. */
+  --eq-gainscale-w: 32px;
+
+  /* Plot grid & curve tokens (derived from EP text color -> theme aware) */
+  --eq-grid-line: color-mix(in srgb, var(--el-text-color-primary) 8%, transparent);
+  --eq-grid-line-major: color-mix(in srgb, var(--el-text-color-primary) 16%, transparent);
+  --eq-zero-line: color-mix(in srgb, var(--el-text-color-primary) 35%, transparent);
+  /* Neutral dashed sum curve: intentionally distinct from all band colors
+     and the colored spectrum analyzer traces. */
+  --eq-sum-curve: var(--el-text-color-primary);
+  --eq-plot-bg: var(--el-fill-color-light);
+  --eq-token-fill: var(--el-bg-color);
+}
+
+/* Band palette — light theme (dark enough to read on light backgrounds).
+   Declared on :root so teleported popovers (filter type picker) can use it. */
+:root {
+  --band-1: hsl(205 85% 42%);
+  --band-2: hsl(38 90% 38%);
+  --band-3: hsl(140 70% 36%);
+  --band-4: hsl(285 65% 50%);
+  --band-5: hsl(18 85% 44%);
+  --band-6: hsl(190 85% 36%);
+  --band-7: hsl(330 70% 46%);
+  --band-8: hsl(95 65% 32%);
+  --band-9: hsl(260 70% 52%);
+  --band-10: hsl(210 8% 45%);
+}
+
+/* Band palette — dark theme (CamillaEQ's brighter hues) */
+html.dark {
+  --band-1: hsl(205 90% 62%);
+  --band-2: hsl(45 95% 58%);
+  --band-3: hsl(140 70% 55%);
+  --band-4: hsl(285 80% 65%);
+  --band-5: hsl(18 90% 60%);
+  --band-6: hsl(190 85% 55%);
+  --band-7: hsl(330 80% 66%);
+  --band-8: hsl(95 70% 55%);
+  --band-9: hsl(260 85% 68%);
+  --band-10: hsl(0 0% 72%);
+}
+
+/* Band-scoped accent variables (used by band cards and plot tokens) */
+.eq-page .band {
+  --band-color: var(--band-1);
+  --band-ink: color-mix(in srgb, var(--band-color) 70%, var(--el-text-color-primary) 30%);
+  --band-muted: color-mix(in srgb, var(--band-color) 18%, transparent);
+}
+
+/* Shared filter-type icon (band cards + type picker) */
+.eq-page .icon {
+  width: 20px;
+  height: 20px;
+  color: var(--band-ink);
+  opacity: 0.95;
+}
+
+.eq-page .band[data-enabled='false'] .icon {
+  opacity: 0.55;
+}
