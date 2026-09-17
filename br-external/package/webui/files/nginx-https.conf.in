@@ -1,0 +1,12 @@
+# HTTPS server block (template; @CERT@/@KEY@ substituted by the init
+# script from uci webui.tls.{cert,key}; installed when enable=1)
+server {
+	listen 443 ssl;
+	listen [::]:443 ssl;
+
+	ssl_protocols TLSv1.2 TLSv1.3;
+	ssl_certificate @CERT@;
+	ssl_certificate_key @KEY@;
+
+	include /etc/nginx/webui-locations.conf;
+}

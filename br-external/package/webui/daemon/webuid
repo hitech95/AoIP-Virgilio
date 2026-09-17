@@ -1,0 +1,53 @@
+#!/usr/bin/ucode -L /usr/share/webui/ucode
+/*
+ * webuid -- the webui RPC daemon (plan/webui.md §4-5).
+ *
+ * Composition root of the module tree in /usr/share/webui/ucode/:
+ *   util, http, sessions, auth, ubusx, ucix, dsp, filesx, menus,
+ *   mods_* -> rpcmods, rpc, scgix
+ *
+ * Endpoints (nginx routes): /_auth (auth_request), /oui-rpc (JSON RPC),
+ * /oui-upload (multipart). Runs as root (shadow read, uci commit,
+ * genconf exec); the SCGI socket is 0660 root:www-data.
+ *
+ * argv: [socket-path [shadow-path]]   (defaults: /run/webui.sock /etc/shadow)
+ */
+
+import * as uloop from "uloop";
+import { unlink } from "fs";
+import { log_err, shq } from "util";
+import { http_response } from "http";
+import { session_sweep, SESSION_SWEEP_MS } from "sessions";
+import * as auth from "auth";
+import { handle_rpc, handle_auth } from "rpc";
+import { handle_upload } from "filesx";
+import { scgi_serve } from "scgix";
+
+const SOCK_PATH = (length(ARGV) > 0) ? ARGV[0] : "/run/webui.sock";
+
+auth.init((length(ARGV) > 1) ? ARGV[1] : null);
+
+/* route: env + body + connection-bound reply sink + uri -> resp|null
+ * (null = answered asynchronously via the sink) */
+function route(env, body, reply, uri) {
+	if (uri == "/_auth")
+		return handle_auth(env);
+	if (uri == "/oui-upload") {
+		handle_upload(env, body, reply);
+		return null;
+	}
+	if (substr(uri, 0, 5) == "/oui-") {
+		handle_rpc(env, body, reply);
+		return null;                    /* handle_rpc always replies */
+	}
+	return http_response(404, '{"error":{"code":-1,"message":"no endpoint"}}');
+}
+
+uloop.init();
+scgi_serve(SOCK_PATH, route);
+uloop.interval(SESSION_SWEEP_MS, session_sweep);
+
+log_err("webuid listening on %s (contract v1)", [SOCK_PATH]);
+uloop.run();
+
+try { unlink(SOCK_PATH); } catch (e) {}

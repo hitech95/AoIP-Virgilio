@@ -1,0 +1,15 @@
+config BR2_PACKAGE_WEBUI
+	bool "webui"
+	depends on BR2_PACKAGE_UCODE
+	select BR2_PACKAGE_NGINX
+	select BR2_PACKAGE_NGINX_HTTP_SCGI_MODULE
+	select BR2_PACKAGE_NGINX_HTTP_AUTH_REQUEST_MODULE
+	select BR2_PACKAGE_NGINX_HTTP_GZIP_STATIC_MODULE
+	select BR2_PACKAGE_NGINX_HTTP_SSL_MODULE
+	help
+	  Minimal appliance web UI: nginx front (static SPA, auth-gated
+	  websocket proxy to camilladsp) + webuid, a ucode daemon speaking
+	  SCGI and implementing the OUI-style JSON RPC contract with
+	  /etc/shadow login (plan/webui.md).
+
+	  https://github.com/../../plan/webui.md
