@@ -1,0 +1,25 @@
+{
+  "en": {
+    "Interface": "Interface",
+    "Protocol": "Protocol",
+    "Static": "Static",
+    "IP address": "IP address",
+    "Netmask": "Netmask",
+    "Gateway": "Gateway",
+    "DNS": "DNS",
+    "optional, space separated": "optional, space separated",
+    "Save & Apply": "Save & Apply",
+    "Configuration has been applied": "Configuration has been applied",
+    "Failed to apply": "Failed to apply",
+    "Changing these settings can lock you out of the web UI. Double-check the address before applying.": "Changing these settings can lock you out of the web UI. Double-check the address before applying."
+  },
+  "it": {
+    "Interface": "Interfaccia",
+    "Protocol": "Protocollo",
+    "Static": "Statico",
+    "IP address": "Indirizzo IP",
+    "Netmask": "Netmask",
+    "Gateway": "Gateway",
+    "Save & Apply": "Salva e applica"
+  }
+}

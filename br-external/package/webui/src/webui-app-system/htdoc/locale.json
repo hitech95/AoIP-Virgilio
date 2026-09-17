@@ -1,0 +1,16 @@
+{
+  "en": {
+    "Hostname": "Hostname",
+    "Timezone": "Timezone",
+    "Save & Apply": "Save & Apply",
+    "Configuration has been applied": "Configuration has been applied",
+    "Failed to apply": "Failed to apply",
+    "This field is required": "This field is required",
+    "Invalid hostname": "Invalid hostname"
+  },
+  "it": {
+    "Hostname": "Nome host",
+    "Timezone": "Fuso orario",
+    "Save & Apply": "Salva e applica"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "en": {
+    "Logs": "Logs",
+    "Refresh": "Refresh",
+    "Follow": "Follow",
+    "No data": "No data"
+  },
+  "it": {
+    "Logs": "Log",
+    "Refresh": "Aggiorna",
+    "Follow": "Segui"
+  }
+}

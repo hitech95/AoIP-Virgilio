@@ -1,0 +1,8 @@
+{
+    "/status/overview": {
+        "title": "Overview",
+        "view": "home",
+        "index": 0,
+        "locales": { "en": "Overview", "it": "Panoramica" }
+    }
+}

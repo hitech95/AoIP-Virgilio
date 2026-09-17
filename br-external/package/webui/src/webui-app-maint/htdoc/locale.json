@@ -1,0 +1,21 @@
+{
+  "en": {
+    "Reboot": "Reboot",
+    "Reboots the speaker.": "Reboots the speaker.",
+    "Really reboot the device?": "Really reboot the device?",
+    "Factory reset": "Factory reset",
+    "Restores the shipped configuration (hostname, network, DSP). All settings are lost.": "Restores the shipped configuration (hostname, network, DSP). All settings are lost.",
+    "Also delete user files (FIR coefficients)": "Also delete user files (FIR coefficients)",
+    "Really reset everything to factory defaults? The device reboots automatically.": "Really reset everything to factory defaults? The device reboots automatically.",
+    "Resetting, the device reboots now": "Resetting, the device reboots now",
+    "Firmware upgrade": "Firmware upgrade",
+    "Not available on this build: requires the production UBI image layout (see plan/squashfs-overlay-userdata.md).": "Not available on this build: requires the production UBI image layout (see plan/squashfs-overlay-userdata.md).",
+    "Cancel": "Cancel"
+  },
+  "it": {
+    "Reboot": "Riavvia",
+    "Factory reset": "Ripristino di fabbrica",
+    "Firmware upgrade": "Aggiornamento firmware",
+    "Cancel": "Annulla"
+  }
+}

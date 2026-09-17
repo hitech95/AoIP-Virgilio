@@ -1,0 +1,24 @@
+{
+  "en": {
+    "Management LAN": "Management LAN",
+    "State": "State",
+    "Up": "Up",
+    "Down": "Down",
+    "Protocol": "Protocol",
+    "Address": "Address",
+    "Gateway": "Gateway",
+    "DNS": "DNS",
+    "Connected": "Connected",
+    "No data": "No data"
+  },
+  "it": {
+    "Management LAN": "LAN gestione",
+    "State": "Stato",
+    "Up": "Attiva",
+    "Down": "Disattiva",
+    "Protocol": "Protocollo",
+    "Address": "Indirizzo",
+    "Gateway": "Gateway",
+    "Connected": "Connessa"
+  }
+}

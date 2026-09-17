@@ -1,0 +1,8 @@
+{
+    "/status/logs": {
+        "title": "Logs",
+        "view": "logs",
+        "index": 30,
+        "locales": { "en": "Logs", "it": "Log" }
+    }
+}

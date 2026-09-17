@@ -1,0 +1,8 @@
+{
+    "/status/audio": {
+        "title": "Audio",
+        "view": "status",
+        "index": 10,
+        "locales": { "en": "Audio", "it": "Audio" }
+    }
+}

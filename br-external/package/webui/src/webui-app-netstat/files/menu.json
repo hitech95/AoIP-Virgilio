@@ -1,0 +1,8 @@
+{
+    "/status/network": {
+        "title": "Network",
+        "view": "netstat",
+        "index": 20,
+        "locales": { "en": "Network", "it": "Rete" }
+    }
+}

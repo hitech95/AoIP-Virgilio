@@ -1,0 +1,26 @@
+{
+  "en": {
+    "PTP": "PTP",
+    "CamillaDSP": "CamillaDSP",
+    "Logs": "Logs",
+    "Not locked": "Not locked",
+    "Locked": "Locked",
+    "Mode": "Mode",
+    "Domain": "Domain",
+    "PTP version": "PTP version",
+    "Priority1": "Priority1",
+    "Freq correction": "Freq correction",
+    "Updates": "Updates",
+    "State": "State",
+    "Sample rate": "Sample rate",
+    "Volume": "Volume",
+    "Processing load": "Processing load",
+    "Buffer level": "Buffer level",
+    "Clipped samples": "Clipped samples",
+    "Stop reason": "Stop reason",
+    "No data": "No data",
+    "ptp monitor is not answering": "ptp monitor is not answering",
+    "camilladsp is not answering": "camilladsp is not answering",
+    "Dante": "Dante"
+  }
+}
