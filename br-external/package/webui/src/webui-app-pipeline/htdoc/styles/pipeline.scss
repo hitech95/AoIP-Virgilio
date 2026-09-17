@@ -1,0 +1,23 @@
+.pipeline-page {
+  --flow-canvas: var(--el-fill-color-lighter);
+  --flow-border: var(--el-border-color);
+  --flow-node: var(--el-bg-color-overlay);
+  --flow-node-alt: var(--el-fill-color-light);
+  --flow-text: var(--el-text-color-primary);
+  --flow-muted: var(--el-text-color-secondary);
+  --flow-shadow: rgb(0 0 0 / 12%);
+  padding: 0 10px;
+}
+
+@import 'flow-node';
+@import 'block-editor';
+
+html.dark .pipeline-page {
+  --flow-canvas: #0e1319;
+  --flow-border: #314052;
+  --flow-node: #161c23;
+  --flow-node-alt: #11171d;
+  --flow-text: #e8eef5;
+  --flow-muted: #9bacbe;
+  --flow-shadow: rgb(0 0 0 / 45%);
+}

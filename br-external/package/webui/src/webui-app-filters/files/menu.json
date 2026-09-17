@@ -1,0 +1,32 @@
+{
+    "/dsp": {
+        "title": "DSP",
+        "index": 20,
+        "locales": { "en": "DSP", "it": "DSP" },
+        "svg": {"-xmlns":"http://www.w3.org/2000/svg","-viewBox":"0 0 24 24","path":{"-d":"M3 12h2l2-6 3 12 3-9 2 5 2-2h4v2h-3l-3 3-3-7-3 9-3-12-1 3H3z","-fill":"currentColor"}}
+    },
+    "/dsp/configuration": {
+        "title": "Configuration",
+        "view": "filters",
+        "index": 10,
+        "locales": { "en": "Configuration", "it": "Configurazione" }
+    },
+    "/dsp/eq": {
+        "title": "EQ",
+        "view": "eq",
+        "index": 20,
+        "locales": { "en": "EQ", "it": "EQ" }
+    },
+    "/dsp/pipeline": {
+        "title": "Pipeline",
+        "view": "pipeline",
+        "index": 30,
+        "locales": { "en": "Pipeline", "it": "Pipeline" }
+    },
+    "/dsp/files": {
+        "title": "Files",
+        "view": "files",
+        "index": 40,
+        "locales": { "en": "Files", "it": "File" }
+    }
+}
