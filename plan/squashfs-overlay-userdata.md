@@ -8,22 +8,26 @@ writable through the overlay, while the base rootfs itself is read-only.
 
 ## 0. Target layout (real hardware)
 
-```
-SPI NAND, UBI
-├── volume "fit"        kernel + DTB (boot chain per plan §6.5/6.6)
-├── volume "rootfs"     squashfs, read-only (lowerdir)
-├── volume "rootfs_data" ubifs, RW    (upperdir/workdir of the / overlay)
-└── volume "user_data"  ubifs, RW     (mounted at /opt/user_data)
+```mermaid
+flowchart TB
+    subgraph NAND["SPI NAND · UBI"]
+        direction TB
+        FIT["volume 'fit'<br/>kernel + DTB (§6.5/6.6)"]
+        ROOT["volume 'rootfs'<br/>squashfs, read-only (lowerdir)"]
+        RD["volume 'rootfs_data'<br/>ubifs, RW (upperdir/workdir)"]
+        UD["volume 'user_data'<br/>ubifs, RW → /opt/user_data"]
+    end
 ```
 
 Runtime view:
 
-```
-/            overlay: lower = squashfs rootfs, upper = rootfs_data
-/rom         bind of the unmodified squashfs (OpenWrt parity, read-only)
-/opt/user_data  ubifs volume — camilladsp user configs, FIRs, and
-                <state_dir>/inferno_aoip/<id>/rx_subscriptions.toml
-                (uci inferno.main.state_dir, already wired)
+```mermaid
+flowchart TB
+    RT["/ · overlay<br/>lower = squashfs rootfs<br/>upper = rootfs_data"]
+    ROM["/rom · bind of the squashfs<br/>read-only recovery view"]
+    UD["/opt/user_data · ubifs volume<br/>camilladsp configs + FIRs<br/>inferno state (uci state_dir)"]
+    RT -.-> ROM
+    RT -.-> UD
 ```
 
 Why two RW volumes instead of one:

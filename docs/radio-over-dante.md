@@ -55,7 +55,7 @@ flowchart TD
     STARTA --> SUB
     SUB --> OK{"ARC reply ... 0001<br/>(CODE_OK)?"}
     OK -- no --> FIX["hostnames set before camilladsp<br/>started? right --to / --rx-host?"] --> SUB
-    OK -- yes --> RADIO["Transmitter: mpd-ctl play URL<br/>+ repeat 1"]
+    OK -- yes --> RADIO["Transmitter: mpc add URL + play<br/>+ repeat 1"]
     RADIO --> VERIFY["Receiver: virtio card0 RUNNING,<br/>hw_ptr advancing at ~48k/s = PASS<br/>(audible on the host speakers)"]
 ```
 
@@ -76,7 +76,7 @@ make a setup permanent, put it in
 cd ~/Documenti/Progetti/dante
 pgrep -af qemu-system-arm        # kill any stale guest STILL on the mcast group:
 kill <pid>                       # a leftover master makes PTP lock onto a ghost
-# image up to date? (needs: mpd-ctl URL support, libcurl TLS + CA bundle,
+# image up to date? (needs: mpc + libcurl TLS + CA bundle,
 # libsndfile, MPD 48k output lock — ./scripts/build.sh after any pull)
 #   ./scripts/build.sh
 ```
@@ -221,22 +221,21 @@ No playlist ships in the image — streams are user data. Add one at
 runtime (or drop an `.m3u` into `/var/lib/mpd/playlist/`):
 
 ```sh
-mpd-ctl play https://<station-url>   # add + play a stream directly
-mpd-ctl repeat 1             # auto-reconnect when the CDN drops the stream
-mpd-ctl status               # state: play; "audio:" shows the SOURCE rate
+mpc add https://<station-url> && mpc play   # queue + play a stream directly
+mpc repeat 1                 # auto-reconnect when the CDN drops the stream
+mpc status                   # state: play; "audio:" shows the SOURCE rate
                               # (48000 for this station; other rates are
                               # resampled to 48k automatically — fine)
 ```
 
-Full command set (any raw MPD command passes through `mpd-ctl`):
+Full command set (`mpc`, the standard MPD client):
 
 ```sh
-mpd-ctl play "https://cdn06-us-east.radio.cloud/..._hq"   # add stream + play
-mpd-ctl add "https://.../stream"                          # queue without playing
-mpd-ctl play 2                # play queue entry N (station 2 of `radio`)
-mpd-ctl currentsong           # what is playing (file/Name/Title)
-mpd-ctl playlistinfo          # the whole queue
-mpd-ctl pause | stop | next | prev | clear
+mpc add "https://<station>/stream"   # queue a stream
+mpc play                             # play (mpc play 2 = queue entry N)
+mpc current                          # what is playing
+mpc playlist                         # the whole queue
+mpc pause | stop | next | prev | clear
 ```
 
 ## 6. Verify
@@ -323,13 +322,12 @@ kill <pid1> <pid2>
 | Symptom | Cause | Fix |
 |---|---|---|
 | `panicked ... BIND_IP has no IPv4 addresses` (camilladsp crash loop) | eth1 has no IP — the wan/aoip uci lines were not applied (mangled paste) or network wasn't restarted | apply §2/§3 again, one line at a time; `ip -4 addr show eth1` must show the address before starting camilladsp |
-| PTP slave locks but steps the clock every second ("Measurement too far from state") | master CPU-saturated under TCG (radio decoding) or a stale guest still on the mcast group | `mpd-ctl pause` on the transmitter until the lock is stable, then resume; kill stale QEMU processes; ensure the transmitter has `priority1 128` so BMCA is deterministic |
-| `ACK [2@0] {play} Integer expected: <url>` | old `mpd-ctl` (no URL support) | rebuild the image (`./scripts/build.sh`) |
+| PTP slave locks but steps the clock every second ("Measurement too far from state") | master CPU-saturated under TCG (radio decoding) or a stale guest still on the mcast group | `mpc pause` on the transmitter until the lock is stable, then resume; kill stale QEMU processes; ensure the transmitter has `priority1 128` so BMCA is deterministic |
 | `ACK {add} Unsupported URI scheme` or cert errors (`not correctly signed`) | old libcurl (no TLS backend / no CA bundle) | rebuild: defconfig needs `LIBCURL_OPENSSL` + `CA_CERTIFICATES` (see D12) |
-| CDN drops the stream after ~30 s ("Decoder is too slow") | TCG emulation can't decode at 1× | `mpd-ctl repeat 1` reconnects; on real silicon this disappears |
+| CDN drops the stream after ~30 s ("Decoder is too slow") | TCG emulation can't decode at 1× | `mpc repeat 1` reconnects; on real silicon this disappears |
 | many small glitches in the sink audio | the SOURCE's camilladsp/inferno-TX load delays the master's PTP TX timestamps → slaves see ±1 ms noise → constant servo corrections (freq_ppm swinging tens of ppm, kalman resets) | `renice -10 $(pidof statime)` on both guests (baked into newer images), `chunksize 2048` on both. Diagnose with a lean third guest (statime only, `camilladsp.main.enabled='0'`): if IT also sees ±1 ms raw_sync_offsets, the problem is upstream of the sink. Residual ~300-500 us slowly-varying offsets are the QEMU mcast-tunnel baseline (emulation ceiling — gentle corrections, no glitches; disappears on real HW). MPD/radio decode is NOT a significant contributor (verified by pause test) |
 | audio arrives pitch-shifted (old images) | mpd.conf used to carry `auto_resample "no"`, which bypasses the `format` lock and forwards the source rate raw into the aloop | rebuild — the output is now locked to `48000:16:2` and MPD resamples every source |
-| wav over HTTP fails (`Seek failed: Not seekable`) | libsndfile needs a seekable stream; python's `http.server` has no HTTP Range support | local files instead: `wget -O /var/lib/mpd/music/x.wav http://10.0.2.2:8000/x.wav && mpd-ctl update`, then `mpd-ctl add x.wav` — or serve with a Range-capable server; MP3/AAC radio streams are unaffected |
+| wav over HTTP fails (`Seek failed: Not seekable`) | libsndfile needs a seekable stream; python's `http.server` has no HTTP Range support | local files instead: `wget -O /opt/user_data/mpd/music/x.wav http://10.0.2.2:8000/x.wav && mpc update`, then `mpc add x.wav` — or serve with a Range-capable server; MP3/AAC radio streams are unaffected |
 | `ERROR: no ARP reply` from dante-l2node | wrong `--to` IP, wrong `--mcast` group, or guest down | check the receiver's eth1 IP and that both QEMUs use the same `--peer` |
 | subscription OK but sink stays silent / `rx.wav` stays zeros | `--rx-host` does not match the transmitter's hostname; or the receiver's camilladsp was restarted after subscribing | hostname must be set on the transmitter **before** its camilladsp starts; `--remove` then re-subscribe |
 | sink runs (card0 RUNNING, hw_ptr advancing) but nothing audible on the host | QEMU cannot reach the sound server (started over SSH / no user session) | run `run-qemu.sh` from the desktop session, or point it at the server: `PULSE_SERVER=unix:/run/user/1000/pulse/native ./scripts/run-qemu.sh ...`. QEMU's `set_sink_input_volume() failed` log lines are benign |
@@ -337,11 +335,11 @@ kill <pid1> <pid2>
 
 ## Notes
 
-- MPD control: `mpd-ctl status | currentsong | playlistinfo | clear | pause |
+- MPD control: `mpc status | current | playlist | clear | pause |
   play [N|url] | add <url> | load radio` — any raw MPD command passes through.
 - Local test assets (any sample rate) work too: drop the file into
   `/var/lib/mpd/music/` (e.g. `wget` from the host server on 10.0.2.2),
-  `mpd-ctl update`, `mpd-ctl add <name>`, `mpd-ctl play` — MPD resamples it
+  `mpc update`, `mpc add <name>`, `mpc play` — MPD resamples it
   to the locked 48k (verified: 44.1 kHz wav → aloop opens at 48000).
 - The radio stream is the guest's own internet (eth0/slirp) — the Dante
   segment stays isolated on eth1.

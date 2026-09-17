@@ -162,7 +162,7 @@ scripts/dante-l2node.py --direct 198.18.100.254 subscribe \
 # success: "ARC reply ... 0001" (CODE_OK); --remove unsubscribes
 
 # source console — radio with auto-reconnect
-mpd-ctl load radio && mpd-ctl repeat 1
+mpc add <station-url> && mpc play && mpc repeat 1
 ```
 
 ### 6. Verify
@@ -182,7 +182,7 @@ logread | grep -c "too far from state"     # must stop growing
 | guest console | the terminal running `run-qemu.sh`, or `telnet 127.0.0.1 5556/5557` with `--console telnet:PORT` | serial console, root, no login |
 | camilladsp (source) | `ws://198.18.100.1:5000` from the host | no `--fwd` needed — host is adjacent; camillagui backend → this URL |
 | camilladsp (sink) | `ws://198.18.100.2:5000` from the host | same |
-| MPD control | guest console: `mpd-ctl ...` | MPD binds 127.0.0.1 only (by design) |
+| MPD control | guest console: `mpc ...` | MPD binds 127.0.0.1 only (by design) |
 | ARC subscriptions | `dante-l2node.py --direct 198.18.100.254 subscribe ...` | host tool |
 | guest → internet | automatic via `198.18.100.254` NAT | MPD radio, wget, etc. |
 | host → guest shell-less checks | `ping 198.18.100.1`, `curl 198.18.100.1:5000/...` | no sshd in the guests |

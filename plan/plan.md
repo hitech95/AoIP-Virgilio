@@ -590,6 +590,37 @@ it does.
 
 ## 11. Next up
 
+- **DONE (D18/M5 — webui COMPLETE)**: hardening — TLS via uci
+  (nginx server blocks assembled by the webui init, config-test guard,
+  http→https redirect, Secure cookie), first-boot set-password flow
+  (own login app, precondition-guarded unauth RPC), CSP/nosniff/referrer
+  headers, exponential login backoff verified (1.2→8.2 s), WS gating
+  over wss. User guide `docs/webui.md`, test report
+  `docs/test-webui-m5.md`. All five milestones green; browser-only
+  rendering (curves, drag UX) still needs a human pass.
+- **DONE (D18/M4)**: filters + uploads — genconf extended with uci-native
+  user steps on editable slots (allow/max validation, placeholder anchor),
+  webuid filters/mix/files modules (transactional genconf dry-run,
+  multipart upload to /opt/user_data/filters), webui-app-filters (slot
+  editors + live cascade curves, vendored camillaEQ biquad math) +
+  webui-app-files. Verified on rig incl. raw-WS attacks on locked chains
+  rejected by the manifest (`docs/test-webui-m4.md`). Next: M5 (TLS,
+  first-boot password, hardening docs).
+- **DONE (D18/M3)**: config pages — webuid uci bridge (write-ACL
+  allowlist), webui.set_password (session invalidation), vendored system
+  app (hostname/TZ/password/reboot) + network app (dhcp/static,
+  lockout warning); apply chain via procd reload triggers verified
+  (`docs/test-webui-m3.md`). Next: M4 filters page + uploads (manifest
+  schema, genconf validation, /opt/user_data).
+- **DONE (D18/M2)**: webui frontend — vendored OUI shell (deps/oui @
+  386f49e, one login patch) + webui-app-status, built by host-node npm+vite
+  (460 KB gzipped dist), gzip_static serving, menus/status/logs contract
+  verified end-to-end (`docs/test-webui-m2.md`). Next: M3 config pages
+  (generic uci bridge + system/network apps), M4 filters.
+- **DONE (D18/M1)**: webui skeleton — nginx + webuid (ucode SCGI daemon,
+  shadow login, sessions, /_auth, WS gating) verified end-to-end on QEMU
+  (`docs/test-webui-m1.md`). Next: M2 status page (vendored OUI frontend
+  + `status.all` wiring), M3 config pages (uci bridge), M4 filters.
 - **DONE (D17)**: camilladsp revents patch landed and verified — decision
   rule met (clean win): sink default is direct `capture='Inferno'` again.
 - Upstream outreach: send both patch series (camilladsp
@@ -602,6 +633,7 @@ it does.
   `sudo scripts/qemu-bridge.sh down` (needs interactive sudo).
 
 | D17 | — | **camilladsp revents patch — the spin fixed at the root**: package patch `0001-capture-use-poll-descriptors-revents.patch` (utils.rs `FileDescriptors<'a>` now carries `&alsa::PCM` and `wait()` calls `snd_pcm_poll_descriptors_revents` after `poll()`; both capture constructors plumb `pcmdevice`) | playback was NEVER affected — it uses `alsa::PCM::wait` = `snd_pcm_wait`, which translates revents correctly inside alsa-lib; only the capture `FileDescriptors::wait` raw-polled. With translation, the plugin's PERIOD_POLL machinery finally engages: AlsaCapture 845 R-state → 52 S-state ticks/8 s (FIFO fallback 38), audio identical, subscription CODE_OK. Sink default is again `capture='Inferno'` + S16_LE; `aoip-bridge` service kept in overlay but disabled by default (enable + `RawFile:/tmp/aoip.fifo` if the patch is dropped). Upstream: both patches ready (camilladsp revents call; inferno PERIOD_POLL/throttle/drain series) |
+| D18 | — | **webui = nginx front + ucode gateway + vendored OUI frontend** (full plan: `plan/webui.md`; M1 implemented): options evaluated — LuCI (uhttpd can't proxy WS), OUI stock (MD5 uci users, lighttpd can't session-gate a proxied WS, ~9 lua-eco recipes not in Buildroot), OUI+nginx+auth-patch (Lua fork), Rust gateway (fallback) — chosen: reimplement OUI's tiny closed-world JSON contract (~16 funcs) in a ucode daemon (`webuid`, ptp-monitor pattern: uloop + nonblocking SCGI on `/run/webui.sock`), nginx as the ONLY exposed process (static, scgi, `auth_request /_auth`, WS upgrade proxy to camilladsp loopback), login via `/etc/shadow` + busybox cryptpw, OUI Vue frontend vendored later (M2+). New in image: nginx only (+`UCI_SUPPORT=ON` in ucode, +`CRYPTPW` applet) | the auth-gated WS was the deciding requirement — neither uhttpd nor lighttpd can enforce a session on a proxied websocket, so every framework variant converged on needing a custom gateway anyway; enforcement of the protected pipeline stays in camilladsp (patch 0003) so the proxy can be a dumb auth'd pipe. ucode gotchas (no function hoisting; no argv-form popen in the pinned rev; `json()` parses only, serialize via `sprintf("%J")`) live in `scripts/webui/README.md`. M1 verified on QEMU: real `$6$` login, 401/403 gating, `101 Switching Protocols` through the proxy (`docs/test-webui-m1.md`); host dev-loop harness in `scripts/webui/` |
 General logic that emerged from these:
 
 - **config flows one way**: uci → genconf/render → process (env or file);

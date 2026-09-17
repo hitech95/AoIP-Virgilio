@@ -8,11 +8,17 @@ Cortex-A7 + NEON, 32-bit hard-float, musl), developed and validated in QEMU.
 The system stack is OpenWrt's — procd as PID 1, ubus, uci, netifd, ubox —
 built with Buildroot. On top of it runs the audio chain:
 
-```
-web radio (MPD) → snd-aloop → camilladsp → inferno (Dante/AES67 AoIP)
-                                              ⇄ PTP clock (statime, fork)
-                                              ⇄ ARC subscriptions
-host audio ← virtio-snd ← camilladsp ← inferno RX (receiver guest)
+```mermaid
+flowchart LR
+    subgraph source[transmitter guest]
+        R[web radio] --> M[MPD] -->|snd-aloop| C1[camilladsp] --> I1[inferno TX]
+    end
+    subgraph sink[receiver guest]
+        I2[inferno RX] --> C2[camilladsp] --> O[virtio-snd / I2S]
+    end
+    I1 <-->|Dante flows + ARC subscriptions| I2
+    P[statime PTP + usrvclock] -.-> I1
+    P -.-> I2
 ```
 
 Status: **end-to-end validated on the bridge rig** — a source guest streams
@@ -37,13 +43,28 @@ sudo scripts/qemu-bridge.sh up              # br-dante 198.18.100.254/24 + taps
     --audio virtio-snd-pa --no-mgmt --console telnet:5557 &  # sink guest
 
 # per docs/bridge-rig.md §4: configure uci on both, wait for PTP lock, then
-mpd-ctl load radio && mpd-ctl play && mpd-ctl repeat 1          # on source
+mpc add <station-url> && mpc play && mpc repeat 1             # on source
 scripts/dante-l2node.py --direct 198.18.100.254 subscribe \
     --to 198.18.100.2 --rx-host rk3506-source --map 1=01 --map 2=02
 ```
 
 Login on the consoles: `root`, no password. QEMU runs with `-snapshot`;
 test boots never modify the built image.
+
+### EQ frontend watch mode
+
+For EQ UI iteration without rebuilding the firmware image, start a slirp guest
+with a telnet console on port 5557, then run:
+
+```sh
+scripts/webui/watch-eq.sh
+```
+
+This runs `vite build --watch`, exposes the generated UMD bundle on the host,
+and copies every rebuilt `eq.umd.js.gz` into the running snapshot guest. Open
+`http://127.0.0.1:18081/dsp/eq?eq-dev=1` to enable browser auto-reload after
+each sync. The helper defaults can be overridden with `EQ_QEMU_CONSOLE_PORT`,
+`EQ_WATCH_HTTP_PORT`, and `EQ_QEMU_HOST`.
 
 ## Layout
 
@@ -87,6 +108,6 @@ projects retain their licenses: camilladsp (GPL-3.0-or-later), inferno
   camilladsp chunksize 2048.
 - PTP: statime (fork) with usrvclock export; host `statime-gm` grand master
   on the bridge; guests slave via `ptp-monitor` → ubus + hotplug policy.
-- Dante subscriptions persist: `XDG_STATE_HOME=/root/.local/state` →
-  `inferno_aoip/<device-id>/rx_subscriptions.toml` survives reboots.
+- Dante subscriptions persist: uci `inferno.main.state_dir` (→ `INFERNO_STATE_PATH`,
+  default `/opt/user_data`) → `inferno_aoip/<device-id>/rx_subscriptions.toml`.
 - Volatile state is RAM-only (OpenWrt-style `/var → /tmp`), logs via logd.
