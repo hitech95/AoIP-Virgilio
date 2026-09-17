@@ -17,11 +17,16 @@ set -e
 # (/etc/init.d/mpd) and pollutes the `service` listing as /etc/init.d/S95mpd.
 rm -f "${TARGET_DIR}"/etc/init.d/S95mpd
 
+# Drop Buildroot's nginx SysV script: /etc/init.d/nginx (procd, from the
+# webui package) replaces it.
+rm -f "${TARGET_DIR}"/etc/init.d/S50nginx
+
 # Overlay removals do NOT propagate into the accumulating target dir --
 # purge anything a previous build may have left behind (T2: mpd is off by
 # default, enabled manually on the source guest; T9: no shipped test
 # assets -- radio/FIR/wav are user data, not image content).
-rm -f "${TARGET_DIR}"/etc/rc.d/S96mpd "${TARGET_DIR}"/etc/rc.d/S96aoip-bridge
+rm -f "${TARGET_DIR}"/etc/rc.d/S96mpd "${TARGET_DIR}"/etc/rc.d/S96aoip-bridge \
+	"${TARGET_DIR}"/usr/bin/mpd-ctl
 rm -rf "${TARGET_DIR}"/usr/share/camilladsp "${TARGET_DIR}"/usr/share/mpd
 
 # OpenWrt-style volatile layout: /var and /run are symlinks into the tmpfs
@@ -30,13 +35,25 @@ rm -rf "${TARGET_DIR}"/usr/share/camilladsp "${TARGET_DIR}"/usr/share/mpd
 # hardware). procd pre-creates /tmp/{shm,run,lock,state}; /etc/init.d/boot's
 # mkdirs then just re-create tmpfs dirs, which is harmless.
 rm -rf "${TARGET_DIR}"/var "${TARGET_DIR}"/run
-ln -s tmp "${TARGET_DIR}"/var
-ln -s var/run "${TARGET_DIR}"/run
+ln -s tmp "${TARGET_DIR}/var"
+ln -s var/run "${TARGET_DIR}/run"
+
+# Keep /tmp/run real so the /run -> var/run -> tmp/run chain never dangles
+# in the accumulating target dir (nginx's install does `test -d run ||
+# mkdir -p run`, which EEXISTs on a dangling symlink).
+mkdir -p "${TARGET_DIR}/tmp/run"
 
 # Run-once uci defaults dir (executed by /etc/init.d/boot's uci_apply_defaults,
 # scripts deleted after success). Ships empty like OpenWrt base-files - a
 # placeholder file would be executed and removed as if it were a script.
 mkdir -p "${TARGET_DIR}"/etc/uci-defaults
+
+# Factory-reset snapshot for the webui (webui.factory_reset): the shipped
+# /etc/config state (incl. /etc/shadow -- the pristine empty root password
+# IS part of factory state), captured after every package + overlay step.
+mkdir -p "${TARGET_DIR}/usr/share/webui/defaults"
+tar -C "${TARGET_DIR}" -cf "${TARGET_DIR}/usr/share/webui/defaults/etc-config.tar" \
+	etc/config etc/shadow
 
 for kdir in "${TARGET_DIR}"/lib/modules/*; do
 	[ -d "${kdir}" ] || continue

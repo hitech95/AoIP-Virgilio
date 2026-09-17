@@ -5,3 +5,5 @@ CONFIG_FEATURE_NTPD_SERVER=y
 CONFIG_FEATURE_AWK_LIBM=y
 # file exfil from guest (M3 DoD: pipeline output to host for verification)
 CONFIG_NC=y
+# webuid login: verify /etc/shadow hashes (cryptpw PASSWORD SALT)
+CONFIG_CRYPTPW=y

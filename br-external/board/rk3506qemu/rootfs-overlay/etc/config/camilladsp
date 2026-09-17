@@ -42,6 +42,8 @@ config camilladsp 'main'
 	option wav_header '1'
 	option capture 'Inferno'
 	option playback 'File:/dev/null'
+	# Initial main fader gain in dB, applied by the service as camilladsp -g.
+	option gain '0'
 	# extra environment for the daemon; use for INFERNO_* settings that the
 	# inferno ALSA plugin picks up when capture/playback is 'Alsa:inferno*'
 	# (values must not contain spaces), e.g.:

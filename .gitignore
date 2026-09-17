@@ -8,3 +8,8 @@ results/*.tmp
 # editor
 *.swp
 __pycache__/
+
+# webui build artifacts
+node_modules/
+dist/
+uc.out

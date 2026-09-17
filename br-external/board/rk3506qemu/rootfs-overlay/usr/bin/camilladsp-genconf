@@ -11,7 +11,11 @@
 #   config step                one pipeline step, ordered by option index
 #                               (type Filter: list channels + list names
 #                                type Mixer: option name
-#                                editable sub chain slot: option subchain only)
+#                                editable sub chain slot: option subchain +
+#                                optional list names = user filters, validated
+#                                against the sub chain's allow list and
+#                                max_steps; the placeholder anchor
+#                                user_slot_<name> is always rendered first)
 #   config subchain            one logical sub chain: name + policy
 #                               (locked | child | free) + constraints
 #
@@ -200,6 +204,14 @@ fi
 # Runs only when subchain sections exist. Fails early (refuse to render):
 # a broken partition must never produce a config.
 
+# resolve a filter name -> its uci type (empty when undefined)
+filter_type_of() {
+	for _fid in $FILTER_IDS; do
+		eval "[ \"\$FLT_${_fid}_name\" = \"\$1\" ] && { printf '%s' \"\${FLT_${_fid}_type}\"; return 0; }"
+	done
+	return 0
+}
+
 SC_BYNAME=""
 for id in $SUBCHAIN_IDS; do
 	eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
@@ -256,7 +268,22 @@ if [ -n "$SUBCHAIN_IDS" ]; then
 		done
 		eval "_p=\"\$SC_${_scid}_policy\""
 		if [ "$_p" != locked ]; then
-			[ -z "$_t" ] && [ -z "$_nm" ] || fail "subchain '$_s' slot step '$id' must have no type/filters"
+			[ -z "$_t" ] || fail "subchain '$_s' slot step '$id' must have no type"
+			# user steps: names allowed on editable slots, validated
+			# against the sub chain constraints (allow / max_steps)
+			eval "_a=\"\$SC_${_scid}_allow\"; _m=\"\$SC_${_scid}_max_steps\""
+			_cntu=0
+			for _f in $_nm; do
+				_ft="$(filter_type_of "$_f")"
+				[ -n "$_ft" ] || fail "subchain '$_s': user filter '$_f' is not defined"
+				case " $_a " in *" $_ft "*) ;;
+					*) fail "subchain '$_s': filter type '$_ft' (of '$_f') not in allow list" ;;
+				esac
+				_cntu=$((_cntu + 1))
+			done
+			if [ -n "$_m" ] && [ "$_cntu" -gt "$_m" ]; then
+				fail "subchain '$_s': $_cntu user steps exceed max_steps=$_m"
+			fi
 		else
 			[ -n "$_t" ] || fail "step '$id' (locked subchain '$_s') missing type"
 		fi
@@ -495,7 +522,10 @@ yaml_list() {
 			eval "_p=\"\$SC_${_scid}_policy\""
 			if [ "$_p" != locked ]; then
 				eval "_c=\"\$SC_${_scid}_channels\""
-				printf '  - type: Filter\n    channels: %s\n    names: [user_slot_%s]\n' "$(yaml_list "$_c")" "$_s"
+				_uy=""
+				for _n in $_nm; do _uy="${_uy}${_uy:+, }$_n"; done
+				printf '  - type: Filter\n    channels: %s\n    names: [user_slot_%s%s]\n' \
+					"$(yaml_list "$_c")" "$_s" "${_uy:+, $_uy}"
 				continue
 			fi
 		fi

@@ -1,22 +1,22 @@
 #!/bin/sh /etc/rc.common
-# aoip-bridge — sink-side Dante receiver feeding camilladsp through a FIFO.
+# aoip-bridge — DEPRECATED, kept for debugging only.
 #
-#   inferno2pipe (rx 1..N, clocked by statime) -> /tmp/aoip.fifo
-#     -> camilladsp capture 'RawFile:/tmp/aoip.fifo' (S32_LE) -> playback
+# Sink-side Dante receiver feeding camilladsp through a FIFO:
+#   inferno2pipe (rx 1..N) | aplay-free variant → /tmp/aoip.fifo
+#     → camilladsp capture 'RawFile:/tmp/aoip.fifo' → playback
 #
-# Why not capture the inferno PCM directly: camilladsp polls raw
-# descriptors without snd_pcm_poll_descriptors_revents, so the userspace
-# plugin's eventfd stays readable forever and its capture loop spins on
-# partial reads at one full pegged core (three plugin-side fixes did not
-# change this — plan D16). A kernel FIFO gives real blocking reads: the
-# capture thread drops from ~850 to ~38 ticks/8 s.
+# This was the workaround for the capture busy-poll bug: camilladsp
+# polled the userspace inferno PCM with raw descriptors (no
+# snd_pcm_poll_descriptors_revents) and spun at one pegged core. That
+# is FIXED by the camilladsp patch
+# 0001-capture-use-poll-descriptors-revents.patch — the sink captures
+# 'Inferno' directly and this service is no longer part of the product
+# path (disabled by default). Use it only to bisect capture issues:
+# enable it, point camilladsp at the FIFO, and compare.
 #
-# Camilladsp uci to pair with this service:
-#   capture='RawFile:/tmp/aoip.fifo'  format='S32_LE'  samplerate='48000'
-# The ARC subscription (--to <sink-ip>) is answered by inferno2pipe's
-# device instance. If either side restarts: a dead reader stalls the
-# writer until respawn; a dead writer ends camilladsp's stream (EOF) and
-# procd restarts it, which reopens the FIFO.
+# If used: camilladsp uci capture='RawFile:/tmp/aoip.fifo'
+# format='S32_LE'; the ARC subscription (--to <sink-ip>) is answered by
+# the bridge's own inferno2pipe instance.
 
 START=96
 STOP=35

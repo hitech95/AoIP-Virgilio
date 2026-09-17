@@ -11,5 +11,6 @@ source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/jsonfilter/Config.in"
 source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/ubox/Config.in"
 source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/ucode/Config.in"
 source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/udebug/Config.in"
+source "$BR2_EXTERNAL_RK3506QEMU_PATH/package/webui/Config.in"
 
 endmenu
