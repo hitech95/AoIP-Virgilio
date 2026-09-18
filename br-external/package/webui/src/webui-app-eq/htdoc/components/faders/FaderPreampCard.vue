@@ -4,6 +4,8 @@
     :model-value="eq.preampGain"
     color="var(--band-10)"
     :marks="gainMarks"
+    :disabled="!eq.preampAvailable"
+    :dimmed="!eq.preampAvailable"
     @input="setPreampGain"
   >
     <template #header>

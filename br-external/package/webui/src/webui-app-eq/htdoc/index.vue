@@ -388,7 +388,10 @@ export default defineComponent({
 
         const result = await self.$oui.call('dsp', 'save_filters', payload)
         if (result?.error) {
-          self.$message?.error?.(result.error.message)
+          const message = plan.mode === 'free' && result.error.message === 'pipeline index out of range'
+            ? 'Free edit cannot be persisted: UCI has no pipeline step for this live block. Import the runtime pipeline into UCI first so its topology can be saved safely.'
+            : result.error.message
+          self.$message?.error?.(message)
           return
         }
 

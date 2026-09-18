@@ -16,7 +16,10 @@ export interface ExtractedEqData {
   bands: EqBand[]
   filterNames: string[]
   channels: number[]
-  preampGain: number // Master-band gain (+/-24 dB), moves zero-line on EQ plot
+  /** Gain of the selected block's first mapped channel. */
+  preampGain: number
+  /** True only when the existing preamp mixer maps every selected channel. */
+  preampAvailable: boolean
   orderNumbers: number[] // Position (1-based) within the selected block
 }
 
@@ -112,22 +115,27 @@ export function extractEqBandsFromConfig(
   config: CamillaDSPConfig,
   stepIndex: number | null
 ): ExtractedEqData {
-  const empty = { bands: [], filterNames: [], channels: [], preampGain: 0, orderNumbers: [] }
-
-  // Preamp gain is global (mixer named "preamp", if present)
-  let preampGain = 0
-  if (config.mixers && config.mixers.preamp) {
-    const preampMixer = config.mixers.preamp
-    if (preampMixer.mapping && preampMixer.mapping[0]?.sources?.[0]) {
-      preampGain = preampMixer.mapping[0].sources[0].gain || 0
-      preampGain = Math.max(-24, Math.min(24, preampGain))
-    }
-  }
+  const empty = { bands: [], filterNames: [], channels: [], preampGain: 0, preampAvailable: false, orderNumbers: [] }
 
   if (stepIndex === null) return empty
 
   const step = normalizePipelineStep(config.pipeline?.[stepIndex])
   if (!step || step.type !== 'Filter' || !step.channels) return empty
+
+  // The preamp is optional. Never synthesize it: expose the control only
+  // when the existing mixer has a direct mapping for every channel in this
+  // Filter block. The UI value is the first channel; writes apply its delta
+  // to every selected channel, preserving existing channel balance.
+  const preampMixer = config.mixers?.preamp
+  const mappings = Array.isArray(preampMixer?.mapping) ? preampMixer.mapping : []
+  const preampSources = step.channels.map((channel) => {
+    const route = mappings.find((mapping: any) => Number(mapping?.dest) === channel)
+    return route?.sources?.find((source: any) => Number(source?.channel) === channel) ?? null
+  })
+  const preampAvailable = preampSources.length > 0 && preampSources.every((source) => source !== null)
+  const preampGain = preampAvailable
+    ? Math.max(-24, Math.min(24, Number(preampSources[0]?.gain) || 0))
+    : 0
 
   const enabledNames = step.names || []
   const stepKey = getStepKey(step.channels, stepIndex)
@@ -178,7 +186,7 @@ export function extractEqBandsFromConfig(
     orderNumbers.push(refIndex + 1)
   }
 
-  return { bands, filterNames, channels: [...step.channels], preampGain, orderNumbers }
+  return { bands, filterNames, channels: [...step.channels], preampGain, preampAvailable, orderNumbers }
 }
 
 /**
@@ -208,36 +216,22 @@ export function applyEqBandsToConfig(
 
   const updatedConfig = JSON.parse(JSON.stringify(config)) as CamillaDSPConfig
 
-  // Update/create the global preamp mixer if gain != 0
-  if (preampGain !== 0) {
-    if (!updatedConfig.mixers) {
-      updatedConfig.mixers = {}
-    }
-
-    updatedConfig.mixers.preamp = {
-      channels: { in: 2, out: 2 },
-      mapping: [
-        {
-          dest: 0,
-          sources: [{ channel: 0, gain: preampGain, inverted: false, mute: false, scale: 'dB' }],
-          mute: false,
-        },
-        {
-          dest: 1,
-          sources: [{ channel: 1, gain: preampGain, inverted: false, mute: false, scale: 'dB' }],
-          mute: false,
-        },
-      ],
-    }
-
-    // Ensure preamp is in pipeline at start
-    const normalizedPipeline = (updatedConfig.pipeline || []).map(normalizePipelineStep)
-    const hasPreampStep = normalizedPipeline.some(
-      (s) => s && s.type === 'Mixer' && s.name === 'preamp'
-    )
-
-    if (!hasPreampStep) {
-      updatedConfig.pipeline = [{ type: 'Mixer', name: 'preamp' }, ...(updatedConfig.pipeline || [])]
+  // Adjust only the selected Filter step's mapped channels. A missing or
+  // incomplete preamp mixer is intentionally left untouched: the control is
+  // disabled in that case rather than silently adding a global mixer node.
+  const selectedChannels = step.channels
+  const preampMappings = updatedConfig.mixers?.preamp?.mapping
+  if (Array.isArray(preampMappings) && selectedChannels.length > 0) {
+    const sources = selectedChannels.map((channel) => {
+      const route = preampMappings.find((mapping: any) => Number(mapping?.dest) === channel)
+      return route?.sources?.find((source: any) => Number(source?.channel) === channel) ?? null
+    })
+    if (sources.every((source) => source !== null)) {
+      const currentPrimaryGain = Number(sources[0]?.gain) || 0
+      const delta = preampGain - currentPrimaryGain
+      for (const source of sources) {
+        source.gain = (Number(source?.gain) || 0) + delta
+      }
     }
   }
 

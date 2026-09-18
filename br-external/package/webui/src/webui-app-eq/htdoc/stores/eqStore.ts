@@ -43,6 +43,7 @@ export interface EqStoreState {
   bandOrderNumbers: number[]
   selectedBandIndex: number | null
   preampGain: number
+  preampAvailable: boolean
   soloActiveBandIndex: number | null
   /** DSP sample rate of the running config (response curves stop at Nyquist) */
   sampleRate: number
@@ -57,6 +58,7 @@ export const eq = reactive<EqStoreState>({
   bandOrderNumbers: [],
   selectedBandIndex: null,
   preampGain: 0,
+  preampAvailable: false,
   soloActiveBandIndex: null,
   sampleRate: 48000,
   uploadStatus: { state: 'idle' },
@@ -89,6 +91,7 @@ function extractForSelection(): void {
     eq.filterNames = []
     eq.bandOrderNumbers = []
     eq.preampGain = 0
+    eq.preampAvailable = false
     return
   }
 
@@ -98,6 +101,7 @@ function extractForSelection(): void {
   eq.filterNames = extracted.filterNames
   eq.bandOrderNumbers = extracted.orderNumbers
   eq.preampGain = extracted.preampGain
+  eq.preampAvailable = extracted.preampAvailable
 }
 
 // Upload runner: builds the payload from CURRENT state and serializes through
@@ -140,6 +144,7 @@ async function runUpload(): Promise<void> {
       if (!soloSessionActive && uploadedRevision === localRevision) {
         eq.bands = extracted.bands
         eq.preampGain = extracted.preampGain
+        eq.preampAvailable = extracted.preampAvailable
       }
 
       eq.uploadStatus = { state: 'success' }
@@ -280,6 +285,7 @@ export function clearEqState(): void {
   eq.filterNames = []
   eq.bandOrderNumbers = []
   eq.preampGain = 0
+  eq.preampAvailable = false
   eq.selectedBandIndex = null
   eq.uploadStatus = { state: 'idle' }
   soloSessionActive = false
@@ -485,7 +491,7 @@ export function selectBand(index: number | null) {
 }
 
 export function setPreampGain(gain: number) {
-  if (eq.selectedStepIndex === null) return
+  if (eq.selectedStepIndex === null || !eq.preampAvailable) return
   eq.preampGain = clampGainDb(gain)
   localRevision++
   requestUpload()
