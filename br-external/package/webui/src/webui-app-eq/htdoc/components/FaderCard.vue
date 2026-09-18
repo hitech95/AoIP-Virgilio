@@ -170,14 +170,13 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   height: 100%;
   min-height: 0;
-  /* Grid: footer rows cannot wrap, reorder, or grow past the fixed zone.
-     Column 1 = control, column 2 = +/- buttons. Full-width rows (e.g. the
-     mute switch) span both columns. */
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 18px;
-  align-content: end;
-  align-items: center;
-  gap: 6px 4px;
+  /* Simple stack: the footer renders app-defined slot content, so it must
+     not impose a column grid (grid auto-placement pushed sibling steppers
+     into shared rows). Each stepper owns its input+buttons layout. */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
   padding: 0 4px 8px;
 }
 </style>

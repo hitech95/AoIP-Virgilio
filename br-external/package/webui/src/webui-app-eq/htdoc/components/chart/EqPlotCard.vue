@@ -2,7 +2,7 @@
   <!-- The graph is ALWAYS visible: grid, curves and the FFT spectrum canvas
          render even when no filter block is selected. -->
   <el-container direction="vertical" class="plot-card">
-    <el-header height="auto">
+    <el-header height="auto" class="plot-card__header">
       <!-- Top labels: octave (C1-C9) + frequency region rows -->
       <div class="octaves" :style="{ gridTemplateColumns: octaveColumns }">
         <div class="cell spacer"></div>
@@ -16,12 +16,12 @@
     </el-header>
 
     <!-- Plot (SVG curve grid+ tokens + spectrum canvas + gain scale) -->
-    <el-main>
+    <el-main class="plot-card__main">
       <EqPlotArea />
     </el-main>
 
     <!-- X labels: below the chart -->
-    <el-footer>
+    <el-footer class="plot-card__footer">
       <div class="x-labels">
         <template v-for="freq in majorTicks" :key="`tick${freq}`">
             <span v-if="freq !== 10 && freq !== plotFreqMax" class="freq-label"

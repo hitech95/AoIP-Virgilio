@@ -1,6 +1,5 @@
 // Response plot: labels, graph surface, gain scale, and draggable band tokens.
 
-$plot-label-gutter: 40px;
 $plot-cell-gap: 4px;
 
 .eq-page {
@@ -14,33 +13,24 @@ $plot-cell-gap: 4px;
     flex-direction: column;
     overflow: hidden;
 
-    > .plot-card__layout {
-      flex: 1;
-      min-height: 0;
-      display: flex;
-    }
-
-    &__layout {
-      min-width: 0;
-    }
-
-    &__labels {
+    &__header {
       /* Same fixed height as the filter-card headers: keeps the slider zone
          vertically aligned with the plot area. */
       flex: 0 0 var(--eq-align-head);
       height: var(--eq-align-head);
       box-sizing: border-box;
-      padding: 0 $plot-label-gutter 1px 0;
+      padding: 0 var(--eq-gainscale-w) 1px 0;
       display: flex;
       flex-direction: column;
       gap: 2px;
+      overflow: hidden;
     }
 
     &__main {
       /* Element Plus el-main defaults to overflow:auto. The aside is the
          vertical scroll owner; this pane only constrains the scalable plot.
          The top gap mirrors the fader cards so slider and plot stay aligned. */
-      flex: 1;
+      flex: 1 1 0;
       min-width: 0;
       min-height: 0;
       display: flex;
@@ -48,11 +38,13 @@ $plot-cell-gap: 4px;
       overflow: hidden;
     }
 
-    &__axis {
+    &__footer {
       flex: 0 0 var(--eq-axis-h);
       height: var(--eq-axis-h);
+      box-sizing: border-box;
       min-height: 0;
       padding: 4px var(--eq-gainscale-w) 0 0;
+      overflow: hidden;
     }
   }
 
@@ -81,9 +73,12 @@ $plot-cell-gap: 4px;
     }
   }
 
-  .freq-track {
+  .x-labels {
     position: relative;
+    display: block;
+    width: 100%;
     height: 100%;
+    min-width: 0;
   }
 
   .freq-label {
@@ -95,8 +90,11 @@ $plot-cell-gap: 4px;
   }
 
   .eq-plot-area {
-    flex: 1;
+    flex: 1 1 0;
+    width: 100%;
+    height: 100%;
     min-height: 0;
+    min-width: 0;
     display: grid;
     grid-template-columns: 1fr var(--eq-gainscale-w);
   }

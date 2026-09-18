@@ -212,7 +212,6 @@ function onQChange(v: number | undefined) {
 }
 
 .switch-row {
-  grid-column: 1 / -1;
   height: 22px;
   display: flex;
   align-items: center;

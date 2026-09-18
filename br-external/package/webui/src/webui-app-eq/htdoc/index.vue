@@ -113,6 +113,7 @@
 .eq-page .chart-aside {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
