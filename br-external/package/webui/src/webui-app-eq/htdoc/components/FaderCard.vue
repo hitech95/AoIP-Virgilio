@@ -92,7 +92,7 @@ onBeforeUnmount(() => {
   width: var(--fader-width);
   height: 100%;
 
-  &:deep(> .el-card__header) {
+  :deep(.el-card__header) {
     box-sizing: border-box;
     flex: 0 0 var(--eq-align-head);
     height: var(--eq-align-head);
@@ -102,7 +102,7 @@ onBeforeUnmount(() => {
     padding: 0 4px;
   }
 
-  &:deep(> .el-card__body) {
+  :deep(.el-card__body) {
     flex: 1;
     min-height: 0;
     display: flex;
@@ -110,7 +110,7 @@ onBeforeUnmount(() => {
     padding: var(--eq-fader-gap) 0 var(--eq-axis-h);
   }
 
-  &:deep(> .el-card__footer) {
+  :deep(.el-card__footer) {
     box-sizing: border-box;
     flex: 0 0 var(--eq-vizbar-h);
     height: var(--eq-vizbar-h);

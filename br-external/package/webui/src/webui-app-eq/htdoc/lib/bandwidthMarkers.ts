@@ -5,7 +5,6 @@
  */
 
 import type { EqBand } from './filterResponse'
-import { bandResponseDb } from './filterResponse'
 
 export interface BandwidthMarkers {
   leftFreq: number | null
@@ -13,7 +12,11 @@ export interface BandwidthMarkers {
 }
 
 /**
- * Calculate -3 dB bandwidth markers for a band
+ * Calculate constant-Q bandwidth markers for a band.
+ *
+ * Searching for `gain - 3 dB` fails for cuts and 0 dB peaking filters.
+ * Q defines the bandwidth independently of gain, so derive the endpoints
+ * directly while preserving f0 as their geometric mean.
  * Only applicable for Peaking and Notch
  */
 export function calculateBandwidthMarkers(band: EqBand): BandwidthMarkers {
@@ -21,65 +24,13 @@ export function calculateBandwidthMarkers(band: EqBand): BandwidthMarkers {
     return { leftFreq: null, rightFreq: null }
   }
 
-  const f0 = band.freq
-  const Q = band.q
+  const f0 = Math.max(10, Math.min(30000, band.freq))
+  const bandwidth = f0 / Math.max(0.1, band.q)
+  const leftFreq = (Math.sqrt(bandwidth * bandwidth + 4 * f0 * f0) - bandwidth) / 2
+  const rightFreq = leftFreq + bandwidth
 
-  const peakGain = band.type === 'Peaking' ? band.gain : 0
-  const targetDb = peakGain - 3
-
-  const approxBandwidth = f0 / Q
-  const searchSpan = approxBandwidth * 3
-
-  const fMin = Math.max(10, f0 - searchSpan)
-  const fMax = Math.min(30000, f0 + searchSpan)
-
-  const leftFreq = findCrossing(band, targetDb, fMin, f0)
-  const rightFreq = findCrossing(band, targetDb, f0, fMax)
-
-  return { leftFreq, rightFreq }
-}
-
-/**
- * Find frequency where band response crosses target dB in given range
- * Uses bisection search for accuracy
- */
-function findCrossing(band: EqBand, targetDb: number, fStart: number, fEnd: number): number | null {
-  const MAX_ITERATIONS = 30
-  const TOLERANCE = 0.1
-
-  const responseStart = bandResponseDb(fStart, band)
-  const responseEnd = bandResponseDb(fEnd, band)
-
-  const crossingExists =
-    (responseStart > targetDb && responseEnd < targetDb) ||
-    (responseStart < targetDb && responseEnd > targetDb)
-
-  if (!crossingExists) {
-    return null
+  return {
+    leftFreq: Math.max(10, leftFreq),
+    rightFreq: Math.min(30000, rightFreq),
   }
-
-  let left = fStart
-  let right = fEnd
-
-  for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const mid = (left + right) / 2
-    const responseMid = bandResponseDb(mid, band)
-
-    if (Math.abs(responseMid - targetDb) < 0.01) {
-      return mid
-    }
-
-    if (Math.abs(right - left) < TOLERANCE) {
-      return mid
-    }
-
-    const responseLeft = bandResponseDb(left, band)
-    if ((responseLeft > targetDb) === (responseMid > targetDb)) {
-      left = mid
-    } else {
-      right = mid
-    }
-  }
-
-  return (left + right) / 2
 }
