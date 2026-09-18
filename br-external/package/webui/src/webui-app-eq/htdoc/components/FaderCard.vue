@@ -92,32 +92,6 @@ onBeforeUnmount(() => {
   width: var(--fader-width);
   height: 100%;
 
-  :deep(.el-card__header) {
-    box-sizing: border-box;
-    flex: 0 0 var(--eq-align-head);
-    height: var(--eq-align-head);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 4px;
-  }
-
-  :deep(.el-card__body) {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    padding: var(--eq-fader-gap) 0 var(--eq-axis-h);
-  }
-
-  :deep(.el-card__footer) {
-    box-sizing: border-box;
-    flex: 0 0 var(--eq-vizbar-h);
-    height: var(--eq-vizbar-h);
-    min-height: 0;
-    padding: 0;
-  }
-
   :deep(.el-slider.is-vertical),
   :deep(.el-slider__runway) {
     height: 100%;
@@ -152,6 +126,35 @@ onBeforeUnmount(() => {
   :deep(.el-slider__marks-text) {
     display: none;
   }
+}
+
+/* Element Plus renders these nodes inside its own component scope. Use exact
+   global direct-child selectors instead of scoped/deep nesting: it keeps PRE
+   and filter cards on the same 35px / plot-body / 120px-footer geometry. */
+:global(.fader-card > .el-card__header) {
+  box-sizing: border-box;
+  flex: 0 0 var(--eq-align-head);
+  height: var(--eq-align-head);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+:global(.fader-card > .el-card__body) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--eq-fader-gap) 0 var(--eq-axis-h);
+}
+
+:global(.fader-card > .el-card__footer) {
+  box-sizing: border-box;
+  flex: 0 0 var(--eq-vizbar-h);
+  height: var(--eq-vizbar-h);
+  min-height: 0;
+  padding: 0;
 }
 
 .fader-card__slider {
