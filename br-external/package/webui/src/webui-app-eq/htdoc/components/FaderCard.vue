@@ -180,6 +180,6 @@ onBeforeUnmount(() => {
   flex-direction: column;
   justify-content: flex-end;
   gap: 6px;
-  padding: 0 4px 8px;
+  padding: 8px 4px 8px;
 }
 </style>
