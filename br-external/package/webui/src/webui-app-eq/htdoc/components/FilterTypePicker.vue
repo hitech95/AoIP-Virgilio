@@ -47,3 +47,78 @@ function handleSelect(type: EqBand['type']) {
   emit('select', type)
 }
 </script>
+
+<style scoped lang="scss">
+.filter-type-picker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.filter-option.el-button {
+  margin: 0;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 6px 2px;
+
+  &:not(.is-current):hover,
+  &:not(.is-current):focus {
+    border-color: color-mix(in srgb, var(--band-color) 45%, var(--el-bg-color));
+    background: color-mix(in srgb, var(--band-color) 12%, var(--el-bg-color));
+    color: var(--band-color);
+
+    .opt-subtitle {
+      color: var(--band-color);
+      opacity: 0.75;
+    }
+  }
+
+  &.is-current {
+    border-color: color-mix(in srgb, var(--band-color) 45%, var(--el-bg-color));
+    background: color-mix(in srgb, var(--band-color) 12%, var(--el-bg-color));
+    color: var(--band-color);
+
+    &:hover,
+    &:focus {
+      border-color: var(--band-color);
+      background: color-mix(in srgb, var(--band-color) 20%, var(--el-bg-color));
+      color: var(--band-color);
+    }
+
+    .opt-subtitle {
+      color: var(--band-color);
+      opacity: 0.75;
+    }
+  }
+}
+
+.f-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.opt-icon {
+  width: 18px;
+  height: 18px;
+  color: currentColor;
+}
+
+.opt-label {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
+  white-space: normal;
+}
+
+.opt-subtitle {
+  font-size: 11px;
+  line-height: 1.1;
+  text-align: center;
+  white-space: normal;
+  color: var(--el-text-color-secondary);
+}
+</style>
