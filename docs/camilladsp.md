@@ -9,7 +9,8 @@ the UCI configuration.
 
 Related pages: [inferno](inferno.md) (Dante/clock side),
 [alsa](alsa.md) (device resolution, plugin settings precedence),
-[crossover analysis](crossover-to-camilladsp.md) (real filter design).
+[crossover analysis](crossover-to-camilladsp.md) (real filter design),
+[policy reference](camilladsp-policy.md) (protected pipeline gating).
 
 ## Role in the firmware
 
