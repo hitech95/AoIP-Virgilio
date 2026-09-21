@@ -7,8 +7,9 @@
  * cannot auth_request selectively): same cookie+addr check as /_auth.
  */
 
-import { writefile, lsdir, unlink, mkdir, stat, basename } from "fs";
-import { SID_COOKIE, MAX_UPLOAD, ERR_INVALID_ARGUMENT, ERR_UNAUTHORIZED } from "util";
+import { writefile, readfile, lsdir, unlink, mkdir, stat, basename } from "fs";
+import { SID_COOKIE, MAX_UPLOAD, ERR_NOT_FOUND,
+         ERR_INVALID_ARGUMENT, ERR_UNAUTHORIZED, ERR_UNKNOWN } from "util";
 import { http_response, cookie_value } from "http";
 import { session_get } from "sessions";
 
@@ -121,4 +122,41 @@ function files_delete(params) {
 	return {};
 }
 
-export { handle_upload, files_list, files_delete };
+/* --- profiles (YAML block presets, applied from the FE) ----------------- */
+
+function profile_name(name) {
+	let safe = sanitize_name(name);
+	if (!safe)
+		return null;
+	let l = length(safe);
+	if (substr(safe, l - 4) != ".yml" && substr(safe, l - 5) != ".yaml")
+		return null;
+	return safe;
+}
+
+function files_read(params) {
+	let safe = profile_name(params?.name);
+	if (!safe)
+		return { error: { code: ERR_INVALID_ARGUMENT, message: "profile name (.yml/.yaml) required" } };
+	let content = readfile(UPLOAD_DIR + "/" + safe);
+	if (content == null)
+		return { error: { code: ERR_NOT_FOUND, message: `no such profile ${safe}` } };
+	return { name: safe, content: content };
+}
+
+function files_write(params) {
+	let safe = profile_name(params?.name);
+	let content = params?.content;
+	if (!safe)
+		return { error: { code: ERR_INVALID_ARGUMENT, message: "profile name (.yml/.yaml) required" } };
+	if (type(content) != "string" || length(content) == 0)
+		return { error: { code: ERR_INVALID_ARGUMENT, message: "content required" } };
+	if (length(content) > (256 * 1024))
+		return { error: { code: ERR_INVALID_ARGUMENT, message: "profile too large (max 256 KiB)" } };
+	upload_dir_ensure();
+	if (writefile(UPLOAD_DIR + "/" + safe, content) === false)
+		return { error: { code: ERR_UNKNOWN, message: "write failed" } };
+	return { name: safe };
+}
+
+export { handle_upload, files_list, files_delete, files_read, files_write };
