@@ -1,28 +1,37 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import viteCompression from 'vite-plugin-compression'
 import vueI18n from '@intlify/unplugin-vue-i18n/vite'
-import { loadEnv } from 'vite'
 
 const env = loadEnv('', process.cwd())
 
 export default defineConfig({
   plugins: [
     vue(),
-    viteCompression({ deleteOriginFile: true }),
-    vueI18n({ compositionOnly: false })
+    viteCompression({
+      deleteOriginFile: true
+    }),
+    vueI18n({
+      compositionOnly: false
+    })
   ],
   build: {
     cssCodeSplit: true,
     lib: {
       formats: ['umd'],
-      entry: 'index.vue',
+      /* Multi-page app: build-frontend.sh sets VITE_ENTRY per page
+       * (pages/<x>.vue -> view "<app>-<x>"); default single-page entry. */
+      entry: env.VITE_ENTRY || 'index.vue',
       name: 'oui-com-' + env.VITE_APP_NAME,
       fileName: env.VITE_APP_NAME
     },
     rollupOptions: {
       external: ['vue'],
-      output: { globals: { vue: 'Vue' } }
+      output: {
+        globals: {
+          vue: 'Vue'
+        }
+      }
     }
   }
 })

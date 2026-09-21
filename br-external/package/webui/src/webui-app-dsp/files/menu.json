@@ -7,26 +7,14 @@
     },
     "/dsp/configuration": {
         "title": "Configuration",
-        "view": "filters",
+        "view": "dsp-filters",
         "index": 10,
         "locales": { "en": "Configuration", "it": "Configurazione" }
     },
-    "/dsp/eq": {
-        "title": "EQ",
-        "view": "eq",
-        "index": 20,
-        "locales": { "en": "EQ", "it": "EQ" }
-    },
-    "/dsp/pipeline": {
-        "title": "Pipeline",
-        "view": "pipeline",
-        "index": 30,
-        "locales": { "en": "Pipeline", "it": "Pipeline" }
-    },
     "/dsp/files": {
-        "title": "Files",
-        "view": "files",
+        "title": "Profiles",
+        "view": "dsp-profiles",
         "index": 40,
-        "locales": { "en": "Files", "it": "File" }
+        "locales": { "en": "Profiles", "it": "Profili" }
     }
 }

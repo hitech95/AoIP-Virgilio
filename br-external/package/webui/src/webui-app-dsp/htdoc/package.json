@@ -2,7 +2,8 @@
   "name": "oui-app",
   "private": true,
   "scripts": {
-    "build": "vite build"
+    "build": "vite build",
+    "watch": "vite build --watch"
   },
   "devDependencies": {
     "@intlify/unplugin-vue-i18n": "^4.0.0",
@@ -13,8 +14,6 @@
     "sass": "^1.86.0"
   },
   "dependencies": {
-    "@vue-flow/core": "^1.47.0",
-    "@vue-flow/background": "^1.3.2",
-    "@vue-flow/controls": "^1.1.2"
+    "js-yaml": "^4.1.0"
   }
 }
