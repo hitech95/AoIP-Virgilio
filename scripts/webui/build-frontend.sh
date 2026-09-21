@@ -41,17 +41,23 @@ for p in "${PATCHES}"/*.patch; do
 	patch -d "${WORK}" -Np1 --fuzz=0 < "$p"
 done
 
-build_app() { # <dir> <VITE_APP_NAME>
-	local dir="$1" name="$2"
-	echo "=== building app: ${name}"
-	echo "VITE_APP_NAME=${name}" > "${dir}/.env.local"
-	npm --prefix "${dir}" install --no-audit --no-fund >/dev/null
+install_app() { # <dir>
+	npm --prefix "$1" install --no-audit --no-fund >/dev/null
+}
+
+# Build ONE view. Entry defaults to index.vue (single-page app); a
+# multi-page app passes pages/<x>.vue -> view "<app>-<x>".
+build_app() { # <dir> <VITE_APP_NAME> [entry=index.vue]
+	local dir="$1" name="$2" entry="${3:-index.vue}"
+	echo "=== building view: ${name} (${entry})"
+	printf 'VITE_APP_NAME=%s\nVITE_ENTRY=%s\n' "${name}" "${entry}" > "${dir}/.env.local"
 	npm --prefix "${dir}" run build >/dev/null
 }
 
 export HOME="${HOME:-$(mktemp -d)}"
 
 # --- shell ----------------------------------------------------------------
+install_app "${WORK}/oui-ui-core/htdoc"
 build_app "${WORK}/oui-ui-core/htdoc" ui-core
 mkdir -p "${OUT}/ui"
 cp -a "${WORK}/oui-ui-core/htdoc/dist/." "${OUT}/ui/"
@@ -69,13 +75,25 @@ mkdir -p "${OUT}/menu.d"
 cp "${OUI}/oui-ui-core/files/menu.json" "${OUT}/menu.d/00-core.json"
 
 # --- apps: UMD bundles -> ui/views/, menus -> menu.d/ ----------------------
+# A module may register MULTIPLE pages: every htdoc/pages/<x>.vue becomes
+# its own view bundle named "<app>-<x>" (Vite empties dist per build, so
+# harvest it after each page). No pages/ dir -> single index.vue view.
 mkdir -p "${OUT}/ui/views"
 for appdir in "${WORK}/applications"/*; do
 	[ -d "${appdir}/htdoc" ] || continue
 	# view names strip BOTH vendor prefixes (OUI: APP_NAME:=home etc.)
 	name="$(basename "${appdir}" | sed 's/^oui-app-//; s/^webui-app-//')"
-	build_app "${appdir}/htdoc" "${name}"
-	cp -a "${appdir}/htdoc/dist/." "${OUT}/ui/views/"
+	install_app "${appdir}/htdoc"
+	if compgen -G "${appdir}/htdoc/pages/*.vue" > /dev/null; then
+		for page in "${appdir}"/htdoc/pages/*.vue; do
+			base="$(basename "${page}" .vue)"
+			build_app "${appdir}/htdoc" "${name}-${base}" "pages/${base}.vue"
+			cp -a "${appdir}/htdoc/dist/." "${OUT}/ui/views/"
+		done
+	else
+		build_app "${appdir}/htdoc" "${name}"
+		cp -a "${appdir}/htdoc/dist/." "${OUT}/ui/views/"
+	fi
 	if [ -f "${appdir}/files/menu.json" ]; then
 		cp "${appdir}/files/menu.json" "${OUT}/menu.d/${name}.json"
 	fi

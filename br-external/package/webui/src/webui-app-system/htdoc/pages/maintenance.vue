@@ -73,4 +73,4 @@ export default {
 .hint { color: #888; font-size: 13px; }
 </style>
 
-<i18n src="./locale.json"/>
+<i18n src="../locale.json"/>

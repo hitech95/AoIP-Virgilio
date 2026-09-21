@@ -19,7 +19,9 @@ export default defineConfig({
     cssCodeSplit: true,
     lib: {
       formats: ['umd'],
-      entry: 'index.vue',
+      /* Multi-page app: build-frontend.sh sets VITE_ENTRY per page
+       * (pages/<x>.vue -> view "<app>-<x>"); default single-page entry. */
+      entry: env.VITE_ENTRY || 'index.vue',
       name: 'oui-com-' + env.VITE_APP_NAME,
       fileName: env.VITE_APP_NAME
     },

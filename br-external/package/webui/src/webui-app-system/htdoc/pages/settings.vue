@@ -70,7 +70,7 @@ export default {
           section: '@system[0]',
           values: {
             hostname: this.formValue.hostname,
-            timezone: zoneinfo.filter(item => item[0] === this.formValue.zonename)[0][1],
+            timezone: (this.zoneinfo.filter(item => item[0] === this.formValue.zonename)[0] ?? ['', 'UTC'])[1],
             zonename: this.formValue.zonename === 'UTC' ? '' : this.formValue.zonename
           }
         })
@@ -89,4 +89,4 @@ export default {
 }
 </script>
 
-<i18n src="./locale.json"/>
+<i18n src="../locale.json"/>

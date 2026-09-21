@@ -71,4 +71,4 @@ export default {
 }
 </script>
 
-<i18n src="./locale.json"/>
+<i18n src="../locale.json"/>
