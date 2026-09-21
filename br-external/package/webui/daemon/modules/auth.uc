@@ -1,17 +1,25 @@
 /*
  * auth -- /etc/shadow login, password change and the firstboot flow.
  *
- * Verify: busybox `cryptpw PASSWORD SALT` (SALT = full stored hash, so
+ * Verify: busybox `cryptpw -P 0 SALT` (SALT = full stored hash, so
  * crypt() derives the method from the $6$ prefix). Commands go through
  * /bin/sh -c strings -- shq() escaping everywhere.
+ *
+ * Passwords are NEVER placed in argv (readable via /proc/<pid>/cmdline
+ * while cryptpw runs); they travel on the stdin pipe instead (LuCI/rpcd
+ * model: verify against /etc/shadow in-process). ucode popen is
+ * one-directional, so cryptpw's stdout is redirected to a root-only
+ * scratch file under /run (world-not-writable: non-root cannot
+ * pre-create or symlink it) that is unlinked right after the read.
  */
 
-import { readfile, popen } from "fs";
+import { readfile, popen, unlink } from "fs";
 import { shq, log_err,
          ERR_INVALID_ARGUMENT, ERR_UNAUTHORIZED, ERR_UNKNOWN } from "util";
 import { session_reset } from "sessions";
 
 let shadow_path = "/etc/shadow";
+const PW_TMP = "/run/webui.pwcheck.tmp";
 
 function init(path) {
 	if (path)
@@ -40,11 +48,17 @@ function verify_password(user, password) {
 	if (hash == "" || hash == "!")
 		return "empty";
 
-	let p = popen(`cryptpw ${shq(password)} ${shq(hash)}`, "r");
+	/* busybox cryptpw: with -P the positional SALT argument is IGNORED
+	 * (random $5$ hash) -- the salt must come via -S (verified on the
+	 * target: -S derives method+salt from the full stored hash). */
+	let p = popen(`cryptpw -P 0 -S ${shq(hash)} > ${PW_TMP}`, "w");
 	if (!p)
 		return "error";
-	let out = p.read(256);
+	p.write(password + "\n");
 	p.close();
+
+	let out = readfile(PW_TMP) ?? "";
+	try { unlink(PW_TMP); } catch (e) {}
 
 	return (trim(out) == hash) ? "ok" : "bad";
 }
@@ -54,11 +68,13 @@ function write_new_root_password(newpw) {
 	if (type(newpw) != "string" || length(newpw) < 6)
 		return { error: { code: ERR_INVALID_ARGUMENT, message: "new password too short (min 6)" } };
 
-	let p = popen(`mkpasswd -m sha512 ${shq(newpw)}`, "r");
+	let p = popen(`mkpasswd -m sha512 -P 0 > ${PW_TMP}`, "w");
 	if (!p)
 		return { error: { code: ERR_UNKNOWN, message: "mkpasswd failed" } };
-	let hash = trim(p.read(256) ?? "");
+	p.write(newpw + "\n");
 	p.close();
+	let hash = trim(readfile(PW_TMP) ?? "");
+	try { unlink(PW_TMP); } catch (e) {}
 
 	if (length(hash) < 20 || substr(hash, 0, 3) != "$6$")
 		return { error: { code: ERR_UNKNOWN, message: "mkpasswd returned garbage" } };
