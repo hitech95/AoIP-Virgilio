@@ -5,7 +5,7 @@
     :model-value="band.gain"
     :color="bandColor"
     :marks="gainMarks"
-    :disabled="!band.enabled || !supportsGain"
+    :disabled="off || !supportsGain"
     :dimmed="!supportsGain"
     @input="(value) => setBandGain(bandIndex, value)"
     @activate="handleSelect"
@@ -14,11 +14,11 @@
       <div class="toolbar">
         <BandOrderIcon class="order-icon" :position="orderNumber" :title="filterName" :size="24" :color="bandColor" />
         <el-popover v-model:visible="pickerVisible" placement="bottom-start" :width="230" trigger="click"
-          :disabled="!band.enabled">
+          :disabled="off">
           <template #reference>
-            <button type="button" class="type-btn" :disabled="!band.enabled"
+            <button type="button" class="type-btn" :disabled="off"
               :title="`Band ${bandIndex + 1} — ${band.type} (change type)`"
-              :aria-label="`Change filter type for band ${bandIndex + 1}`" @click.stop>
+              :aria-label="$t('Change filter type for band {n}', { n: bandIndex + 1 })" @click.stop>
               <FilterIcon :type="band.type" />
             </button>
           </template>
@@ -31,14 +31,14 @@
     <template #footer>
       <!-- Unlabeled Gain/Hz/Q steppers with the mute switch between gain and
            frequency; the preamp card footer carries the labels. -->
-      <div class="f-stepper" title="Gain (dB)">
+      <div class="f-stepper" :title="$t('Gain (dB)')">
         <el-input-number class="f-input" size="small" :controls="false" :model-value="band.gain" :min="-24" :max="24"
-          :step="0.5" :precision="1" :disabled="!band.enabled || !supportsGain" aria-label="Gain in decibel"
+          :step="0.5" :precision="1" :disabled="off || !supportsGain" :aria-label="$t('Gain in decibel')"
           @change="(v: number | undefined) => v !== undefined && setBandGain(bandIndex, v)" />
         <div class="f-btns">
-          <button type="button" class="f-btn" :disabled="!band.enabled || !supportsGain" aria-label="Increase gain"
+          <button type="button" class="f-btn" :disabled="off || !supportsGain" :aria-label="$t('Increase gain')"
             @click="setBandGain(bandIndex, band.gain + 0.5)">+</button>
-          <button type="button" class="f-btn" :disabled="!band.enabled || !supportsGain" aria-label="Decrease gain"
+          <button type="button" class="f-btn" :disabled="off || !supportsGain" :aria-label="$t('Decrease gain')"
             @click="setBandGain(bandIndex, band.gain - 0.5)">−</button>
         </div>
       </div>
@@ -48,24 +48,24 @@
           @change="toggleMute" />
       </div>
 
-      <div class="f-stepper" title="Frequency (Hz)">
+      <div class="f-stepper" :title="$t('Frequency (Hz)')">
         <el-input-number class="f-input" size="small" :controls="false" :model-value="band.freq" :min="10" :max="30000"
-          :step="10" :precision="0" :disabled="!band.enabled" aria-label="Frequency in hertz" @change="onFreqChange" />
+          :step="10" :precision="0" :disabled="off" :aria-label="$t('Frequency in hertz')" @change="onFreqChange" />
         <div class="f-btns">
-          <button type="button" class="f-btn" :disabled="!band.enabled" aria-label="Increase frequency"
+          <button type="button" class="f-btn" :disabled="off" :aria-label="$t('Increase frequency')"
             @click="setBandFreq(bandIndex, band.freq + 10)">+</button>
-          <button type="button" class="f-btn" :disabled="!band.enabled" aria-label="Decrease frequency"
+          <button type="button" class="f-btn" :disabled="off" :aria-label="$t('Decrease frequency')"
             @click="setBandFreq(bandIndex, band.freq - 10)">−</button>
         </div>
       </div>
 
-      <div class="f-stepper" title="Quality (Q)">
+      <div class="f-stepper" :title="$t('Quality (Q)')">
         <el-input-number class="f-input" size="small" :controls="false" :model-value="band.q" :min="0.1" :max="10"
-          :step="0.1" :precision="1" :disabled="!band.enabled" aria-label="Quality factor" @change="onQChange" />
+          :step="0.1" :precision="1" :disabled="off" :aria-label="$t('Quality factor')" @change="onQChange" />
         <div class="f-btns">
-          <button type="button" class="f-btn" :disabled="!band.enabled" aria-label="Increase Q"
+          <button type="button" class="f-btn" :disabled="off" :aria-label="$t('Increase Q')"
             @click="setBandQ(bandIndex, band.q + 0.1)">+</button>
-          <button type="button" class="f-btn" :disabled="!band.enabled" aria-label="Decrease Q"
+          <button type="button" class="f-btn" :disabled="off" :aria-label="$t('Decrease Q')"
             @click="setBandQ(bandIndex, band.q - 0.1)">−</button>
         </div>
       </div>
@@ -99,7 +99,12 @@ const props = defineProps<{
   orderNumber: number
   filterName: string
   selected: boolean
+  /** Policy: the whole block is protected (locked) -- freeze every control */
+  readOnly?: boolean
 }>()
+
+/** true when the band is muted OR the owning block is policy-locked */
+const off = computed(() => props.readOnly || !props.band.enabled)
 
 const pickerVisible = ref(false)
 const bandColor = `var(--band-${(props.bandIndex % 10) + 1})`
@@ -278,3 +283,5 @@ function onQChange(v: number | undefined) {
   }
 }
 </style>
+
+<i18n src="../../locale.json"/>

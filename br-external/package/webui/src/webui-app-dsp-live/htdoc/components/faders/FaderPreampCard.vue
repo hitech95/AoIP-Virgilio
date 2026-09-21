@@ -4,8 +4,8 @@
     :model-value="eq.preampGain"
     color="var(--band-10)"
     :marks="gainMarks"
-    :disabled="!eq.preampAvailable"
-    :dimmed="!eq.preampAvailable"
+    :disabled="!eq.preampAvailable || readOnly"
+    :dimmed="!eq.preampAvailable || readOnly"
     @input="setPreampGain"
   >
     <template #header>
@@ -34,6 +34,11 @@
 <script setup lang="ts">
 import FaderCard from '../FaderCard.vue'
 import { eq, setPreampGain } from '../../stores/eqStore.ts'
+
+defineProps<{
+  /** Policy: the whole block is protected (locked) -- freeze the fader */
+  readOnly?: boolean
+}>()
 
 // Gain scale dots at every 6 dB inside the ±24 dB range; the labels are
 // hidden in the stylesheet, leaving only the dot marks.
