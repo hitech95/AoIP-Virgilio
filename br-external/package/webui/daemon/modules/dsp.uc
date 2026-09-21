@@ -7,13 +7,15 @@
  */
 
 import * as uci from "uci";
-import { readfile, writefile, unlink, popen } from "fs";
+import { readfile, writefile, unlink, popen, mkdir } from "fs";
 import { shq, ERR_INVALID_ARGUMENT, ERR_NOT_FOUND, ERR_PERMISSION_DENIED } from "util";
 import { uci_sections } from "ucix";
 
 const GENCONF = "/usr/bin/camilladsp-genconf";
 const CDSP_CONFIG = "/etc/config/camilladsp";
-const CDSP_CHECK = "/tmp/camilladsp.yml.check";
+/* Root-owned path only: a fixed name under /tmp would be symlink-able by
+ * any local user (genconf writes through it as root -> file clobber). */
+const CDSP_CHECK = "/run/webui/camilladsp.yml.check";
 
 /* slot model: { <subchain>: { policy, channels, allow, max_steps,
  *   step: section id, names: [current user filters] } } */
@@ -94,6 +96,7 @@ function filters_schema() {
 
 /* run genconf on the candidate uci; non-empty stderr (or rc!=0) = reject */
 function genconf_check() {
+	try { mkdir("/run/webui", 0700); } catch (e) {}
 	let p = popen(`${GENCONF} ${shq(CDSP_CHECK)} 2>&1`, "r");
 	if (!p)
 		return "genconf not runnable";
