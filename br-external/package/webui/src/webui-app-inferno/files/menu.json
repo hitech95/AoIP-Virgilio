@@ -1,0 +1,8 @@
+{
+    "/system/inferno": {
+        "title": "AoIP interface",
+        "view": "inferno",
+        "index": 15,
+        "locales": { "en": "AoIP interface", "it": "Interfaccia AoIP" }
+    }
+}
