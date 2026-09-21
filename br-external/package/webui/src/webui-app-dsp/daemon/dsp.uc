@@ -1,6 +1,11 @@
 /*
- * dsp -- protected-pipeline editing (plan/webui.md §9): filters/mix on
- * the uci subchain model. Three validation layers:
+ * dsp -- BE module for webui-app-dsp: generic/basic DSP configuration
+ * (settings, protected-pipeline editing, mixers, runtime pipeline map).
+ * The FE modules webui-app-{eq,pipeline,filters} depend on this module
+ * (they call dsp.* over RPC; nothing else provides it).
+ *
+ * Protected-pipeline editing (plan/webui.md §9): filters/mix on the uci
+ * subchain model. Three validation layers:
  *   1. here (allow list, max_steps, locked subchains)
  *   2. genconf dry-run (transactional: restore on failure)
  *   3. camilladsp manifest enforcement (patch 0003) at SIGHUP
@@ -13,7 +18,7 @@ import { uci_sections } from "ucix";
 
 const GENCONF = "/usr/bin/camilladsp-genconf";
 const CDSP_CONFIG = "/etc/config/camilladsp";
-/* Root-owned path only: a fixed name under /tmp would be symlink-able by
+/* Root-owned dir only: a fixed name under /tmp would be symlink-able by
  * any local user (genconf writes through it as root -> file clobber). */
 const CDSP_CHECK = "/run/webui/camilladsp.yml.check";
 
@@ -316,6 +321,70 @@ function mix_get() {
 	return out;
 }
 
+/* detailed view for the mixer tab: per user_gains mixer the derived
+ * state plus every route gain (linear), topology-ordered */
+function mixers_get() {
+	let states = mix_get();
+	let out = [];
+	for (let m in uci_sections("camilladsp", "mixer")) {
+		if (m.user_gains != "1")
+			continue;
+		let routes = [];
+		for (let r in uci_sections("camilladsp", "mixroute"))
+			if (r.mixer == m.name)
+				push(routes, { dest: r.dest, source: r.source, gain: +r.gain });
+		sort(routes, (a, b) => (+a.dest != +b.dest)
+			? (+a.dest - +b.dest) : (+a.source - +b.source));
+		push(out, { name: m.name, state: states[m.name] ?? "custom", routes: routes });
+	}
+	return { mixers: out };
+}
+
+/* manual gain set for one user_gains mixer ("Other" in the UI): gains
+ * follow the existing locked route topology -- no route may be added
+ * or dropped, only the values change. Gains are LINEAR (0..10). */
+function mix_set_gains(params) {
+	let mixer = params?.mixer;
+	let routes = params?.routes;
+
+	if (type(routes) != "array" || length(routes) == 0)
+		return { error: { code: ERR_INVALID_ARGUMENT, message: "routes array required" } };
+
+	let exposed = {};
+	for (let m in uci_sections("camilladsp", "mixer"))
+		if (m.user_gains == "1")
+			exposed[m.name] = true;
+	if (!exposed[mixer])
+		return { error: { code: ERR_PERMISSION_DENIED, message: `mixer ${mixer} not exposed` } };
+
+	let wanted = {};
+	for (let r in routes) {
+		let g = +r?.gain;
+		if (r?.dest == null || r?.source == null || g != g || g < 0 || g > 10)
+			return { error: { code: ERR_INVALID_ARGUMENT,
+				message: "routes[] of {dest, source, gain 0..10} required" } };
+		wanted[`${r.dest}:${r.source}`] = g;
+	}
+
+	let existing = {};
+	for (let r in uci_sections("camilladsp", "mixroute"))
+		if (r.mixer == mixer)
+			existing[`${r.dest}:${r.source}`] = r[".section"];
+	if (length(existing) != length(wanted))
+		return { error: { code: ERR_INVALID_ARGUMENT, message: "routes must match the mixer topology" } };
+	for (let k in wanted)
+		if (!existing[k])
+			return { error: { code: ERR_INVALID_ARGUMENT, message: `unknown route ${k}` } };
+
+	return camilladsp_txn(() => {
+		let c = uci.cursor();
+		c.load("camilladsp");
+		for (let k in wanted)
+			c.set("camilladsp", existing[k], "gain", `${wanted[k]}`);
+		c.commit("camilladsp");
+	});
+}
+
 const DSP_OPTIONS = [
 	"samplerate", "chunksize", "format", "channels", "output_channels",
 	"capture", "playback", "gain"
@@ -326,9 +395,15 @@ function dsp_settings_get() {
 	let out = {};
 	for (let key in DSP_OPTIONS)
 		out[key] = c.get("camilladsp", "main", key);
-	let selected_sources = values(mix_get());
-	out.source = (length(selected_sources) && selected_sources[0] != "custom")
-		? selected_sources[0] : "mix";
+	/* honest aggregate of the user_gains mixers: the common selection,
+	 * or "custom" when they disagree / gains are manual (the General
+	 * tab shows that as the read-only "Other" state) */
+	let vals = values(mix_get());
+	let src = length(vals) ? vals[0] : "mix";
+	for (let v in vals)
+		if (v != src)
+			src = "custom";
+	out.source = src;
 	return out;
 }
 
@@ -425,5 +500,6 @@ function dsp_pipeline_get() {
 
 export {
 	filters_slots, filters_schema, filters_set, mix_set, mix_get,
+	mixers_get, mix_set_gains,
 	dsp_settings_get, dsp_settings_set, dsp_pipeline_get
 };
