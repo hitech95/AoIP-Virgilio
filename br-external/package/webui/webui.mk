@@ -22,7 +22,10 @@ define WEBUI_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(WEBUI_PKGDIR)/daemon/webuid \
 		$(TARGET_DIR)/usr/bin/webuid
 	$(INSTALL) -d -m 0755 $(TARGET_DIR)/usr/share/webui/ucode
-	$(INSTALL) -m 0644 $(WEBUI_PKGDIR)/daemon/modules/*.uc \
+	# core modules (daemon/core/) + per-app modules (src/webui-app-*/daemon/)
+	$(INSTALL) -m 0644 $(WEBUI_PKGDIR)/daemon/core/*.uc \
+		$(TARGET_DIR)/usr/share/webui/ucode/
+	$(INSTALL) -m 0644 $(WEBUI_PKGDIR)/src/*/daemon/*.uc \
 		$(TARGET_DIR)/usr/share/webui/ucode/
 	$(INSTALL) -D -m 0755 $(WEBUI_PKGDIR)/files/webui.init \
 		$(TARGET_DIR)/etc/init.d/webui
@@ -32,6 +35,8 @@ define WEBUI_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/etc/nginx/nginx.conf
 	$(INSTALL) -D -m 0644 $(WEBUI_PKGDIR)/files/nginx-locations.conf \
 		$(TARGET_DIR)/etc/nginx/webui-locations.conf
+	$(INSTALL) -D -m 0644 $(WEBUI_PKGDIR)/files/nginx-security-headers.conf \
+		$(TARGET_DIR)/etc/nginx/webui-security.conf
 	$(INSTALL) -d -m 0755 $(TARGET_DIR)/usr/share/webui/nginx
 	$(INSTALL) -m 0644 $(WEBUI_PKGDIR)/files/nginx-http.conf \
 		$(WEBUI_PKGDIR)/files/nginx-redirect.conf \

@@ -2,9 +2,13 @@
 /*
  * webuid -- the webui RPC daemon (plan/webui.md §4-5).
  *
- * Composition root of the module tree in /usr/share/webui/ucode/:
- *   util, http, sessions, auth, ubusx, ucix, dsp, filesx, menus,
- *   mods_* -> rpcmods, rpc, scgix
+ * Composition root. Modules install flat into /usr/share/webui/ucode/:
+ *   core (daemon/core/): util, http, sessions, auth, ubusx, ucix,
+ *     menus, rpc, scgix, mods_core, mods_uci, mods_webui, rpcmods
+ *   per-app (each webui-app-X/daemon folder): mods_dsp (+dsp), mods_files
+ *     (+filesx), mods_logs, mods_status, mods_netstat, mods_home,
+ *     mods_system -- rpcmods.uc lists the manifest; webui-app-dsp is
+ *     the dependency of webui-app-{eq,pipeline,filters}
  *
  * Endpoints (nginx routes): /_auth (auth_request), /oui-rpc (JSON RPC),
  * /oui-upload (multipart). Runs as root (shadow read, uci commit,

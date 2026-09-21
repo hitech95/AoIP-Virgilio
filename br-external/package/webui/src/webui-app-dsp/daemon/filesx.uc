@@ -2,11 +2,15 @@
  * filesx -- user uploads (FIR coefficients, EQ files) under
  * /opt/user_data/filters (UBIFS on hardware, survives factory reset).
  * Files are inert data until a conv filter references them.
+ *
+ * /oui-upload is session-gated HERE (the nginx `location /oui-` prefix
+ * cannot auth_request selectively): same cookie+addr check as /_auth.
  */
 
 import { writefile, lsdir, unlink, mkdir, stat, basename } from "fs";
-import { MAX_UPLOAD, ERR_INVALID_ARGUMENT } from "util";
-import { http_response } from "http";
+import { SID_COOKIE, MAX_UPLOAD, ERR_INVALID_ARGUMENT, ERR_UNAUTHORIZED } from "util";
+import { http_response, cookie_value } from "http";
+import { session_get } from "sessions";
 
 const UPLOAD_DIR = "/opt/user_data/filters";
 
@@ -59,6 +63,13 @@ function multipart_parse(body, content_type) {
 
 /* POST /oui-upload handler (reply is the connection-bound sink) */
 function handle_upload(env, body, reply) {
+	let sid = cookie_value(env.HTTP_COOKIE, SID_COOKIE);
+	if (!sid || !session_get(sid, env.REMOTE_ADDR ?? "")) {
+		reply(http_response(403,
+			`{"error":{"code":${ERR_UNAUTHORIZED},"message":"unauthorized"}}`));
+		return;
+	}
+
 	let parts = multipart_parse(body, env.CONTENT_TYPE);
 	if (!parts || length(parts) == 0) {
 		reply(http_response(400, '{"error":{"code":-2,"message":"multipart body required"}}'));
