@@ -20,6 +20,11 @@
     "IP address": "Indirizzo IP",
     "Netmask": "Netmask",
     "Gateway": "Gateway",
-    "Save & Apply": "Salva e applica"
+    "Save & Apply": "Salva e applica",
+    "DNS": "DNS",
+    "optional, space separated": "opzionale, separati da spazi",
+    "Configuration has been applied": "Configurazione applicata",
+    "Failed to apply": "Applicazione non riuscita",
+    "Changing these settings can lock you out of the web UI. Double-check the address before applying.": "Modificare queste impostazioni può bloccare l'accesso alla web UI. Ricontrolla l'indirizzo prima di applicare."
   }
 }

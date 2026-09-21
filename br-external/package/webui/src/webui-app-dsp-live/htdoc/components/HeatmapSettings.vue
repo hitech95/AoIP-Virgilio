@@ -1,15 +1,15 @@
 <template>
   <div class="heatmap-settings">
     <div class="section">
-      <span class="label">Mask</span>
+      <span class="label">{{ $t('Mask') }}</span>
       <el-radio-group
         size="small"
         :model-value="maskMode"
         @update:model-value="(m: HeatmapMaskMode) => emit('change', { maskMode: m })"
       >
-        <el-radio-button value="top">Top</el-radio-button>
-        <el-radio-button value="bottom">Bottom</el-radio-button>
-        <el-radio-button value="full">Full</el-radio-button>
+        <el-radio-button value="top">{{ $t('Top') }}</el-radio-button>
+        <el-radio-button value="bottom">{{ $t('Bottom') }}</el-radio-button>
+        <el-radio-button value="full">{{ $t('Full') }}</el-radio-button>
       </el-radio-group>
     </div>
 
@@ -19,12 +19,12 @@
         :model-value="highPrecision"
         @update:model-value="(v: boolean) => emit('change', { highPrecision: v })"
       >
-        High precision (slower, more stable)
+        {{ $t('High precision (slower, more stable)') }}
       </el-checkbox>
     </div>
 
     <div v-for="p in params" :key="p.key" class="section knob-row">
-      <span class="label">{{ p.label }}</span>
+      <span class="label">{{ $t(p.label) }}</span>
       <el-slider
         class="knob-slider"
         size="small"
@@ -102,3 +102,5 @@ const params = [
   },
 ]
 </script>
+
+<i18n src="../locale.json"/>

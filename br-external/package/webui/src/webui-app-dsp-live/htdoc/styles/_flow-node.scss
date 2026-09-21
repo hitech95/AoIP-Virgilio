@@ -11,7 +11,10 @@
   }
 
   .vue-flow__controls { box-shadow: 0 6px 22px var(--flow-shadow); }
-  .vue-flow__controls-button { border-color: var(--flow-border); background: var(--flow-node); color: var(--flow-text); }
+  .vue-flow__controls-button { border: 0; border-bottom: 1px solid var(--flow-border); background: var(--flow-node); color: var(--flow-text); }
+  .vue-flow__controls-button:last-child { border-bottom: 0; }
+  .vue-flow__controls-button:hover { background: var(--flow-node-alt); }
+  .vue-flow__controls-button svg { fill: currentColor; }
   .vue-flow__node:not(.selectable) { cursor: default; }
   .vue-flow__node.selectable { cursor: pointer; }
   .vue-flow__node.selectable:hover .pipeline-node { transform: translateY(-2px); box-shadow: 0 10px 24px var(--flow-shadow); }
@@ -37,19 +40,16 @@
   }
 
   .node-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .node-title { font-size: 13px; font-weight: 700; }
-  .channel-row { display: flex; align-items: center; gap: 4px; margin-top: 5px; color: var(--flow-muted); font-size: 10px; }
-  .channel-label { min-width: 0; font-weight: 600; }
-  .channel-row .el-tag { border-radius: 999px; font-weight: 700; }
+  .channel-row { display: flex; align-items: center; gap: 4px; margin-top: 5px; color: var(--flow-muted); }
+  .channel-label { min-width: 0; }
   .channel-0 { color: #1769aa; border-color: #51a5df; background: #e5f3ff; }
   .channel-1 { color: #9c2869; border-color: #e67ab8; background: #fff0f7; }
-  .node-detail { margin-top: 5px; color: var(--flow-muted); font-size: 10px; }
+  .node-detail { margin-top: 5px; color: var(--flow-muted); }
   .applied-filters, .destination-sources { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
-  .applied-filters .el-tag, .destination-sources .el-tag { font-size: 10px; }
   .mixer-destinations { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 7px; }
   .mixer-destination { padding: 5px; border: 1px solid var(--flow-border); border-radius: 5px; background: var(--flow-node-alt); }
   .mixer-destination.muted { opacity: .55; }
-  .destination-label { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; }
+  .destination-label { display: flex; justify-content: space-between; }
   .vue-flow__handle { width: 10px; height: 10px; border: 2px solid var(--flow-node); border-radius: 50%; background: var(--el-color-primary); }
   .vue-flow__handle-left { box-shadow: -2px 0 0 #409eff; }
   .vue-flow__handle-right { box-shadow: 2px 0 0 var(--el-color-success); }
@@ -58,4 +58,5 @@
 html.dark .pipeline-page {
   .channel-0 { color: #59aeff; border-color: #28699d; background: #15395b; }
   .channel-1 { color: #ff8ccd; border-color: #91406f; background: #4a1d3e; }
+  .vue-flow__controls { border: 1px solid var(--flow-border); background: var(--flow-node); }
 }

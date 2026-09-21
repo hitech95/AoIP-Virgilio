@@ -23,6 +23,12 @@
     "New password": "Nuova password",
     "Repeat new password": "Ripeti la nuova password",
     "Set password and log in": "Imposta password e accedi",
-    "wrong username or password": "utente o password errati"
+    "wrong username or password": "utente o password errati",
+    "Please enter username": "Inserisci il nome utente",
+    "Please enter password": "Inserisci la password",
+    "At least 6 characters": "Almeno 6 caratteri",
+    "Passwords do not match": "Le password non coincidono",
+    "No administrator password is set. Choose one to secure this device.": "Nessuna password amministratore impostata. Scegline una per proteggere il dispositivo.",
+    "Password set, please log in": "Password impostata, accedi"
   }
 }

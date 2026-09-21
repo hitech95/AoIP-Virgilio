@@ -22,5 +22,29 @@
     "ptp monitor is not answering": "ptp monitor is not answering",
     "camilladsp is not answering": "camilladsp is not answering",
     "Dante": "Dante"
+  },
+  "it": {
+    "PTP": "PTP",
+    "CamillaDSP": "CamillaDSP",
+    "Logs": "Log",
+    "Not locked": "Non sincronizzato",
+    "Locked": "Sincronizzato",
+    "Mode": "Modalità",
+    "Domain": "Dominio",
+    "PTP version": "Versione PTP",
+    "Priority1": "Priorità 1",
+    "Freq correction": "Correzione di frequenza",
+    "Updates": "Aggiornamenti",
+    "State": "Stato",
+    "Sample rate": "Frequenza di campionamento",
+    "Volume": "Volume",
+    "Processing load": "Carico di elaborazione",
+    "Buffer level": "Livello buffer",
+    "Clipped samples": "Campioni clippati",
+    "Stop reason": "Motivo di arresto",
+    "No data": "Nessun dato",
+    "ptp monitor is not answering": "il monitor ptp non risponde",
+    "camilladsp is not answering": "camilladsp non risponde",
+    "Dante": "Dante"
   }
 }

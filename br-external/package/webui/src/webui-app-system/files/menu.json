@@ -7,19 +7,19 @@
     },
     "/system/settings": {
         "title": "Settings",
-        "view": "system",
+        "view": "system-settings",
         "index": 10,
         "locales": { "en": "Settings", "it": "Impostazioni" }
     },
     "/system/password": {
         "title": "Password",
-        "view": "passwd",
+        "view": "system-password",
         "index": 20,
         "locales": { "en": "Password", "it": "Password" }
     },
     "/system/maintenance": {
         "title": "Maintenance",
-        "view": "maint",
+        "view": "system-maintenance",
         "index": 30,
         "locales": { "en": "Maintenance", "it": "Manutenzione" }
     }

@@ -14,23 +14,23 @@
       </svg>
     </div>
 
-    <div class="groupStub" role="button" tabindex="0" aria-label="Curve smoothing"></div>
+    <div class="groupStub" role="button" tabindex="0" :aria-label="$t('Curve smoothing')"></div>
 
     <div class="groupExpanded">
-      <div class="groupTitle">Curve Smoothing</div>
+      <div class="groupTitle">{{ $t('Curve Smoothing') }}</div>
       <div class="row">
         <VizChip
           :class="{ active: vizOptions.smoothingMode === 'off' }"
           :active="vizOptions.smoothingMode === 'off'"
-          title="No smoothing (raw spectrum)"
+          :title="$t('No smoothing (raw spectrum)')"
           @click="vizOptions.smoothingMode = 'off'"
         >
-          Off
+          {{ $t('Off') }}
         </VizChip>
         <VizChip
           :class="{ active: vizOptions.smoothingMode === '1/12' }"
           :active="vizOptions.smoothingMode === '1/12'"
-          title="1/12-octave smoothing (most detail)"
+          :title="$t('1/12-octave smoothing (most detail)')"
           @click="vizOptions.smoothingMode = '1/12'"
         >
           1/12 Oct
@@ -38,7 +38,7 @@
         <VizChip
           :class="{ active: vizOptions.smoothingMode === '1/6' }"
           :active="vizOptions.smoothingMode === '1/6'"
-          title="1/6-octave smoothing (balanced)"
+          :title="$t('1/6-octave smoothing (balanced)')"
           @click="vizOptions.smoothingMode = '1/6'"
         >
           1/6 Oct
@@ -46,7 +46,7 @@
         <VizChip
           :class="{ active: vizOptions.smoothingMode === '1/3' }"
           :active="vizOptions.smoothingMode === '1/3'"
-          title="1/3-octave smoothing (smoothest)"
+          :title="$t('1/3-octave smoothing (smoothest)')"
           @click="vizOptions.smoothingMode = '1/3'"
         >
           1/3 Oct
@@ -74,3 +74,5 @@ const smoothLevel = computed(() => {
   }
 })
 </script>
+
+<i18n src="../../locale.json"/>

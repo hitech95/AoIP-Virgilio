@@ -27,15 +27,15 @@
       </svg>
     </div>
 
-    <div class="groupStub" role="button" tabindex="0" aria-label="Token visuals"></div>
+    <div class="groupStub" role="button" tabindex="0" :aria-label="$t('Token visuals')"></div>
 
     <div class="groupExpanded">
-      <div class="groupTitle">Token Visuals</div>
+      <div class="groupTitle">{{ $t('Token Visuals') }}</div>
       <div class="row">
         <VizChip
           :active="vizOptions.showPerBandCurves"
           :aria-pressed="vizOptions.showPerBandCurves"
-          title="Show per-band response curves"
+          :title="$t('Show per-band response curves')"
           @click="vizOptions.showPerBandCurves = !vizOptions.showPerBandCurves"
         >
           Per-band
@@ -43,7 +43,7 @@
         <VizChip
           :active="vizOptions.showBandwidthMarkers"
           :aria-pressed="vizOptions.showBandwidthMarkers"
-          title="Show bandwidth (Q) markers"
+          :title="$t('Show bandwidth (Q) markers')"
           @click="vizOptions.showBandwidthMarkers = !vizOptions.showBandwidthMarkers"
         >
           BW
@@ -51,7 +51,7 @@
         <VizChip
           :active="vizOptions.soloWhileEditing"
           :aria-pressed="vizOptions.soloWhileEditing"
-          title="Solo the selected band while editing (mutes all others)"
+          :title="$t('Solo the selected band while editing (mutes all others)')"
           @click="vizOptions.soloWhileEditing = !vizOptions.soloWhileEditing"
         >
           Solo
@@ -59,8 +59,8 @@
         <span
           class="knob-wrapper-inline"
           style="--knob-arc: var(--el-color-primary)"
-          title="Band fill opacity (Shift = fine adjust)"
-          aria-label="Band fill opacity"
+          :title="$t('Band fill opacity (Shift = fine adjust)')"
+          :aria-label="$t('Band fill opacity')"
         >
           <KnobDial
             :value="vizOptions.bandFillOpacity"
@@ -81,3 +81,5 @@ import { vizOptions } from '../../stores/vizOptions'
 import KnobDial from '../KnobDial.vue'
 import VizChip from '../VizChip.vue'
 </script>
+
+<i18n src="../../locale.json"/>

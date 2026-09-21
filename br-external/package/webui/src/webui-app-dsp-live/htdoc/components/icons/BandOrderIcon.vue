@@ -1,5 +1,5 @@
 <template>
-  <div class="band-order-icon" :title="displayTitle" v-html="svgWithDisplay"></div>
+  <div class="band-order-icon" :title="title || $t('Band {n}', { n: clampedPosition })" v-html="svgWithDisplay"></div>
 </template>
 
 <script setup lang="ts">
@@ -26,5 +26,6 @@ const svgWithDisplay = computed(() => {
   return svgRaw.replace(regex, '$1inline$2')
 })
 
-const displayTitle = computed(() => props.title || `Band ${clampedPosition.value}`)
 </script>
+
+<i18n src="../../locale.json"/>

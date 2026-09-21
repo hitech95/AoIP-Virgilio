@@ -15,10 +15,10 @@
       </svg>
     </div>
 
-    <div class="groupStub" role="button" tabindex="0" aria-label="Spectrum signal tap"></div>
+    <div class="groupStub" role="button" tabindex="0" :aria-label="$t('Spectrum signal tap')"></div>
 
     <div class="groupExpanded">
-      <div class="groupTitle">Spectrum Signal Tap</div>
+      <div class="groupTitle">{{ $t('Spectrum Signal Tap') }}</div>
       <div class="sigTapGroup" :data-sel="vizOptions.spectrumMode">
         <svg class="sigTap" viewBox="0 0 190 50" width="190" height="50" xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -43,11 +43,11 @@
             data-pos="pre"
             role="button"
             tabindex="0"
-            aria-label="Analyze signal before EQ (input)"
+            :aria-label="$t('Analyze signal before EQ (input)')"
             @click="vizOptions.spectrumMode = 'pre'"
             @keydown.enter="vizOptions.spectrumMode = 'pre'"
           >
-            <title>Analyze signal before EQ (input)</title>
+            <title>{{ $t('Analyze signal before EQ (input)') }}</title>
             <line class="tapStem" x1="42" y1="10" x2="42" y2="24.5" />
             <circle class="tapNode" cx="42" cy="30" r="5.5" />
             <circle class="tapHead" cx="42" cy="7" r="3.5" />
@@ -59,11 +59,11 @@
             data-pos="post"
             role="button"
             tabindex="0"
-            aria-label="Analyze signal after EQ (output)"
+            :aria-label="$t('Analyze signal after EQ (output)')"
             @click="vizOptions.spectrumMode = 'post'"
             @keydown.enter="vizOptions.spectrumMode = 'post'"
           >
-            <title>Analyze signal after EQ (output)</title>
+            <title>{{ $t('Analyze signal after EQ (output)') }}</title>
             <line class="tapStem" x1="148" y1="10" x2="148" y2="24.5" />
             <circle class="tapNode" cx="148" cy="30" r="5.5" />
             <circle class="tapHead" cx="148" cy="7" r="3.5" />
@@ -78,3 +78,5 @@
 <script setup lang="ts">
 import { vizOptions } from '../../stores/vizOptions'
 </script>
+
+<i18n src="../../locale.json"/>

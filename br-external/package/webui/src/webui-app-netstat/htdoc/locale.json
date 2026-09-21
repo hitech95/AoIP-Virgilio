@@ -19,6 +19,8 @@
     "Protocol": "Protocollo",
     "Address": "Indirizzo",
     "Gateway": "Gateway",
-    "Connected": "Connessa"
+    "Connected": "Connessa",
+    "DNS": "DNS",
+    "No data": "Nessun dato"
   }
 }

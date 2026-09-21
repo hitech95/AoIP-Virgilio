@@ -2,26 +2,26 @@
   <section class="pipeline-page">
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
     <el-alert type="info" :closable="false" show-icon
-      :title="unprotected ? 'Unprotected configuration: live WebSocket controls are enabled.' : 'Protected configuration: only policy-exposed controls are enabled.'" />
+      :title="unprotected ? $t('Unprotected configuration: live WebSocket controls are enabled.') : $t('Protected configuration: only policy-exposed controls are enabled.')" />
 
     <VueFlow v-if="nodes.length" :nodes="nodes" :edges="edges" :nodes-draggable="false"
       :nodes-connectable="false" :elements-selectable="true" :fit-view-on-init="true"
       :fit-view-options="{ padding: 0.3, maxZoom: 1.05, minZoom: 0.55 }" class="flow" :class="{ 'is-simple': isSimple }"
-      @node-click="selectNode">
+      @node-click="selectNode" @pane-click="clearSelection">
       <Background :color="graphGrid" :gap="22" :size="1" />
       <Controls />
       <template #node-pipeline="nodeProps">
         <PipelineNode v-bind="nodeProps" />
       </template>
     </VueFlow>
-    <el-empty v-else description="CamillaDSP is not running or has no pipeline" />
+    <el-empty v-else :description="$t('CamillaDSP is not running or has no pipeline')" />
 
     <div class="selected-editor" v-if="selected">
       <FilterBlockEditor v-if="selected?.step.type === 'Filter'" :node="selected" :step="selected.step"
         :input-channels="inputChannels" :can-edit-block="canEditBlock" :can-edit-filters="canEditFilters"
         :entries="filterEntries" :filter="filter" :filter-label="filterLabel" :is-biquad="isBiquad" :has-q="hasQ"
         :has-gain="hasGain" :filter-types="filterTypes" @apply="apply" @remove-filter="removeFilter"
-        @set-enabled="setFilterEnabled" @add-filter="addFilter" />
+        @set-enabled="setFilterEnabled" @set-type="setFilterType" @add-filter="addFilter" />
 
       <MixerBlockEditor v-else-if="selected?.step.type === 'Mixer'" :node="selected" :step="selected.step"
         :mixer="mixer(selected.step.name)" :can-edit="canEditBlock" :input-channels="inputChannels"
@@ -35,10 +35,10 @@
 import { VueFlow } from '@vue-flow/core'
 import { Controls } from '@vue-flow/controls'
 import { Background } from '@vue-flow/background'
-import PipelineNode from './components/PipelineNode.vue'
-import FilterBlockEditor from './components/FilterBlockEditor.vue'
-import MixerBlockEditor from './components/MixerBlockEditor.vue'
-import './styles/pipeline.scss'
+import PipelineNode from '../components/PipelineNode.vue'
+import FilterBlockEditor from '../components/FilterBlockEditor.vue'
+import MixerBlockEditor from '../components/MixerBlockEditor.vue'
+import '../styles/pipeline.scss'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/controls/dist/style.css'
 
@@ -87,7 +87,7 @@ export default {
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
         this.ws = new WebSocket(`${protocol}//${location.host}/ws`)
         this.ws.onopen = async () => { try { await this.refresh(); resolve() } catch (error) { reject(error) } }
-        this.ws.onerror = () => reject(new Error('CamillaDSP websocket connection failed'))
+        this.ws.onerror = () => reject(new Error(this.$t('CamillaDSP websocket connection failed')))
       })
     },
     async checkSession() {
@@ -98,13 +98,13 @@ export default {
     },
     request(command, value) {
       return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error(`${command} timed out`)), 5000)
+        const timeout = setTimeout(() => reject(new Error(this.$t('{command} timed out', { command }))), 5000)
         const onMessage = event => {
           clearTimeout(timeout)
           this.ws.removeEventListener('message', onMessage)
           const reply = JSON.parse(event.data)
           const body = reply[Object.keys(reply)[0]]
-          body?.result === 'Ok' ? resolve(body.value) : reject(body?.value ?? new Error(`${command} failed`))
+          body?.result === 'Ok' ? resolve(body.value) : reject(body?.value ?? new Error(this.$t('{command} failed', { command })))
         }
         this.ws.addEventListener('message', onMessage)
         this.ws.send(JSON.stringify(value === undefined ? command : { [command]: value }))
@@ -176,12 +176,25 @@ export default {
       this.selected = { id: node.id, data: node.data, step: this.config.pipeline[index] }
       this.buildGraph()
     },
+    clearSelection() {
+      this.selected = null
+      this.selectedId = null
+      this.buildGraph()
+    },
     filter(name) { return this.config?.filters?.[name] ?? this.disabledFilters[name]?.filter },
     runtimeFilterLabel(name) { return this.filter(name)?.parameters?.type ?? this.filter(name)?.type ?? name },
     filterLabel(name) { const type = this.runtimeFilterLabel(name); return /^EQ\d+$/.test(name) ? `${type} filter` : `${type} · ${name}` },
     isBiquad(name) { return this.filter(name)?.type === 'Biquad' },
     hasQ(name) { return this.isBiquad(name) && this.filter(name)?.parameters?.q != null },
     hasGain(name) { return this.isBiquad(name) && this.filter(name)?.parameters?.gain != null },
+    setFilterType(name, type) {
+      const filter = this.filter(name)
+      if (!filter?.parameters) return
+      filter.parameters.type = type
+      if (type === 'Peaking' || type.endsWith('shelf')) filter.parameters.gain ??= 0
+      else delete filter.parameters.gain
+      this.apply()
+    },
     addFilter(type) {
       const prefix = type.toLowerCase()
       let number = 1, name = `${prefix}_${number}`
@@ -211,3 +224,5 @@ export default {
   }
 }
 </script>
+
+<i18n src="../locale.json"/>

@@ -6,13 +6,13 @@
       class="filter-option"
       :class="{ 'is-current': ft.type === currentType }"
       plain
-      :title="`${ft.label} — ${ft.subtitle}`"
+      :title="$t(ft.label) + ' — ' + $t(ft.subtitle)"
       @click="handleSelect(ft.type)"
     >
       <span class="f-opt">
         <FilterIcon :type="ft.type" class="opt-icon" />
-        <span class="opt-label">{{ ft.label }}</span>
-        <span class="opt-subtitle">{{ ft.subtitle }}</span>
+        <span class="opt-label">{{ $t(ft.label) }}</span>
+        <span class="opt-subtitle">{{ $t(ft.subtitle) }}</span>
       </span>
     </el-button>
   </div>
@@ -122,3 +122,5 @@ function handleSelect(type: EqBand['type']) {
   color: var(--el-text-color-secondary);
 }
 </style>
+
+<i18n src="../locale.json"/>

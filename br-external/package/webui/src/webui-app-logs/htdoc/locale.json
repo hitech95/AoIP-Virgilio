@@ -8,6 +8,7 @@
   "it": {
     "Logs": "Log",
     "Refresh": "Aggiorna",
-    "Follow": "Segui"
+    "Follow": "Segui",
+    "No data": "Nessun dato"
   }
 }

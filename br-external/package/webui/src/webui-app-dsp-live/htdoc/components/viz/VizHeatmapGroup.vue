@@ -19,10 +19,10 @@
       </svg>
     </div>
 
-    <div class="groupStub" role="button" tabindex="0" aria-label="Heatmap"></div>
+    <div class="groupStub" role="button" tabindex="0" :aria-label="$t('Heatmap')"></div>
 
     <div class="groupExpanded">
-      <div class="groupTitle">Heatmap</div>
+      <div class="groupTitle">{{ $t('Heatmap') }}</div>
       <div class="row">
         <VizChip
           class="heatmapToggle"
@@ -63,7 +63,7 @@
               <circle class="dot" cx="32" cy="32" r="3.5" />
             </svg>
           </div>
-          <span class="powerLabel">On / Off</span>
+          <span class="powerLabel">{{ $t('On / Off') }}</span>
         </VizChip>
 
         <el-popover
@@ -78,10 +78,10 @@
               class="disclosureChip"
               :active="prefsOpen"
               :disabled="!vizOptions.heatmapEnabled"
-              title="Heatmap settings"
-              aria-label="Heatmap settings"
+              :title="$t('Heatmap settings')"
+              :aria-label="$t('Heatmap settings')"
             >
-              <span>Prefs</span>
+              <span>{{ $t('Prefs') }}</span>
               <span class="arrow">▲</span>
             </VizChip>
           </template>
@@ -125,3 +125,5 @@ function applyHeatmapChange(changes: {
   if (changes.maxAlpha !== undefined) vizOptions.heatmapMaxAlpha = changes.maxAlpha
 }
 </script>
+
+<i18n src="../../locale.json"/>

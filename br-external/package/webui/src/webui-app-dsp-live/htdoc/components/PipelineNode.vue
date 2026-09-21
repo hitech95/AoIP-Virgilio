@@ -5,14 +5,14 @@
 
     <div class="node-heading">
       <strong class="node-title">{{ data.label }}</strong>
-      <el-tag v-if="data.bypassed" size="small" type="warning" effect="plain">Bypassed</el-tag>
-      <el-tag v-else-if="data.kind === 'locked'" size="small" type="info" effect="plain">Protected</el-tag>
+      <el-tag v-if="data.bypassed" size="small" type="warning" effect="plain">{{ $t('Bypassed') }}</el-tag>
+      <el-tag v-else-if="data.kind === 'locked'" size="small" type="info" effect="plain">{{ $t('Protected') }}</el-tag>
     </div>
 
-    <ChannelRow v-if="sameChannels" label="Channels" :channels="inputs"/>
+    <ChannelRow v-if="sameChannels" :label="$t('Channels')" :channels="inputs"/>
     <template v-else>
-      <ChannelRow label="In" :channels="inputs"/>
-      <ChannelRow label="Out" :channels="outputs"/>
+      <ChannelRow :label="$t('In')" :channels="inputs"/>
+      <ChannelRow :label="$t('Out')" :channels="outputs"/>
     </template>
 
     <div v-if="data.detail" class="node-detail">{{ data.detail }}</div>
@@ -22,10 +22,10 @@
 
     <div v-if="data.kind === 'mixer'" class="mixer-destinations">
       <div v-for="destination in data.destinations" :key="destination.dest" class="mixer-destination" :class="{ muted: destination.mute }">
-        <div class="destination-label">Dest {{ destination.dest }} <el-tag v-if="destination.mute" size="small" type="danger">Muted</el-tag></div>
+        <div class="destination-label">{{ $t('Dest') }} {{ destination.dest }} <el-tag v-if="destination.mute" size="small" type="danger">{{ $t('Muted') }}</el-tag></div>
         <div class="destination-sources">
           <el-tag v-for="source in destination.sources" :key="source.channel" size="small" effect="plain" :type="source.mute ? 'info' : 'success'">
-            Src {{ source.channel }}<span v-if="source.inverted"> · Inv</span><span v-if="source.mute"> · Mute</span>
+            {{ $t('Src {n}', { n: source.channel }) }}<span v-if="source.inverted"> · {{ $t('Inv') }}</span><span v-if="source.mute"> · {{ $t('Mute') }}</span>
           </el-tag>
         </div>
       </div>
@@ -54,3 +54,5 @@ export default {
   setup() { return { Position } }
 }
 </script>
+
+<i18n src="../locale.json"/>
