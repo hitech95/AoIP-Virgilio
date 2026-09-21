@@ -15,6 +15,13 @@ export default defineConfig({
       compositionOnly: false
     })
   ],
+  /* @vue-flow/core's dev-warn helper reads process.env.NODE_ENV in a
+   * computed form (["production","prod"].includes(process.env.NODE_ENV||""))
+   * that Vite's lib-mode default define does NOT replace -> bare
+   * ReferenceError in the browser. Pin it explicitly. */
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production')
+  },
   build: {
     cssCodeSplit: true,
     lib: {
