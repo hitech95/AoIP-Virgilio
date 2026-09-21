@@ -86,7 +86,7 @@ function mapCamillaBiquadType(camillaType: string): EqBand['type'] | null {
 /**
  * Map EqBand type to CamillaDSP biquad subtype
  */
-function mapEqBandTypeToCamilla(type: EqBand['type']): string {
+export function mapEqBandTypeToCamilla(type: EqBand['type']): string {
   switch (type) {
     case 'HighPass':
       return 'Highpass'

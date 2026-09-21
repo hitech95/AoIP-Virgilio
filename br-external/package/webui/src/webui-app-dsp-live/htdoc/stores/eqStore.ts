@@ -15,6 +15,7 @@ import {
   extractEqBandsFromConfig,
   applyEqBandsToConfig,
   listFilterSteps,
+  mapEqBandTypeToCamilla,
   type ExtractedEqData,
   type FilterStepInfo,
 } from '../lib/camillaEqMapping'
@@ -187,6 +188,17 @@ function queueUpload(): void {
 function requestUpload(): void {
   editsPending = true
   debouncedUpload.call()
+}
+
+/**
+ * Structural changes (band added/removed) upload IMMEDIATELY: the band
+ * must not live in a local-only debounce window, where a racing upload
+ * or re-init could mirror it away ("fader appears, then vanishes").
+ */
+function uploadNow(): void {
+  debouncedUpload.cancel()
+  editsPending = true
+  queueUpload()
 }
 
 // Debounced upload entry point (uploads the selected block only)
@@ -383,6 +395,82 @@ export async function toggleBandEnabled(index: number): Promise<void> {
       message: error instanceof Error ? error.message : 'Failed to toggle band',
     }
   }
+}
+
+// ─── Band add/remove on the selected block ─────────────────────────────────
+
+/**
+ * Append a new EQ band (biquad) to the selected block and upload it.
+ * Policy gating (editable/free stage, max_steps) is done by the caller
+ * (the toolbar button state).
+ */
+export async function addBand(type: EqBand['type'] = 'Peaking'): Promise<boolean> {
+  const stepIndex = eq.selectedStepIndex
+  if (!lastConfig || stepIndex === null || !dsp.isConnected()) {
+    return false
+  }
+
+  // Config-level mutation: build on a config that has every pending edit
+  await flushPendingUpload()
+  if (soloSessionActive) {
+    await endSoloEditSession()
+  }
+
+  const step = lastConfig.pipeline[stepIndex]
+  if (!step || step.type !== 'Filter' || !step.names) {
+    return false
+  }
+
+  const camillaType = mapEqBandTypeToCamilla(type)
+  let n = 1
+  while (lastConfig.filters?.[`eq_b${n}`]) n++
+  const name = `eq_b${n}`
+
+  const parameters: Record<string, number | string> = { type: camillaType, freq: 1000, q: 1 }
+  if (type === 'Peaking' || type === 'LowShelf' || type === 'HighShelf') {
+    parameters.gain = 0
+  }
+
+  if (!lastConfig.filters) lastConfig.filters = {}
+  lastConfig.filters[name] = { type: 'Biquad', description: 'EQ band', parameters }
+  step.names = [...step.names, name]
+
+  extractForSelection()
+  localRevision++
+  eq.selectedBandIndex = eq.bands.length - 1
+  uploadNow()
+  return true
+}
+
+/**
+ * Remove one EQ band (by index) from the selected block and upload it.
+ */
+export async function removeBand(index: number): Promise<boolean> {
+  const stepIndex = eq.selectedStepIndex
+  if (!lastConfig || stepIndex === null || !dsp.isConnected()) {
+    return false
+  }
+  await flushPendingUpload()
+  if (soloSessionActive) {
+    await endSoloEditSession()
+  }
+
+  const step = lastConfig.pipeline[stepIndex]
+  const filterName = extractedData?.filterNames[index]
+  if (!step || step.type !== 'Filter' || !step.names || !filterName) {
+    return false
+  }
+
+  step.names = step.names.filter((n) => n !== filterName)
+  if (lastConfig.filters) delete lastConfig.filters[filterName]
+
+  extractForSelection()
+  localRevision++
+  if (eq.selectedBandIndex !== null && eq.selectedBandIndex >= eq.bands.length) {
+    eq.selectedBandIndex = eq.bands.length ? eq.bands.length - 1 : null
+  }
+  uploadNow()
+  return true
 }
 
 // ─── Solo session state (scoped to the selected block) ─────────────────────

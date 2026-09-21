@@ -1,7 +1,7 @@
 <template>
   <el-container ref="pageEl" class="eq-page" :style="{ '--eq-page-h': pageHeight }">
 
-    <!-- <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon class="eq-alert" /> -->
+    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon class="eq-alert" />
 
     <el-header height="auto" class="toolbar">
       <!-- Filter block selector: edits apply to ONE pipeline block at a time.
@@ -11,30 +11,62 @@
         <el-icon class="icon" :size="18">
           <Filter />
         </el-icon>
-        <span class="title">Filter Block</span>
+        <span class="title">{{ $t('Filter Block') }}</span>
         <el-select class="select" v-model="selectedStep" :disabled="!eq.steps.length"
-          :placeholder="eq.steps.length ? 'Select a filter block' : 'No editable blocks'">
-          <el-option v-for="s in eq.steps" :key="s.index" :value="s.index" :label="stepLabel(s)" />
+          popper-class="eq-block-dd"
+          :placeholder="eq.steps.length ? $t('Select a filter block') : $t('No editable blocks')">
+          <!-- selected rendering: name left + chips right, justified like
+               the option rows (the wrapper is stretched in the scoped CSS).
+               Colors: filter count = primary, channel chips = success. -->
+          <template #label="{ label }">
+            <span class="sel-name">{{ label }}</span>
+            <span class="sel-tags">
+              <el-tag v-if="selectedStepInfo" size="small" type="primary" effect="light" class="sel-chip">
+                {{ selectedStepInfo.names.length }} {{ $t('filters') }}
+              </el-tag>
+              <el-tag v-for="c in (selectedStepInfo?.channels ?? [])" :key="c" size="small"
+                type="success" effect="light" class="sel-chip">ch {{ c }}</el-tag>
+            </span>
+          </template>
+          <el-option v-for="s in eq.steps" :key="s.index" :value="s.index" :label="stepName(s)">
+            <div class="opt-row">
+              <span class="opt-name">{{ stepName(s) }}</span>
+              <span class="opt-tags">
+                <el-tag size="small" type="primary" effect="light">{{ s.names.length }} {{ $t('filters') }}</el-tag>
+                <el-tag v-for="c in s.channels" :key="c" size="small" type="success" effect="light">ch {{ c }}</el-tag>
+              </span>
+            </div>
+          </el-option>
         </el-select>
+
+        <el-button
+          type="primary"
+          plain
+          :disabled="!canAddBand"
+          :title="$t('Add a new EQ band to this block')"
+          @click="doAddBand"
+        >
+          {{ $t('Add band') }}
+        </el-button>
 
         <el-button
           type="primary"
           plain
           :loading="savingToUci"
           :disabled="eq.selectedStepIndex === null"
-          title="Persist the selected block's live filters to UCI"
+          :title="$t('Persist the selected block\'s live filters to UCI')"
           @click="saveToUci"
         >
-          Save to UCI
+          {{ $t('Save to UCI') }}
         </el-button>
       </el-space>
 
       <el-space>
-        <el-tag v-if="policyTag" size="small" :type="policyTag.type" class="policy-tag">
+        <el-tag v-if="policyTag" :type="policyTag.type" class="policy-tag">
           {{ policyTag.text }}
         </el-tag>
-        <el-tag size="small" :type="connected ? 'success' : 'danger'">
-          {{ connected ? 'Connected' : 'Offline' }}
+        <el-tag :type="connected ? 'success' : 'danger'">
+          {{ connected ? $t('Connected') : $t('Offline') }}
         </el-tag>
       </el-space>
     </el-header>
@@ -53,14 +85,14 @@
       <el-main class="filters-container">
         <div class="bands-col" @wheel="scrollBandRail">
           <template v-if="eq.selectedStepIndex !== null">
-            <PreampCard />
+            <PreampCard :read-only="selectedLocked" />
             <BandCard v-for="(b, i) in eq.bands" :key="`${eq.filterNames[i] ?? 'band'}-${i}`" :band="b" :band-index="i"
               :order-number="eq.bandOrderNumbers[i] ?? i + 1" :filter-name="eq.filterNames[i] ?? ''"
-              :selected="eq.selectedBandIndex === i" />
-            <el-empty v-if="!eq.bands.length" description="This block has no EQ (biquad) filters" :image-size="70"
+              :selected="eq.selectedBandIndex === i" :read-only="selectedLocked" />
+            <el-empty v-if="!eq.bands.length" :description="$t('This block has no EQ (biquad) filters')" :image-size="70"
               class="bands-empty" />
           </template>
-          <el-empty v-else description="Select a filter block to edit its EQ bands" :image-size="70"
+          <el-empty v-else :description="$t('Select a filter block to edit its EQ bands')" :image-size="70"
             class="bands-empty" />
         </div>
       </el-main>
@@ -110,6 +142,28 @@
   white-space: nowrap;
 }
 
+/* collapsed selection: stretch the EP wrapper so the label-slot content
+   justifies exactly like an option row (name left, chips right) */
+.eq-page .select :deep(.el-select__selected-item.el-select__placeholder) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+}
+.eq-page .select .sel-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.eq-page .select .sel-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .eq-page .chart-aside {
   display: flex;
   flex-direction: column;
@@ -137,19 +191,48 @@
 }
 </style>
 
+<style>
+/* custom el-option rows: block name left, badge chips (filter count +
+   one chip per channel) right. GLOBAL on purpose: the dropdown popper
+   teleports to <body>, so scoped selectors (.eq-page ...) never match. */
+.eq-block-dd .opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+.eq-block-dd .opt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.eq-block-dd .opt-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+/* el-option content must fill the row for space-between alignment */
+.eq-block-dd .el-select-dropdown__item {
+  display: flex;
+  align-items: center;
+}
+</style>
+
 <script lang="ts">
-import { defineComponent, computed, ref, onBeforeUnmount } from 'vue'
+import { defineComponent, computed, ref, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { Filter } from '@element-plus/icons-vue'
-import EqPlotCard from './components/chart/EqPlotCard.vue'
-import VizOptionsBar from './components/VizOptionsBar.vue'
-import PreampCard from './components/faders/FaderPreampCard.vue'
-import BandCard from './components/faders/FaderBandCard.vue'
-import './styles/eq.scss'
-import { eq, initializeFromConfig, selectStep, flushLiveEdits } from './stores/eqStore'
-import { initializeVizOptions, setupVizOptionsPersistence } from './stores/vizOptions'
-import * as dsp from './dsp'
-import type { FilterStepInfo } from './lib/camillaEqMapping'
-import { planSlotSave, type FiltersSchema, type PipelineStage } from './lib/uciSync'
+import EqPlotCard from '../components/chart/EqPlotCard.vue'
+import VizOptionsBar from '../components/VizOptionsBar.vue'
+import PreampCard from '../components/faders/FaderPreampCard.vue'
+import BandCard from '../components/faders/FaderBandCard.vue'
+import '../styles/eq.scss'
+import { eq, initializeFromConfig, selectStep, flushLiveEdits, addBand } from '../stores/eqStore'
+import { initializeVizOptions, setupVizOptionsPersistence } from '../stores/vizOptions'
+import * as dsp from '../dsp'
+import type { FilterStepInfo } from '../lib/camillaEqMapping'
+import { planSlotSave, type FiltersSchema, type PipelineStage } from '../lib/uciSync'
 
 function scrollBandRail(event: WheelEvent): void {
   const rail = event.currentTarget as HTMLElement
@@ -165,6 +248,9 @@ export default defineComponent({
   setup() {
     const pageEl = ref<HTMLDivElement | null>(null)
     const error = ref('')
+    // $t access inside setup (the shell installs vue-i18n globally; the
+    // <i18n> block below adds this component's own messages)
+    const labelCtx = getCurrentInstance()?.proxy as any
     // Definite height so the plot column can fill the viewport exactly
     // (measured from the Oui scroll container; small screens fall back to auto).
     const pageHeight = ref('auto')
@@ -186,31 +272,59 @@ export default defineComponent({
     const stageOf = (index: number | null): PipelineStage | null =>
       index === null ? null : pipelineStages.value.find((s) => s.index === index) ?? null
 
-    const stepLabel = (s: FilterStepInfo): string => {
-      const n = s.names.length
-      const base = `Block ${s.position} — ch ${s.channels.join(',')} — ${n} filter${n === 1 ? '' : 's'}`
+    /* Block name ONLY -- the same label the filters page uses (the uci
+     * slot name for editable stages); counts/channels live in the chips. */
+    const stepName = (s: FilterStepInfo): string => {
       const stage = stageOf(s.index)
-      if (!stage) return base
-      if (stage.kind === 'locked') return `${base} · protected`
-      if (stage.kind === 'mixer') return `${base} · mixer`
-      if (stage.kind === 'editable') return `${base} · ${stage.label}`
-      return `${base} · free`
+      if (stage) return stage.label
+      return `Block ${s.position}`
     }
 
+    const selectedStepInfo = computed<FilterStepInfo | null>(() =>
+      eq.steps.find((s) => s.index === eq.selectedStepIndex) ?? null
+    )
+
+    /* Add-band policy: free blocks always, editable slots while under
+     * max_steps, locked/mixer blocks never. */
+    const canAddBand = computed(() => {
+      if (eq.selectedStepIndex === null || dsp.connectionState.value !== 'connected')
+        return false
+      const stage = stageOf(eq.selectedStepIndex)
+      if (!stage) return true
+      if (stage.kind !== 'editable') return false
+      const max = stage.max_steps != null ? Number(stage.max_steps) : null
+      return max == null || (selectedStepInfo.value?.names.length ?? 0) < max
+    })
+
+    const doAddBand = async () => {
+      const ok = await addBand('Peaking')
+      if (!ok)
+        labelCtx.$message?.error?.(labelCtx.$t('Cannot add a band to this block'))
+    }
+
+    /* policy tag: only for states the selector does NOT already show --
+     * editable blocks are named by their slot in the selector, a second
+     * "slot: X" tag would be redundant */
     const policyTag = computed(() => {
       const stage = stageOf(eq.selectedStepIndex)
       if (!stage) return null
       switch (stage.kind) {
         case 'editable':
-          return { type: 'success' as const, text: `slot: ${stage.label}` }
+          return null
         case 'locked':
-          return { type: 'danger' as const, text: 'protected — live only' }
+          return { type: 'danger' as const, text: labelCtx.$t('protected — read only') }
         case 'mixer':
-          return { type: 'warning' as const, text: 'mixer' }
+          return { type: 'warning' as const, text: labelCtx.$t('mixer') }
         default:
-          return { type: 'info' as const, text: 'free edit' }
+          return { type: 'info' as const, text: labelCtx.$t('free edit') }
       }
     })
+
+    /* locked block: every fader/control freezes (manifest would reject
+     * live edits anyway -- fail loudly in the UI instead of in toasts) */
+    const selectedLocked = computed(() =>
+      stageOf(eq.selectedStepIndex)?.kind === 'locked'
+    )
 
     let scrollWrap: HTMLElement | null = null
     let ro: ResizeObserver | null = null
@@ -254,7 +368,11 @@ export default defineComponent({
       selectedStep,
       connected,
       selectStep,
-      stepLabel,
+      stepName,
+      selectedStepInfo,
+      selectedLocked,
+      canAddBand,
+      doAddBand,
       scrollBandRail,
       pipelineStages,
       filtersSchema,
@@ -300,7 +418,7 @@ export default defineComponent({
             const cfg = await dsp.downloadConfig()
             if (cfg) initializeFromConfig(cfg)
           } catch (e: any) {
-            self.error = e?.value ?? 'Unable to read CamillaDSP configuration'
+            self.error = e?.value ?? self.$t('Unable to read CamillaDSP configuration')
           }
         }
       },
@@ -389,17 +507,19 @@ export default defineComponent({
         const result = await self.$oui.call('dsp', 'save_filters', payload)
         if (result?.error) {
           const message = plan.mode === 'free' && result.error.message === 'pipeline index out of range'
-            ? 'Free edit cannot be persisted: UCI has no pipeline step for this live block. Import the runtime pipeline into UCI first so its topology can be saved safely.'
+            ? self.$t('Free edit cannot be persisted: UCI has no pipeline step for this live block. Import the runtime pipeline into UCI first so its topology can be saved safely.')
             : result.error.message
           self.$message?.error?.(message)
           return
         }
 
         const target = plan.mode === 'free'
-          ? `pipeline step ${plan.pipelineIndex} (free edit)`
-          : `UCI slot "${plan.slot}"`
+          ? self.$t('pipeline step {index} (free edit)', { index: plan.pipelineIndex })
+          : self.$t('UCI slot "{slot}"', { slot: plan.slot })
         self.$message?.success?.(
-          `Saved ${plan.steps.length} filter${plan.steps.length === 1 ? '' : 's'} to ${target}`
+          plan.steps.length === 1
+            ? self.$t('Saved {n} filter to {target}', { n: plan.steps.length, target })
+            : self.$t('Saved {n} filters to {target}', { n: plan.steps.length, target })
         )
 
         // The daemon rewrote filter sections and reloaded camilladsp:
@@ -420,3 +540,5 @@ export default defineComponent({
   },
 })
 </script>
+
+<i18n src="../locale.json"/>
