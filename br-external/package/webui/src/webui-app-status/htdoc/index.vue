@@ -54,7 +54,7 @@ export default {
   },
   computed: {
     freqPpm() {
-      if (!this.st?.ptp?.freq_ppm == null)
+      if (this.st?.ptp?.freq_ppm == null)
         return '—'
       return this.st.ptp.freq_ppm.toFixed(2) + ' ppm'
     }
