@@ -79,7 +79,13 @@ export function enableFilterInStep(
     (loc) => loc.stepKey === step.stepKey
   )
   if (!location) {
-    return updated // Not disabled in this step
+    /* no overlay record (stale / restored in another browser): still
+     * restore the filter, appended at the end -- returning without
+     * re-adding the name would orphan the definition and camilladsp
+     * rejects the whole config ("not used by any pipeline step") */
+    step.names.push(filterName)
+    ;(updated.pipeline![stepIndex] as any).names = step.names
+    return updated
   }
 
   // Subtract the gaps of OTHER filters in this step that are still disabled

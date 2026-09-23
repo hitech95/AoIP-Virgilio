@@ -10,7 +10,6 @@
 import type { EqBand } from './filterResponse'
 import type { CamillaDSPConfig, PipelineStepNormalized } from './camillaTypes'
 import { normalizePipelineStep, isGainCapable, type BiquadType } from './camillaTypes'
-import { getStepKey, getDisabledFiltersForStep } from './disabledFiltersOverlay'
 
 export interface ExtractedEqData {
   bands: EqBand[]
@@ -18,8 +17,15 @@ export interface ExtractedEqData {
   channels: number[]
   /** Gain of the selected block's first mapped channel. */
   preampGain: number
-  /** True only when the existing preamp mixer maps every selected channel. */
+  /** True when a preamp control exists for this block. */
   preampAvailable: boolean
+  /**
+   * Block-local preamp: when the block's FIRST filter is a Gain filter,
+   * the PRE fader edits that filter directly (its name lives here and
+   * applyEqBandsToConfig writes parameters.gain). Null = the legacy
+   * global mixers.preamp path (or no preamp at all).
+   */
+  preampFilterName: string | null
   orderNumbers: number[] // Position (1-based) within the selected block
 }
 
@@ -115,38 +121,48 @@ export function extractEqBandsFromConfig(
   config: CamillaDSPConfig,
   stepIndex: number | null
 ): ExtractedEqData {
-  const empty = { bands: [], filterNames: [], channels: [], preampGain: 0, preampAvailable: false, orderNumbers: [] }
+  const empty = { bands: [], filterNames: [], channels: [], preampGain: 0, preampAvailable: false, preampFilterName: null, orderNumbers: [] }
 
   if (stepIndex === null) return empty
 
   const step = normalizePipelineStep(config.pipeline?.[stepIndex])
   if (!step || step.type !== 'Filter' || !step.channels) return empty
 
-  // The preamp is optional. Never synthesize it: expose the control only
-  // when the existing mixer has a direct mapping for every channel in this
-  // Filter block. The UI value is the first channel; writes apply its delta
-  // to every selected channel, preserving existing channel balance.
-  const preampMixer = config.mixers?.preamp
-  const mappings = Array.isArray(preampMixer?.mapping) ? preampMixer.mapping : []
-  const preampSources = step.channels.map((channel) => {
-    const route = mappings.find((mapping: any) => Number(mapping?.dest) === channel)
-    return route?.sources?.find((source: any) => Number(source?.channel) === channel) ?? null
-  })
-  const preampAvailable = preampSources.length > 0 && preampSources.every((source) => source !== null)
-  const preampGain = preampAvailable
-    ? Math.max(-24, Math.min(24, Number(preampSources[0]?.gain) || 0))
-    : 0
-
+  // The preamp is optional; two shapes are recognized:
+  //  1. block-local: the block's FIRST filter is a Gain filter -> the PRE
+  //     fader edits that filter's gain directly (authoritative when both
+  //     exist: it sits inside the block being edited)
+  //  2. global: the existing mixers.preamp has a direct mapping for every
+  //     channel of this Filter block. The UI value is the first channel;
+  //     writes apply its delta to every selected channel, preserving
+  //     existing channel balance.
+  // Never synthesize either: expose the control only when one exists.
   const enabledNames = step.names || []
-  const stepKey = getStepKey(step.channels, stepIndex)
-  const disabledLocations = getDisabledFiltersForStep(stepKey)
 
-  // Full ordered name list: enabled names + disabled filters at their original positions
-  const fullNames: string[] = [...enabledNames]
-  for (const loc of disabledLocations) {
-    const insertIndex = Math.max(0, Math.min(fullNames.length, loc.index))
-    fullNames.splice(insertIndex, 0, loc.filterName)
+  let preampFilterName: string | null = null
+  let preampAvailable = false
+  let preampGain = 0
+  const firstDef = enabledNames[0] ? config.filters?.[enabledNames[0]] : undefined
+  if (firstDef?.type === 'Gain' && Number.isFinite(Number(firstDef.parameters?.gain))) {
+    preampFilterName = enabledNames[0]
+    preampAvailable = true
+    preampGain = Math.max(-24, Math.min(24, Number(firstDef.parameters.gain)))
+  } else {
+    const preampMixer = config.mixers?.preamp
+    const mappings = Array.isArray(preampMixer?.mapping) ? preampMixer.mapping : []
+    const preampSources = step.channels.map((channel) => {
+      const route = mappings.find((mapping: any) => Number(mapping?.dest) === channel)
+      return route?.sources?.find((source: any) => Number(source?.channel) === channel) ?? null
+    })
+    preampAvailable = preampSources.length > 0 && preampSources.every((source) => source !== null)
+    preampGain = preampAvailable
+      ? Math.max(-24, Math.min(24, Number(preampSources[0]?.gain) || 0))
+      : 0
   }
+  /* bands = the ENABLED filters of the block only. Disabled (muted)
+   * filters are simply absent: they become orphans restorable through
+   * the "Add filter" dropdown -- no more phantom bands after reload. */
+  const fullNames: string[] = [...enabledNames]
 
   const bands: EqBand[] = []
   const filterNames: string[] = []
@@ -167,8 +183,7 @@ export function extractEqBandsFromConfig(
     const bandType = mapCamillaBiquadType(params.type)
     if (!bandType) continue // Skip unsupported biquad subtypes (e.g., LinkwitzTransform)
 
-    // A band is enabled when its filter is present in this step's names[]
-    const enabled = enabledNames.includes(filterName)
+    const enabled = true
 
     const freq = Number(params.freq || params.Frequency || 1000)
     const q = Number(params.q || params.Q || 1.41)
@@ -186,7 +201,7 @@ export function extractEqBandsFromConfig(
     orderNumbers.push(refIndex + 1)
   }
 
-  return { bands, filterNames, channels: [...step.channels], preampGain, preampAvailable, orderNumbers }
+  return { bands, filterNames, channels: [...step.channels], preampGain, preampAvailable, preampFilterName, orderNumbers }
 }
 
 /**
@@ -216,9 +231,16 @@ export function applyEqBandsToConfig(
 
   const updatedConfig = JSON.parse(JSON.stringify(config)) as CamillaDSPConfig
 
-  // Adjust only the selected Filter step's mapped channels. A missing or
-  // incomplete preamp mixer is intentionally left untouched: the control is
-  // disabled in that case rather than silently adding a global mixer node.
+  // Preamp: block-local Gain filter (authoritative) or the legacy global
+  // mixer. A missing/incomplete one is intentionally left untouched: the
+  // control is disabled in that case rather than silently adding nodes.
+  if (data.preampFilterName) {
+    const preampDef = updatedConfig.filters?.[data.preampFilterName]
+    if (preampDef && preampDef.type === 'Gain') {
+      preampDef.parameters = { ...(preampDef.parameters ?? {}), gain: preampGain }
+    }
+    // NB: no early return -- the band patch loop below must still run
+  } else {
   const selectedChannels = step.channels
   const preampMappings = updatedConfig.mixers?.preamp?.mapping
   if (Array.isArray(preampMappings) && selectedChannels.length > 0) {
@@ -233,6 +255,7 @@ export function applyEqBandsToConfig(
         source.gain = (Number(source?.gain) || 0) + delta
       }
     }
+  }
   }
 
   // Update each filter definition of this block

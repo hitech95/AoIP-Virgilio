@@ -25,7 +25,7 @@
                 {{ selectedStepInfo.names.length }} {{ $t('filters') }}
               </el-tag>
               <el-tag v-for="c in (selectedStepInfo?.channels ?? [])" :key="c" size="small"
-                type="success" effect="light" class="sel-chip">ch {{ c }}</el-tag>
+                type="success" effect="light" class="sel-chip">{{ channelLabel(c) }}</el-tag>
             </span>
           </template>
           <el-option v-for="s in eq.steps" :key="s.index" :value="s.index" :label="stepName(s)">
@@ -33,31 +33,37 @@
               <span class="opt-name">{{ stepName(s) }}</span>
               <span class="opt-tags">
                 <el-tag size="small" type="primary" effect="light">{{ s.names.length }} {{ $t('filters') }}</el-tag>
-                <el-tag v-for="c in s.channels" :key="c" size="small" type="success" effect="light">ch {{ c }}</el-tag>
+                <el-tag v-for="c in s.channels" :key="c" size="small" type="success" effect="light">{{ channelLabel(c) }}</el-tag>
               </span>
             </div>
           </el-option>
         </el-select>
 
-        <el-button
-          type="primary"
-          plain
-          :disabled="!canAddBand"
+        <el-dropdown split-button type="primary" :disabled="!canAddBand"
           :title="$t('Add a new EQ band to this block')"
-          @click="doAddBand"
-        >
-          {{ $t('Add band') }}
-        </el-button>
+          @click="doAddBand" @command="doAddOrphan">
+          {{ $t('Add filter') }}
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-for="o in orphanFilters" :key="o.name" :command="o.name"
+                :disabled="!orphanAllowed(o)">
+                {{ o.name }} <span class="opt-meta-inline">({{ o.type }}) · {{ orphanBlockLabel(o) }}</span>
+              </el-dropdown-item>
+              <el-dropdown-item v-if="!orphanFilters.length" disabled>
+                {{ $t('No orphaned filters') }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
 
         <el-button
           type="primary"
-          plain
           :loading="savingToUci"
           :disabled="eq.selectedStepIndex === null"
           :title="$t('Persist the selected block\'s live filters to UCI')"
           @click="saveToUci"
         >
-          {{ $t('Save to UCI') }}
+          {{ $t('Save') }}
         </el-button>
       </el-space>
 
@@ -157,6 +163,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.eq-page .toolbar .opt-meta-inline {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-left: 6px;
+}
 .eq-page .select .sel-tags {
   display: inline-flex;
   align-items: center;
@@ -222,13 +233,14 @@
 
 <script lang="ts">
 import { defineComponent, computed, ref, onBeforeUnmount, getCurrentInstance } from 'vue'
-import { Filter } from '@element-plus/icons-vue'
+import { Filter, ArrowDown } from '@element-plus/icons-vue'
 import EqPlotCard from '../components/chart/EqPlotCard.vue'
 import VizOptionsBar from '../components/VizOptionsBar.vue'
 import PreampCard from '../components/faders/FaderPreampCard.vue'
 import BandCard from '../components/faders/FaderBandCard.vue'
 import '../styles/eq.scss'
-import { eq, initializeFromConfig, selectStep, flushLiveEdits, addBand } from '../stores/eqStore'
+import { eq, initializeFromConfig, selectStep, flushLiveEdits, addBand, addOrphanFilter } from '../stores/eqStore'
+import { loadSession, sessionTypeOf } from '../lib/filterSession'
 import { initializeVizOptions, setupVizOptionsPersistence } from '../stores/vizOptions'
 import * as dsp from '../dsp'
 import type { FilterStepInfo } from '../lib/camillaEqMapping'
@@ -244,7 +256,7 @@ function scrollBandRail(event: WheelEvent): void {
 
 export default defineComponent({
   name: 'EqPage',
-  components: { EqPlotCard, VizOptionsBar, PreampCard, BandCard },
+  components: { EqPlotCard, VizOptionsBar, PreampCard, BandCard, ArrowDown },
   setup() {
     const pageEl = ref<HTMLDivElement | null>(null)
     const error = ref('')
@@ -272,13 +284,62 @@ export default defineComponent({
     const stageOf = (index: number | null): PipelineStage | null =>
       index === null ? null : pipelineStages.value.find((s) => s.index === index) ?? null
 
-    /* Block name ONLY -- the same label the filters page uses (the uci
-     * slot name for editable stages); counts/channels live in the chips. */
+    /* Block name ONLY -- the custom uci block name when set, else the
+     * slot name (the filters-page label); counts/channels live in the
+     * chips. */
     const stepName = (s: FilterStepInfo): string => {
       const stage = stageOf(s.index)
-      if (stage) return stage.label
+      if (stage) return (stage as any).name ?? stage.label
       return `Block ${s.position}`
     }
+
+    /* disabled/orphaned filters: the definitions live in the SESSION
+     * store (camilladsp refuses unreferenced defs in the live config);
+     * restorable into the selected block through the Restore dropdown.
+     * The session has no reactive signal: band-count and selection
+     * changes are the invalidation triggers. */
+    const orphanFilters = computed(() => {
+      void eq.bands.length
+      void eq.selectedStepIndex
+      return Object.entries(loadSession()).map(([name, entry]) => ({
+        name,
+        type: sessionTypeOf(entry)
+      }))
+    })
+    const UCI_OF_CAMILLA: Record<string, string> = {
+      Peaking: 'peak', Highshelf: 'hs', Lowshelf: 'ls', Highpass: 'hp',
+      Lowpass: 'lp', Bandpass: 'bp', Notch: 'notch', Allpass: 'ap'
+    }
+    const orphanAllowed = (o: { name: string; type: string }): boolean => {
+      const idx = eq.selectedStepIndex
+      const stage = idx === null ? null : stageOf(idx)
+      if (!stage) return true
+      if (stage.kind === 'locked' || stage.kind === 'mixer') return false
+      /* the origin block already shows the disabled band as a grayed
+       * fader (its toggle restores it): only OTHER blocks can pull it */
+      const entry = loadSession()[o.name]
+      if (entry && entry.stepIndex === idx) return false
+      if (stage.kind !== 'editable') return true
+      const def = loadSession()[o.name]?.def
+      const uci = def?.type === 'Gain' ? 'gain' : def?.type === 'Conv' ? 'conv' : UCI_OF_CAMILLA[def?.parameters?.type]
+      const allow = filtersSchema.value?.editable?.[stage.label]?.allow ?? []
+      return !allow.length || (!!uci && allow.includes(uci))
+    }
+    /* original block of an orphan (for the dropdown label) */
+    const orphanBlockLabel = (o: { name: string }): string => {
+      const entry = loadSession()[o.name]
+      const stage = entry ? stageOf(entry.stepIndex) : null
+      return stage ? ((stage as any).name ?? stage.label) : '—'
+    }
+
+    const doAddOrphan = async (name: string) => {
+      const ok = await addOrphanFilter(name)
+      if (!ok) labelCtx.$message?.error?.(labelCtx.$t('Cannot add a band to this block'))
+    }
+
+    /* mixer channel labels (uci in_label): chips show them when set */
+    const channelLabels = ref<string[]>([])
+    const channelLabel = (c: number) => channelLabels.value[c]?.trim() || `ch ${c}`
 
     const selectedStepInfo = computed<FilterStepInfo | null>(() =>
       eq.steps.find((s) => s.index === eq.selectedStepIndex) ?? null
@@ -371,6 +432,11 @@ export default defineComponent({
       stepName,
       selectedStepInfo,
       selectedLocked,
+      channelLabel,
+      orphanFilters,
+      orphanAllowed,
+      doAddOrphan,
+      orphanBlockLabel,
       canAddBand,
       doAddBand,
       scrollBandRail,
@@ -407,6 +473,12 @@ export default defineComponent({
     // runtime pipeline index + the editable slot schema).
     void self._loadPolicies(this.$oui)
 
+    // mixer channel labels for the chips (best effort)
+    this.$oui.call('dsp', 'get_mixers').then(r => {
+      const l = r?.mixers?.[0]?.in_label
+      if (Array.isArray(l)) channelLabels.value = l
+    }).catch(() => {})
+
     // Connect to the CamillaDSP websocket proxy and load the running config
     dsp.connect()
     self._stopConn = this.$watch(
@@ -429,8 +501,9 @@ export default defineComponent({
     self._stopUpload = this.$watch(
       () => eq.uploadStatus,
       (status: any) => {
-        if (status?.state === 'error' && status?.message) {
-          self.$message?.error?.(status.message)
+        if (status?.state === 'error') {
+          self.$message?.error?.(
+            self.$t('Upload failed') + (status.message ? `: ${status.message}` : ''))
         }
       },
       { deep: true }

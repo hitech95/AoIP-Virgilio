@@ -42,7 +42,10 @@ import ChannelRow from './ChannelRow.vue'
 
 export default {
   components: { Handle, ChannelRow },
-  props: { data: { type: Object, required: true }, selected: Boolean },
+  props: {
+    data: { type: Object, required: true },
+    selected: Boolean,
+  },
   computed: {
     inputs() { return this.data.inputs ?? [] },
     outputs() { return this.data.outputs ?? [] },

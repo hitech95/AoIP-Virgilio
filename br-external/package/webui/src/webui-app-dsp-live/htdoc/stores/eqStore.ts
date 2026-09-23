@@ -23,6 +23,7 @@ import { debounceCancelable } from '../lib/debounce'
 import * as dsp from '../dsp'
 import { clampFreqHz, clampGainDb, clampQ } from '../lib/eqParamClamp'
 import { disableFilterInStep, enableFilterInStep } from '../lib/filterEnablement'
+import { sessionDisable, sessionForget, reconcileSession, loadSession } from '../lib/filterSession'
 
 // Upload debounce time (ms)
 const UPLOAD_DEBOUNCE_MS = 200
@@ -97,10 +98,53 @@ function extractForSelection(): void {
   }
 
   const extracted = extractEqBandsFromConfig(lastConfig, eq.selectedStepIndex)
+  applyExtraction(extracted)
+}
+
+/**
+ * Publish an extraction into the store, appending the DISABLED filters of
+ * this block (session store) as grayed bands: they stay visible with
+ * their toggle switch so they can be re-enabled in place. Bands of other
+ * blocks are NOT shown here -- those are offered by the Restore dropdown.
+ */
+function applyExtraction(extracted: ExtractedEqData): void {
+  const bands = [...extracted.bands]
+  const names = [...extracted.filterNames]
+  const orders = [...extracted.orderNumbers]
+
+  const stepIndex = eq.selectedStepIndex
+  for (const [name, entry] of Object.entries(loadSession())) {
+    if (entry.stepIndex !== stepIndex) continue
+    const def = entry.def
+    if (!def || def.type !== 'Biquad') continue
+    const params = def.parameters ?? {}
+    // the live config cannot hold the def (camilladsp refuses orphans):
+    // guard against a stale session entry that is actually enabled
+    if ((lastConfig?.pipeline?.[stepIndex]?.names ?? []).includes(name)) continue
+    bands.push({
+      enabled: false,
+      type: mapEqBandTypeToCamilla(params.type) ?? 'Peaking',
+      freq: Math.max(10, Math.min(30000, Number(params.freq) || 1000)),
+      gain: Math.max(-24, Math.min(24, Number(params.gain) || 0)),
+      q: Math.max(0.1, Math.min(10, Number(params.q) || 1)),
+    } as EqBand)
+    names.push(name)
+    orders.push(orders.length + 1)
+  }
+
+  /* the merged view must be the SINGLE source: runUpload spreads
+   * extractedData and overrides bands with eq.bands -- a filterNames
+   * without the grayed entries made the counts diverge and every
+   * following upload throw "Band count and filter name count must
+   * match". */
+  extracted.bands = bands
+  extracted.filterNames = names
+  extracted.orderNumbers = orders
   extractedData = extracted
-  eq.bands = extracted.bands
-  eq.filterNames = extracted.filterNames
-  eq.bandOrderNumbers = extracted.orderNumbers
+
+  eq.bands = bands
+  eq.filterNames = names
+  eq.bandOrderNumbers = orders
   eq.preampGain = extracted.preampGain
   eq.preampAvailable = extracted.preampAvailable
 }
@@ -129,23 +173,24 @@ async function runUpload(): Promise<void> {
     const success = await dsp.uploadConfig(updatedConfig)
 
     if (success) {
-      const confirmedConfig = dsp.config.value as CamillaDSPConfig
-      lastConfig = confirmedConfig
+      // OPTIMISTIC: the daemon answered Ok -- extract from the config we
+      // just sent. An immediate re-download can race the apply and
+      // momentarily return the previous config, which made freshly
+      // added/removed bands vanish from the UI until the next reload.
+      lastConfig = updatedConfig
 
       // Refresh the base extraction for the block that is selected NOW (it
       // may have changed while the upload was in flight).
       const extracted = extractEqBandsFromConfig(lastConfig, stepIndex)
-      extractedData = extracted
-      eq.filterNames = extracted.filterNames
-      eq.bandOrderNumbers = extracted.orderNumbers
 
       // Mirror the server state into the UI only when nothing was edited
       // after this upload was built; otherwise keep local (newer) values so
-      // the slider never jumps back mid-interaction.
+      // the slider never jumps back mid-interaction. (applyExtraction also
+      // re-appends the disabled bands of this block as grayed faders.)
       if (!soloSessionActive && uploadedRevision === localRevision) {
-        eq.bands = extracted.bands
-        eq.preampGain = extracted.preampGain
-        eq.preampAvailable = extracted.preampAvailable
+        applyExtraction(extracted)
+      } else {
+        extractedData = extracted
       }
 
       eq.uploadStatus = { state: 'success' }
@@ -239,6 +284,14 @@ export function initializeFromConfig(cfg: CamillaDSPConfig): boolean {
   eq.sampleRate = Number(cfg.devices?.samplerate) || 48000
 
   try {
+    // disabled-filter session: drop stale entries, re-disable filters
+    // whose removal was lost (failed upload / clobbered by another
+    // client), keeping the mute state stable across reloads
+    const removed = reconcileSession(cfg)
+    if (removed.length) {
+      void dsp.uploadConfig(cfg).catch(() => {})
+    }
+
     eq.steps = listFilterSteps(cfg)
 
     const stillValid =
@@ -379,9 +432,23 @@ export async function toggleBandEnabled(index: number): Promise<void> {
 
   try {
     // Mute/unmute within THIS block only
-    const updatedConfig = isCurrentlyEnabled
-      ? disableFilterInStep(lastConfig, filterName, stepIndex)
-      : enableFilterInStep(lastConfig, filterName, stepIndex)
+    // grayed (session-disabled) bands of this block: index maps 1:1
+    let updatedConfig
+    if (isCurrentlyEnabled) {
+      updatedConfig = disableFilterInStep(lastConfig, filterName, stepIndex)
+      // camilladsp refuses configs with unreferenced filter defs: the
+      // definition moves OUT of the live config and into the session
+      const def = updatedConfig.filters?.[filterName]
+      if (updatedConfig.filters) delete updatedConfig.filters[filterName]
+      sessionDisable(filterName, stepIndex, def)
+    } else {
+      // restore: put the definition back, then re-add the name
+      const entry = loadSession()[filterName]
+      if (entry?.def && !lastConfig.filters?.[filterName])
+        lastConfig.filters[filterName] = entry.def
+      updatedConfig = enableFilterInStep(lastConfig, filterName, stepIndex)
+      sessionForget(filterName)
+    }
 
     lastConfig = updatedConfig
     extractForSelection()
@@ -463,12 +530,47 @@ export async function removeBand(index: number): Promise<boolean> {
 
   step.names = step.names.filter((n) => n !== filterName)
   if (lastConfig.filters) delete lastConfig.filters[filterName]
+  sessionForget(filterName)
 
   extractForSelection()
   localRevision++
   if (eq.selectedBandIndex !== null && eq.selectedBandIndex >= eq.bands.length) {
     eq.selectedBandIndex = eq.bands.length ? eq.bands.length - 1 : null
   }
+  uploadNow()
+  return true
+}
+
+/**
+ * Append an EXISTING (orphaned) filter definition to the selected block
+ * and upload immediately -- the restore path for disabled filters.
+ */
+export async function addOrphanFilter(filterName: string): Promise<boolean> {
+  const stepIndex = eq.selectedStepIndex
+  if (!lastConfig || stepIndex === null || !dsp.isConnected()) {
+    return false
+  }
+  await flushPendingUpload()
+  if (soloSessionActive) {
+    await endSoloEditSession()
+  }
+
+  const step = lastConfig.pipeline[stepIndex]
+  if (!step || step.type !== 'Filter' || !step.names) {
+    return false
+  }
+  // the definition lives in the session, not the live config
+  const entry = loadSession()[filterName]
+  if (!entry?.def) return false
+  if (step.names.includes(filterName)) return false
+
+  if (!lastConfig.filters) lastConfig.filters = {}
+  lastConfig.filters[filterName] = entry.def
+  step.names = [...step.names, filterName]
+  sessionForget(filterName)
+  extractForSelection()
+  localRevision++
+  eq.selectedBandIndex = eq.bands.length - 1
   uploadNow()
   return true
 }

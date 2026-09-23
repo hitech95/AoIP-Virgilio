@@ -36,11 +36,16 @@ export interface FiltersSchema {
   user_gains: string[]
 }
 
-/** CamillaDSP biquad subtype -> uci filter type. Null = no UCI equivalent. */
+/** CamillaDSP biquad subtype -> uci filter type. Null = no UCI equivalent.
+ * Mirrors genconf's emit_filter_yaml case list one-to-one (peak/hs/ls/
+ * hp/lp/bp/notch/ap + gain); anything not here cannot be persisted. */
 const UCI_TYPE_BY_BAND: Partial<Record<EqBand['type'], string>> = {
   Peaking: 'peak',
   LowShelf: 'ls',
   HighShelf: 'hs',
+  HighPass: 'hp',
+  LowPass: 'lp',
+  BandPass: 'bp',
   Notch: 'notch',
   AllPass: 'ap',
 }
@@ -50,6 +55,9 @@ const UCI_PARAMS: Record<string, string[]> = {
   peak: ['f', 'gain', 'q'],
   ls: ['f', 'gain', 'q'],
   hs: ['f', 'gain', 'q'],
+  hp: ['f', 'q'],
+  lp: ['f', 'q'],
+  bp: ['f', 'q'],
   notch: ['f', 'q'],
   ap: ['f', 'q'],
   gain: ['gain'],
@@ -121,7 +129,7 @@ export function planSlotSave(
     const mapped = bandToUciFilter(band)
     if (!mapped) {
       errors.push(
-        `Filter ${i + 1} (${band.type}) has no UCI equivalent (peak/ls/hs/notch/ap).`
+        `Filter ${i + 1} (${band.type}) has no UCI equivalent (peak/ls/hs/hp/lp/bp/notch/ap).`
       )
       return
     }
