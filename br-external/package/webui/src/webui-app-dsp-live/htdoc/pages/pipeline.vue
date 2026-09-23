@@ -16,17 +16,41 @@
     </VueFlow>
     <el-empty v-else :description="$t('CamillaDSP is not running or has no pipeline')" />
 
+    <!-- Orphaned filter definitions: present in filters{} but referenced
+         by no pipeline block. Re-adding follows the policy (editable or
+         free Filter blocks only; allow lists and max_steps respected --
+         the daemon manifest re-checks every live change anyway). -->
+    <el-card v-if="orphans.length" shadow="never" class="orphan-card">
+      <template #header>{{ $t('Orphaned filters') }}</template>
+      <div v-for="o in orphans" :key="o.name" class="orphan-row">
+        <span class="orphan-name">{{ o.name }}</span>
+        <el-tag size="small" type="info">{{ o.type }}</el-tag>
+        <el-select v-model="orphanTarget[o.name]" size="small" :placeholder="$t('Add to block')"
+          class="orphan-select">
+          <el-option v-for="b in eligibleBlocks(o)" :key="b.index" :value="b.index"
+            :label="`${b.label} (${b.count}/${b.max ?? '∞'})`" :disabled="b.max != null && b.count >= b.max"/>
+        </el-select>
+        <el-button size="small" type="primary" :disabled="orphanTarget[o.name] == null"
+          @click="addOrphan(o)">{{ $t('Add') }}</el-button>
+      </div>
+    </el-card>
+
     <div class="selected-editor" v-if="selected">
       <FilterBlockEditor v-if="selected?.step.type === 'Filter'" :node="selected" :step="selected.step"
         :input-channels="inputChannels" :can-edit-block="canEditBlock" :can-edit-filters="canEditFilters"
+        :can-label="canLabel"
         :entries="filterEntries" :filter="filter" :filter-label="filterLabel" :is-biquad="isBiquad" :has-q="hasQ"
         :has-gain="hasGain" :filter-types="filterTypes" @apply="apply" @remove-filter="removeFilter"
-        @set-enabled="setFilterEnabled" @set-type="setFilterType" @add-filter="addFilter" />
+        @set-enabled="setFilterEnabled" @set-type="setFilterType" @add-filter="addFilter"
+        @rename-filter="renameFilter" @save-label="saveBlockLabel" />
 
       <MixerBlockEditor v-else-if="selected?.step.type === 'Mixer'" :node="selected" :step="selected.step"
-        :mixer="mixer(selected.step.name)" :can-edit="canEditBlock" :input-channels="inputChannels"
-        :warning="mixWarning" :gain-limits="gainLimits" @apply="apply" @set-scale="setScale"
-        @remove-source="removeSource" @add-source="addSource" />
+        :mixer="mixer(selected.step.name)" :can-edit="canEditBlock" :can-route="canEditRoutes"
+        :can-bypass="canEditRoutes" :can-label="canLabel"
+        :input-channels="inputChannels"
+        :warning="mixWarning" :gain-limits="gainLimits" :ch-labels="chLabels"
+        @apply="apply" @set-scale="setScale" @rename-out="renameMixerOut"
+        @remove-source="removeSource" @add-source="addSource" @save-label="saveBlockLabel" />
     </div>
   </section>
 </template>
@@ -39,6 +63,7 @@ import PipelineNode from '../components/PipelineNode.vue'
 import FilterBlockEditor from '../components/FilterBlockEditor.vue'
 import MixerBlockEditor from '../components/MixerBlockEditor.vue'
 import '../styles/pipeline.scss'
+import { sessionDisable, sessionForget, reconcileSession, loadSession, sessionTypeOf } from '../lib/filterSession'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/controls/dist/style.css'
 
@@ -50,22 +75,47 @@ export default {
   components: { VueFlow, Controls, Background, PipelineNode, FilterBlockEditor, MixerBlockEditor },
   data() {
     return {
-      nodes: [], edges: [], error: '', ws: null, config: null, policy: [],
+      nodes: [], edges: [], error: '', ws: null, config: null, policy: [], schema: null,
+      orphanTarget: {},
+      chLabels: { in: [], out: [] },
       selected: null, selectedId: null, unprotected: false, applying: false,
       disabledFilters: {}, sessionTimer: null
     }
   },
   computed: {
     inputChannels() { return Array.from({ length: this.config?.devices?.capture?.channels ?? 0 }, (_, i) => i) },
+    mixerStageIndex() {
+      return (this.config?.pipeline ?? []).findIndex(s => s.type === 'Mixer')
+    },
+    /* filters defined but referenced by no pipeline block (placeholders
+       like user_slot_* anchors are not orphan candidates) */
+    /* disabled/orphaned filters: definitions live in the SESSION store
+       (camilladsp refuses unreferenced defs in the running config) */
+    orphans() {
+      // re-evaluate on config changes (the session has no signal)
+      void this.config
+      return Object.entries(loadSession())
+        .map(([name, entry]) => ({ name, type: sessionTypeOf(entry), stepIndex: entry.stepIndex }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    },
     filterTypes() { return FILTER_TYPES },
-    canEditBlock() { return this.unprotected || this.selected?.data.kind === 'free' },
+    /* 'mixer' = source mixer whose route GAINS the policy exposes --
+     * structure (bypass/scale/invert/mute/sources) stays manifest-pinned */
+    canEditBlock() { return this.unprotected || ['free', 'mixer'].includes(this.selected?.data.kind) },
+    canEditRoutes() { return this.unprotected || this.selected?.data.kind === 'free' },
+    /* the block label is uci metadata -- safe on any non-locked block */
+    canLabel() { return !!this.selected && this.selected.data.kind !== 'locked' },
     canEditFilters() { return this.unprotected || ['free', 'editable'].includes(this.selected?.data.kind) },
     graphGrid() { return document.documentElement.classList.contains('dark') ? '#314052' : '#b8c4d1' },
     isSimple() { return this.nodes.length <= 3 },
     filterEntries() {
       if (this.selected?.step.type !== 'Filter') return []
       const stepIndex = (this.config.pipeline ?? []).indexOf(this.selected.step)
-      const active = (this.selected.step.names ?? []).map(name => ({ name, disabled: false }))
+      /* the user_slot_* anchors are Gain filters genconf renders to host
+       * editable slots (the EQ page uses the leading one as block preamp):
+       * visible and gain-editable, but never disable/remove/rename-able */
+      const active = (this.selected.step.names ?? [])
+        .map(name => ({ name, disabled: false, structural: name.startsWith('user_slot_') }))
       const disabled = Object.entries(this.disabledFilters)
         .filter(([, item]) => item.stepIndex === stepIndex)
         .sort(([, a], [, b]) => a.index - b.index)
@@ -76,6 +126,14 @@ export default {
   async created() {
     try {
       this.policy = (await this.$oui.call('dsp', 'get_pipeline')).stages ?? []
+      try {
+        this.schema = await this.$oui.call('dsp', 'get_saved_filters')
+      } catch { this.schema = null }
+      try {
+        const mix = await this.$oui.call('dsp', 'get_mixers')
+        const m0 = mix?.mixers?.[0]
+        this.chLabels = { in: m0?.in_label ?? [], out: m0?.out_label ?? [] }
+      } catch { this.chLabels = { in: [], out: [] } }
       await this.connect()
       this.sessionTimer = setInterval(() => this.checkSession(), 5000)
     } catch (error) { this.error = error?.message ?? String(error) }
@@ -104,7 +162,13 @@ export default {
           this.ws.removeEventListener('message', onMessage)
           const reply = JSON.parse(event.data)
           const body = reply[Object.keys(reply)[0]]
-          body?.result === 'Ok' ? resolve(body.value) : reject(body?.value ?? new Error(this.$t('{command} failed', { command })))
+          if (body?.result === 'Ok') { resolve(body.value); return }
+          const r = body?.result
+          const msg = typeof r === 'string' ? `${command}: ${r}`
+            : (r && typeof r === 'object' && Object.keys(r).length)
+              ? `${command}: ${Object.keys(r)[0]} ${Object.values(r)[0]}`
+              : `${command} failed`
+          reject(new Error(msg))
         }
         this.ws.addEventListener('message', onMessage)
         this.ws.send(JSON.stringify(value === undefined ? command : { [command]: value }))
@@ -113,20 +177,26 @@ export default {
     async refresh() {
       const value = await this.request('GetConfigJson')
       this.config = typeof value === 'string' ? JSON.parse(value) : value
+      // disabled-filter session: entries whose removal was lost get
+      // re-disabled and the reconciled config uploaded once
+      if (reconcileSession(this.config).length)
+        this.request('SetConfigJson', JSON.stringify(this.config)).catch(() => {})
       this.unprotected = !this.policy.length || this.policy.every(stage => stage.kind === 'free')
       this.buildGraph()
     },
     stage(index) { return this.policy.find(stage => stage.index === index) },
     kind(index, step) {
-      if (step.type === 'Mixer') return 'mixer'
       const stage = this.stage(index)
+      /* mixers follow the policy map: kind 'mixer' = route gains exposed
+       * by policy (user_gains), 'free' = unprotected block */
+      if (step.type === 'Mixer') return stage ? stage.kind : 'mixer'
       if (!stage) return step.type === 'Filter' ? 'filter' : 'free'
       return stage.kind === 'locked' ? 'locked' : stage.kind === 'editable' ? 'editable' : 'readonly'
     },
     buildGraph() {
       const capture = Array.from({ length: this.config.devices.capture.channels }, (_, i) => i)
       const playback = Array.from({ length: this.config.devices.playback.channels }, (_, i) => i)
-      const nodes = [{ id: 'capture', type: 'pipeline', selectable: false, position: { x: 0, y: 140 }, data: { kind: 'endpoint', label: 'Capture', inputs: [], outputs: capture } }]
+      const nodes = [{ id: 'capture', type: 'pipeline', selectable: false, position: { x: 0, y: 140 }, data: { kind: 'endpoint', label: 'Capture', inputs: [], outputs: capture, chOut: this.chLabels.in } }]
       const edges = []
       const state = Object.fromEntries(capture.map(channel => [channel, { node: 'capture', channel, depth: 0, color: this.channelColor(channel) }]))
 
@@ -142,10 +212,13 @@ export default {
         const stage = this.stage(index)
         const id = `stage-${index}`
         const detail = step.type === 'Filter' ? `${step.names?.length ?? 0} filters` : mixer ? `${inputs.length} × ${outputs.length}` : ''
+        const afterMixer = this.mixerStageIndex >= 0 && index > this.mixerStageIndex
+        const chIn = afterMixer ? this.chLabels.out : this.chLabels.in
+        const chOut = this.chLabels.out
         nodes.push({
           id, type: 'pipeline', selectable: kind !== 'locked', position: { x: depth * 280, y: this.channelY(outputs) },
           data: {
-            kind, label: kind === 'locked' ? stage.label : (step.description || step.type), inputs, outputs, detail,
+            kind, label: kind === 'locked' ? (stage.name ?? stage.label) : (stage.name ?? (step.description || step.type)), inputs, outputs, detail, chIn, chOut,
             bypassed: !!step.bypassed,
             filterLabels: step.type === 'Filter' ? (step.names ?? []).map(name => this.runtimeFilterLabel(name)) : [],
             destinations: mixer ? mixer.mapping.map(destination => ({ dest: destination.dest, mute: !!destination.mute, sources: destination.sources.map(source => ({ channel: source.channel, mute: !!source.mute, inverted: !!source.inverted })) })) : []
@@ -159,7 +232,7 @@ export default {
       }
 
       const depth = Math.max(0, ...playback.map(channel => state[channel]?.depth ?? 0)) + 1
-      nodes.push({ id: 'playback', type: 'pipeline', selectable: false, position: { x: depth * 280, y: this.channelY(playback) }, data: { kind: 'endpoint', label: 'Playback', inputs: playback, outputs: [] } })
+      nodes.push({ id: 'playback', type: 'pipeline', selectable: false, position: { x: depth * 280, y: this.channelY(playback) }, data: { kind: 'endpoint', label: 'Playback', inputs: playback, outputs: [], chIn: this.chLabels.out } })
       for (const channel of playback) if (state[channel]) edges.push(this.edge(state[channel].node, 'playback', state[channel].channel, channel, state[channel].color))
       this.nodes = nodes
       this.edges = edges
@@ -169,6 +242,105 @@ export default {
     channelColor(channel) { return ['#3f9cff', '#f05ab7', '#9a7cff', '#f3bf4f'][channel % 4] },
     mixerColor(channel) { return ['#31d390', '#ff9d42', '#49c8ff', '#d88cff'][channel % 4] },
     edge(source, target, channel, targetChannel, color) { return { id: `${source}-${channel}-${target}-${targetChannel}`, source, target, sourceHandle: `out-${channel}`, targetHandle: `in-${targetChannel}`, type: 'straight', style: { stroke: color, strokeWidth: 2 } } },
+    /* camilladsp type -> uci name (mirror of genconf's vocabulary) */
+    uciTypeName(f) {
+      if (f.type === 'Gain') return 'gain'
+      if (f.type === 'Conv') return 'conv'
+      if (f.type === 'Delay') return 'delay'
+      const map = { Peaking: 'peak', Highshelf: 'hs', Lowshelf: 'ls', Highpass: 'hp',
+                    Lowpass: 'lp', Bandpass: 'bp', Notch: 'notch', Allpass: 'ap' }
+      return map[f.parameters?.type] ?? null
+    },
+    eligibleBlocks(orphan) {
+      const out = []
+      const def = loadSession()[orphan.name]?.def ?? this.config.filters?.[orphan.name]
+      const uciType = this.uciTypeName(def)
+      for (const stage of this.policy) {
+        if (stage.kind !== 'editable' && stage.kind !== 'free') continue
+        const step = this.config.pipeline[stage.index]
+        if (!step || step.type !== 'Filter') continue
+        if (stage.kind === 'editable') {
+          const slot = this.schema?.editable?.[stage.label]
+          const allow = slot?.allow ?? []
+          const max = slot?.max_steps ? Number(slot.max_steps) : null
+          if (allow.length && (!uciType || !allow.includes(uciType))) continue
+          out.push({ index: stage.index, label: stage.label, count: (step.names ?? []).length, max })
+        } else {
+          out.push({ index: stage.index, label: step.description || `#${stage.index}`, count: (step.names ?? []).length, max: null })
+        }
+      }
+      return out
+    },
+    /* live output renaming: uci out_label via save_mixer_meta */
+    async renameMixerOut(dest, label) {
+      const mixerName = this.selected?.step?.name
+      if (!mixerName || dest == null) return
+      try {
+        const mix = await this.$oui.call('dsp', 'get_mixers')
+        const m0 = (mix?.mixers ?? []).find(m => m.name === mixerName)
+        const out = [...(m0?.out_label ?? [])]
+        while (out.length <= +dest) out.push('')
+        out[+dest] = String(label ?? '').trim().slice(0, 16)
+        const r = await this.$oui.call('dsp', 'save_mixer_meta', {
+          mixer: mixerName, out_label: out.filter(x => x || out.lastIndexOf(x) >= 0)
+        })
+        if (r?.error) throw new Error(r.error.message)
+        this.chLabels = { ...this.chLabels, out }
+        this.buildGraph()
+        const node = this.nodes.find(item => item.id === this.selected?.id)
+        if (node) this.selectNode({ node })
+      } catch (e) {
+        this.$message.error(this.$t('Update failed') + (e?.message ? `: ${e.message}` : ''))
+      }
+    },
+    async renameFilter(oldName, newName) {
+      if (this.isStructural(oldName)) return
+      newName = String(newName ?? '').trim().replace(/[^a-zA-Z0-9._-]/g, '')
+      if (!newName || newName === oldName) return
+      if (this.config.filters[newName]) {
+        this.$message.error(`Filter '${newName}' already exists`)
+        return
+      }
+      this.config.filters[newName] = this.config.filters[oldName]
+      delete this.config.filters[oldName]
+      for (const step of this.config.pipeline ?? [])
+        step.names = (step.names ?? []).map(n => n === oldName ? newName : n)
+      await this.apply()
+    },
+    async saveBlockLabel(label) {
+      if (!this.selected) return
+      const r = await this.$oui.call('dsp', 'set_block_label', {
+        index: this.config.pipeline.indexOf(this.selected.step),
+        label: String(label ?? '').trim()
+      })
+      if (r?.error) this.$message.error(r.error.message)
+      else {
+        this.policy = (await this.$oui.call('dsp', 'get_pipeline')).stages ?? this.policy
+        this.buildGraph()
+        /* re-select so the editor follows the rebuilt node (label) */
+        const node = this.nodes.find(item => item.id === this.selected?.id)
+        if (node) this.selectNode({ node })
+      }
+    },
+    async addOrphan(orphan) {
+      const idx = this.orphanTarget[orphan.name]
+      if (idx == null) return
+      const step = this.config.pipeline[idx]
+      if (!step || step.type !== 'Filter') return
+      const def = loadSession()[orphan.name]?.def
+      if (!def) return
+      if (!this.config.filters) this.config.filters = {}
+      this.config.filters[orphan.name] = def
+      step.names = [...(step.names ?? []), orphan.name]
+      sessionForget(orphan.name)
+      /* the orphan is CONSUMED: drop every disabled-view of it (the
+       * origin block's table row, the panel list) or it keeps showing
+       * as disabled on the block it came from */
+      delete this.disabledFilters[orphan.name]
+      this.config = { ...this.config }
+      await this.apply()
+      this.$set ? null : (this.orphanTarget = { ...this.orphanTarget, [orphan.name]: undefined })
+    },
     selectNode({ node }) {
       if (!node.selectable || node.data.kind === 'endpoint' || node.data.kind === 'locked') return
       this.selectedId = node.id
@@ -181,13 +353,19 @@ export default {
       this.selectedId = null
       this.buildGraph()
     },
-    filter(name) { return this.config?.filters?.[name] ?? this.disabledFilters[name]?.filter },
+    filter(name) { return this.config?.filters?.[name] ?? this.disabledFilters[name]?.filter ?? loadSession()[name]?.def },
     runtimeFilterLabel(name) { return this.filter(name)?.parameters?.type ?? this.filter(name)?.type ?? name },
     filterLabel(name) { const type = this.runtimeFilterLabel(name); return /^EQ\d+$/.test(name) ? `${type} filter` : `${type} · ${name}` },
     isBiquad(name) { return this.filter(name)?.type === 'Biquad' },
     hasQ(name) { return this.isBiquad(name) && this.filter(name)?.parameters?.q != null },
-    hasGain(name) { return this.isBiquad(name) && this.filter(name)?.parameters?.gain != null },
+    hasGain(name) {
+        const f = this.filter(name)
+        // plain Gain/Volume filters (uci 'gain') carry the value in parameters.gain
+        return f?.type === 'Gain' || f?.type === 'Volume' || (f?.type === 'Biquad' && f?.parameters?.gain != null)
+      },
+    isStructural(name) { return name.startsWith('user_slot_') },
     setFilterType(name, type) {
+      if (this.isStructural(name)) return
       const filter = this.filter(name)
       if (!filter?.parameters) return
       filter.parameters.type = type
@@ -203,10 +381,37 @@ export default {
       this.selected.step.names.push(name)
       this.apply()
     },
-    removeFilter(name) { const index = this.selected.step.names.indexOf(name); if (index >= 0) { this.selected.step.names.splice(index, 1); delete this.config.filters[name] } delete this.disabledFilters[name]; this.apply() },
+    removeFilter(name) {
+      if (this.isStructural(name)) return
+      const index = this.selected.step.names.indexOf(name); if (index >= 0) { this.selected.step.names.splice(index, 1); delete this.config.filters[name] } delete this.disabledFilters[name]; sessionForget(name); this.apply() },
     setFilterEnabled(name, enabled) {
-      if (enabled) { const saved = this.disabledFilters[name]; if (!saved) return; this.config.filters[name] = saved.filter; this.config.pipeline[saved.stepIndex].names.splice(saved.index, 0, name); delete this.disabledFilters[name] }
-      else { const stepIndex = this.config.pipeline.indexOf(this.selected.step); const index = this.selected.step.names.indexOf(name); this.disabledFilters[name] = { filter: this.config.filters[name], stepIndex, index }; this.selected.step.names.splice(index, 1); delete this.config.filters[name] }
+      if (this.isStructural(name)) return
+      if (enabled) {
+        const entry = loadSession()[name]
+        const saved = this.disabledFilters[name] ??
+          { filter: entry?.def, stepIndex: entry?.stepIndex ?? this.config.pipeline.indexOf(this.selected.step), index: 0 }
+        if (!saved?.filter) return
+        if (!this.config.filters) this.config.filters = {}
+        this.config.filters[name] = saved.filter
+        this.config.pipeline[saved.stepIndex].names.splice(saved.index, 0, name)
+        delete this.disabledFilters[name]
+        sessionForget(name)
+        this.config = { ...this.config }
+      } else {
+        const stepIndex = this.config.pipeline.indexOf(this.selected.step)
+        const index = this.selected.step.names.indexOf(name)
+        /* idempotency guard: a repeated disable (double event, stale
+         * row) would splice(-1, ...) -- corrupting the block -- and
+         * clobber the session def with undefined */
+        if (index < 0) return
+        const def = this.config.filters[name]
+        this.disabledFilters[name] = { filter: def, stepIndex, index }
+        this.selected.step.names.splice(index, 1)
+        /* camilladsp refuses unreferenced defs: the definition moves to
+           the session store; the orphan panel restores from there */
+        if (this.config.filters) delete this.config.filters[name]
+        sessionDisable(name, stepIndex, def)
+      }
       this.apply()
     },
     addSource(destination, channel) { destination.sources.push({ channel, gain: 0, inverted: false, mute: false, scale: 'dB' }); this.apply() },
@@ -215,10 +420,16 @@ export default {
     gainLimits(source) { return (source.scale || 'dB') === 'linear' ? { min: 0, max: 10, step: 0.01 } : { min: -150, max: 50, step: 0.25 } },
     mixWarning(destination) { const active = destination.mute ? [] : (destination.sources ?? []).filter(source => !source.mute); const linear = active.reduce((sum, source) => sum + ((source.scale || 'dB') === 'linear' ? (+source.gain || 0) : Math.pow(10, (+source.gain || 0) / 20)), 0); return { sources: active.length, risk: linear > 1 + 1e-6, gainDb: linear <= 0 ? '-∞' : (20 * Math.log10(linear)).toFixed(2) } },
     async apply() {
-      if ((!this.canEditBlock && !this.canEditFilters) || this.applying) return
+      /* NOTE: no canEdit guard here -- orphan restore / rename operate
+       * without a selected block; the editors gate their own controls */
+      if (this.applying) return
       this.applying = true
       try { const selectedId = this.selected?.id; await this.request('SetConfigJson', JSON.stringify(this.config)); await this.refresh(); const node = this.nodes.find(item => item.id === selectedId); if (node) this.selectNode({ node }) }
-      catch (error) { this.error = typeof error === 'string' ? error : JSON.stringify(error) }
+      catch (error) {
+        /* Error instances stringify to '{}' -- keep the real message */
+        this.error = typeof error === 'string' ? error : (error?.message ?? String(error))
+        this.$message.error(this.$t('Update failed') + (this.error ? `: ${this.error}` : ''))
+      }
       finally { this.applying = false }
     }
   }
@@ -226,3 +437,10 @@ export default {
 </script>
 
 <i18n src="../locale.json"/>
+
+<style scoped>
+.orphan-card { margin: 12px 0; }
+.orphan-row { display: flex; align-items: center; gap: 12px; margin: 6px 0; }
+.orphan-name { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+.orphan-select { width: 260px; }
+</style>
