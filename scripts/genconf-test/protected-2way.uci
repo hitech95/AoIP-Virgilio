@@ -1,5 +1,7 @@
 # test uci tree: protected 2-way speaker (mirrors the shipped overlay
 # example). Devices match configs/camilladsp_protected_2way.yaml.
+# New named-section schema: pipeline_step sections + `config pipeline`
+# order list.
 
 config camilladsp 'main'
 	option enabled '1'
@@ -14,34 +16,7 @@ config camilladsp 'main'
 	option capture 'Inferno'
 	option playback 'Inferno'
 
-config subchain
-	option name 'user_in0'
-	option policy 'child'
-	option channels '0'
-	option allow 'gain peak hs ls notch ap conv delay'
-	option max_steps '8'
-
-config subchain
-	option name 'user_in1'
-	option policy 'child'
-	option channels '1'
-	option allow 'gain peak hs ls notch ap conv delay'
-	option max_steps '8'
-
-config subchain
-	option name 'src_sel'
-	option policy 'locked'
-
-config subchain
-	option name 'wf_tail'
-	option policy 'locked'
-
-config subchain
-	option name 'tw_tail'
-	option policy 'locked'
-
-config mixer
-	option name 'srcmix'
+config mixer 'srcmix'
 	option user_gains '1'
 	option in '2'
 	option out '2'
@@ -67,66 +42,88 @@ config mixroute
 	option source '1'
 	option gain '0.5'
 
-config filter
-	option name 'wf_lp'
+config filter 'wf_lp'
 	option type 'lrlp'
 	option f '2300'
 	option order '4'
-config filter
-	option name 'wf_fir'
+config filter 'wf_fir'
 	option type 'conv'
 	option filename '/usr/share/camilladsp/coeffs/wf_fir.txt'
-config filter
-	option name 'wf_limit'
+config filter 'wf_limit'
 	option type 'limiter'
 	option clip_limit '0.9'
-config filter
-	option name 'tw_hp'
+config filter 'tw_hp'
 	option type 'lrhp'
 	option f '1900'
 	option order '4'
-config filter
-	option name 'tw_notch10k'
+config filter 'tw_notch10k'
 	option type 'notch'
 	option f '10000'
 	option q '2.0'
-config filter
-	option name 'tw_peak17k'
+config filter 'tw_peak17k'
 	option type 'peak'
 	option f '17000'
 	option gain '-3.0'
 	option q '2.0'
-config filter
-	option name 'tw_limit'
+config filter 'tw_limit'
 	option type 'limiter'
 	option clip_limit '0.8'
 
-config step
-	option index '10'
-	option subchain 'user_in0'
-config step
-	option index '15'
-	option subchain 'user_in1'
-config step
-	option index '20'
-	option subchain 'src_sel'
+config pipeline_step 'user_in0'
+	option policy 'child'
+	list channels '0'
+	list allow 'gain'
+	list allow 'peak'
+	list allow 'hs'
+	list allow 'ls'
+	list allow 'notch'
+	list allow 'ap'
+	list allow 'bp'
+	list allow 'hp'
+	list allow 'lp'
+	list allow 'conv'
+	option max_steps '8'
+
+config pipeline_step 'user_in1'
+	option policy 'child'
+	list channels '1'
+	list allow 'gain'
+	list allow 'peak'
+	list allow 'hs'
+	list allow 'ls'
+	list allow 'notch'
+	list allow 'ap'
+	list allow 'bp'
+	list allow 'hp'
+	list allow 'lp'
+	list allow 'conv'
+	option max_steps '8'
+
+config pipeline_step 'src_sel'
+	option policy 'locked'
 	option type 'Mixer'
-	option name 'srcmix'
-	option user_gains '1'
-config step
-	option index '30'
-	option subchain 'wf_tail'
+	option mixer 'srcmix'
+
+config pipeline_step 'wf_tail'
+	option policy 'locked'
 	option type 'Filter'
 	list channels '0'
 	list names 'wf_lp'
 	list names 'wf_fir'
 	list names 'wf_limit'
-config step
-	option index '40'
-	option subchain 'tw_tail'
+
+config pipeline_step 'tw_tail'
+	option policy 'locked'
 	option type 'Filter'
 	list channels '1'
 	list names 'tw_hp'
 	list names 'tw_notch10k'
 	list names 'tw_peak17k'
 	list names 'tw_limit'
+
+config pipeline
+	list step 'user_in0'
+	list step 'user_in1'
+	list step 'src_sel'
+	list step 'wf_tail'
+	list step 'tw_tail'

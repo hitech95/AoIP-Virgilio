@@ -1,15 +1,15 @@
 # camilladsp: pipeline is generated at runtime into /tmp/camilladsp.yml by
 # /usr/bin/camilladsp-genconf (docs: docs/camilladsp.md).
 #
-# The audio chain is defined by generic uci nodes:
-#   config filter    one filter (option name/type + params)
-#   config mixer     one mixer  (option name/in/out)
-#   config mixroute  one mixer source contribution (mixer/dest/source/gain)
-#   config step      one pipeline step, ordered by option index
-#                    (Filter: list channels + list names | Mixer: option name |
-#                     editable sub chain slot: option subchain only)
-#   config subchain  one logical sub chain (policy locked|child|free),
-#                    see "Protected pipeline" in docs/camilladsp.md
+# The audio chain is defined by generic uci nodes (NAMED sections; the
+# section id is the object name):
+#   config filter '<name>'    one filter (type + params)
+#   config mixer '<name>'     one mixer (in, out, user_gains)
+#   config mixroute           one mixer source contribution
+#                             (mixer/dest/source/gain)
+#   config pipeline_step '<n>'  one pipeline step (policy locked|child|free,
+#                             type, filter/mixer refs, constraints, label)
+#   config pipeline           pipeline ORDER: one 'list step' per step
 # No nodes -> plain pass-through capture -> playback.
 #
 # Device specs "TYPE[:VALUE]":
@@ -26,10 +26,10 @@
 config camilladsp 'main'
 	option enabled '1'
 	option port '5000'
-	# websocket bind address. The WS API has NO authentication: the
-	# product binds loopback (127.0.0.1) so only local tools reach it.
-	# The dev rig sets 0.0.0.0 here to use the forwarded port from the
-	# host (run-qemu.sh hostfwd, scripts/protected_ws_test.py).
+	# websocket bind address. The WS API has NO authentication: bind to
+	# loopback (127.0.0.1) so only local tools (web UI, preset
+	# daemon) can reach it. The dev rig overrides this to 0.0.0.0 to
+	# use the forwarded port.
 	option ws_address '0.0.0.0'
 	# flexi_logger spec (--custom_log_spec); default silences the inferno
 	# PCM short-read warnings (~2000 lines/s at warn)
@@ -44,129 +44,128 @@ config camilladsp 'main'
 	option playback 'File:/dev/null'
 	# Initial main fader gain in dB, applied by the service as camilladsp -g.
 	option gain '0'
-	# extra environment for the daemon; use for INFERNO_* settings that the
-	# inferno ALSA plugin picks up when capture/playback is 'Alsa:inferno*'
-	# (values must not contain spaces), e.g.:
-	#	list env 'INFERNO_NAME=myspeaker'
-	#	list env 'INFERNO_RX_CHANNELS=8'
-	#	list env 'INFERNO_BIND_IP=eth1'
 
-# --- protected 2-way speaker example (sub chains + user EQ slots) ----------
-# The pipeline is partitioned into logical sub chains; genconf renders the
-# config AND a policy spec, camilladsp builds its manifest from them and
-# enforces it (see docs/camilladsp.md "Protected pipeline" and
-# plan/protected-xover-pipeline.md). User EQ lives on the INPUT channels
-# (two editable slots before the mixer); mix + xover/FIR/limiter tails
-# are locked.
-#
-# config subchain
-# 	option name 'user_in0'            # editable slot, input ch0
-# 	option policy 'child'             # content editable, position fixed
-# 	option channels '0'               # bus channels the slot owns
-# 	option allow 'gain peak hs ls notch ap conv delay'   # uci filter types
-# 	option max_steps '8'
-# config subchain
-# 	option name 'user_in1'
-# 	option policy 'child'
-# 	option channels '1'
-# 	option allow 'gain peak hs ls notch ap conv delay'
-# 	option max_steps '8'
-# config subchain
-# 	option name 'src_sel'             # source-select mixer
-# 	option policy 'locked'            # content + position pinned
-# config subchain
-# 	option name 'wf_tail'             # woofer xover + FIR + limiter
-# 	option policy 'locked'
-# config subchain
-# 	option name 'tw_tail'             # tweeter xover + EQ + limiter
-# 	option policy 'locked'
-#
-# config mixer
-# 	option name 'srcmix'
-#	option user_gains '1'              # route gains selectable via WS
-# 	option in '2'
-# 	option out '2'
-# config mixroute                        # woofer feed = (L+R)/2
-# 	option mixer 'srcmix'
-# 	option dest '0'
-# 	option source '0'
-# 	option gain '0.5'                # LINEAR (0.5 = -6 dB)
-# config mixroute
-# 	option mixer 'srcmix'
-# 	option dest '0'
-# 	option source '1'
-# 	option gain '0.5'
-# config mixroute                        # tweeter feed = (L+R)/2
-# 	option mixer 'srcmix'
-# 	option dest '1'
-# 	option source '0'
-# 	option gain '0.5'
-# config mixroute
-# 	option mixer 'srcmix'
-# 	option dest '1'
-# 	option source '1'
-# 	option gain '0.5'
-#
-# config filter
-# 	option name 'wf_lp'
-# 	option type 'lrlp'
-# 	option f '2300'
-# 	option order '4'
-# config filter
-# 	option name 'wf_fir'              # locked conv filters must point
-# 	option type 'conv'                # under /usr/share/camilladsp/coeffs
-# 	option filename '/usr/share/camilladsp/coeffs/wf_fir.txt'
-# config filter
-# 	option name 'wf_limit'
-# 	option type 'limiter'
-# 	option clip_limit '0.9'
-# config filter
-# 	option name 'tw_hp'
-# 	option type 'lrhp'
-# 	option f '1900'
-# 	option order '4'
-# config filter
-# 	option name 'tw_notch10k'
-# 	option type 'notch'
-# 	option f '10000'
-# 	option q '2.0'
-# config filter
-# 	option name 'tw_peak17k'
-# 	option type 'peak'
-# 	option f '17000'
-# 	option gain '-3.0'
-# 	option q '2.0'
-# config filter
-# 	option name 'tw_limit'
-# 	option type 'limiter'
-# 	option clip_limit '0.8'
-#
-# config step
-# 	option index '10'                 # editable slot: bare step,
-# 	option subchain 'user_in0'        # renders user_slot_user_in0
-# config step
-# 	option index '15'
-# 	option subchain 'user_in1'
-# config step
-# 	option index '20'
-# 	option subchain 'src_sel'
-# 	option type 'Mixer'
-# 	option name 'srcmix'
-#	option user_gains '1'              # route gains selectable via WS
-# config step
-# 	option index '30'
-# 	option subchain 'wf_tail'
-# 	option type 'Filter'
-# 	list channels '0'
-# 	list names 'wf_lp'
-# 	list names 'wf_fir'
-# 	list names 'wf_limit'
-# config step
-# 	option index '40'
-# 	option subchain 'tw_tail'
-# 	option type 'Filter'
-# 	list channels '1'
-# 	list names 'tw_hp'
-# 	list names 'tw_notch10k'
-# 	list names 'tw_peak17k'
-# 	list names 'tw_limit'
+# --- protected 2-way speaker pipeline ---------------------------------------
+# Provisioned at build time (docs/camilladsp.md "Protected pipeline",
+# plan/protected-xover-pipeline.md): user EQ lives on the INPUT channels
+# (two editable slots before the mixer); the source-select mixer is
+# user-gain-exposed; mix + xover/FIR/limiter tails are locked (enforced
+# by genconf + the camilladsp manifest).
+
+config mixer 'srcmix'
+	option in '2'
+	option out '2'
+	option user_gains '1'
+
+config mixroute
+	option mixer 'srcmix'
+	option dest '0'
+	option source '0'
+	option gain '0.5'
+config mixroute
+	option mixer 'srcmix'
+	option dest '0'
+	option source '1'
+	option gain '0.5'
+config mixroute
+	option mixer 'srcmix'
+	option dest '1'
+	option source '0'
+	option gain '0.5'
+config mixroute
+	option mixer 'srcmix'
+	option dest '1'
+	option source '1'
+	option gain '0.5'
+
+config filter 'wf_lp'
+	option type 'lrlp'
+	option f '2300'
+	option order '4'
+config filter 'wf_fir'
+	option type 'conv'
+	# woofer correction FIR: vendor path, locked (identity placeholder in
+	# the prototype image -- see scripts/camilladsp_xo_coeffs.py)
+	option filename '/usr/share/camilladsp/coeffs/wf_fir.txt'
+config filter 'wf_limit'
+	option type 'limiter'
+	option clip_limit '0.9'
+config filter 'tw_hp'
+	option type 'lrhp'
+	option f '1900'
+	option order '4'
+config filter 'tw_notch10k'
+	option type 'notch'
+	option f '10000'
+	option q '2.0'
+config filter 'tw_peak17k'
+	option type 'peak'
+	option f '17000'
+	option gain '-3.0'
+	option q '2.0'
+config filter 'tw_limit'
+	option type 'limiter'
+	option clip_limit '0.8'
+
+# editable user EQ slots (child policy): user filters are added to
+# 'list names' by the web UI; the placeholder anchor user_slot_<step>
+# is always rendered first
+config pipeline_step 'user_in0'
+	option policy 'child'
+	list channels '0'
+	list allow 'gain'
+	list allow 'peak'
+	list allow 'hs'
+	list allow 'ls'
+	list allow 'notch'
+	list allow 'ap'
+	list allow 'bp'
+	list allow 'hp'
+	list allow 'lp'
+	list allow 'conv'
+	option max_steps '8'
+
+config pipeline_step 'user_in1'
+	option policy 'child'
+	list channels '1'
+	list allow 'gain'
+	list allow 'peak'
+	list allow 'hs'
+	list allow 'ls'
+	list allow 'notch'
+	list allow 'ap'
+	list allow 'bp'
+	list allow 'hp'
+	list allow 'lp'
+	list allow 'conv'
+	option max_steps '8'
+
+config pipeline_step 'src_sel'
+	option policy 'locked'
+	option type 'Mixer'
+	option mixer 'srcmix'
+
+config pipeline_step 'wf_tail'
+	option policy 'locked'
+	option type 'Filter'
+	list channels '0'
+	list names 'wf_lp'
+	list names 'wf_fir'
+	list names 'wf_limit'
+
+config pipeline_step 'tw_tail'
+	option policy 'locked'
+	option type 'Filter'
+	list channels '1'
+	list names 'tw_hp'
+	list names 'tw_notch10k'
+	list names 'tw_peak17k'
+	list names 'tw_limit'
+
+# pipeline order
+config pipeline
+	list step 'user_in0'
+	list step 'user_in1'
+	list step 'src_sel'
+	list step 'wf_tail'
+	list step 'tw_tail'

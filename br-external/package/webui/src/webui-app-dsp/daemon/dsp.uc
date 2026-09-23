@@ -22,29 +22,43 @@ const CDSP_CONFIG = "/etc/config/camilladsp";
  * any local user (genconf writes through it as root -> file clobber). */
 const CDSP_CHECK = "/run/webui/camilladsp.yml.check";
 
-/* slot model: { <subchain>: { policy, channels, allow, max_steps,
- *   step: section id, names: [current user filters] } } */
+/* slot model: { <step name>: { policy, channels, allow, max_steps,
+ *   step: section id, names: [current user filters] } } -- the editable
+ * (child/free) pipeline_step sections (named-section uci schema) */
+
+/* pipeline order: the 'list step' entries of `config pipeline`
+ * (anonymous section), in order */
+function pipeline_order() {
+	for (let st in uci_sections("camilladsp", "pipeline")) {
+		if (type(st.step) == "array") return st.step;
+		if (st.step != null) return [ st.step ];
+	}
+	return [];
+}
+
+/* pipeline_step sections by section name */
+function pipeline_steps() {
+	let out = {};
+	for (let st in uci_sections("camilladsp", "pipeline_step"))
+		out[st[".name"]] = st;
+	return out;
+}
+
 function filters_slots() {
 	let slots = {};
-	for (let sc in uci_sections("camilladsp", "subchain")) {
-		let allow = (type(sc.allow) == "array") ? sc.allow : split(sc.allow ?? "", /\s+/);
-		slots[sc.name] = {
-			policy: sc.policy,
-			channels: sc.channels,
-			allow: allow,
-			max_steps: sc.max_steps,
-			step: null,
-			names: []
-		};
-	}
-	for (let st in uci_sections("camilladsp", "step")) {
-		if (st.subchain && slots[st.subchain] && !slots[st.subchain].step) {
-			slots[st.subchain].step = st[".section"];
-			let nm = st.names ?? [];
+	for (let st in uci_sections("camilladsp", "pipeline_step")) {
+		if (st.policy != "child" && st.policy != "free")
+			continue;
+		slots[st[".name"]] = {
+			policy: st.policy,
+			channels: (type(st.channels) == "array") ? join(" ", st.channels) : (st.channels ?? ""),
+			allow: (type(st.allow) == "array") ? st.allow : split(st.allow ?? "", /\s+/),
+			max_steps: st.max_steps,
+			step: st[".section"],
 			/* the rendered placeholder anchor is implicit -- the uci list
 			 * holds only user filters */
-			slots[st.subchain].names = (type(nm) == "array") ? nm : [nm];
-		}
+			names: (type(st.names) == "array") ? st.names : ((st.names != null) ? [st.names] : [])
+		};
 	}
 	return slots;
 }
@@ -52,7 +66,7 @@ function filters_slots() {
 function filters_by_name() {
 	let out = {};
 	for (let f in uci_sections("camilladsp", "filter"))
-		out[f.name] = f;
+		out[f[".name"]] = f;
 	return out;
 }
 
@@ -80,22 +94,22 @@ function filters_schema() {
 	let editable = {}, locked = {};
 	for (let sc in slots) {
 		let slot = slots[sc];
-		if (slot.policy == "locked") {
-			locked[sc] = slot.names;
-		} else {
-			editable[sc] = {
-				policy: slot.policy,
-				channels: slot.channels,
-				allow: slot.allow,
-				max_steps: slot.max_steps,
-				filters: filter_params(slot.names, flt)
-			};
-		}
+		editable[sc] = {
+			policy: slot.policy,
+			channels: slot.channels,
+			allow: slot.allow,
+			max_steps: slot.max_steps,
+			filters: filter_params(slot.names, flt)
+		};
 	}
+	/* locked steps: the fixed chains, names only */
+	for (let st in uci_sections("camilladsp", "pipeline_step"))
+		if (st.policy == "locked")
+			locked[st[".name"]] = (type(st.names) == "array") ? st.names : ((st.names != null) ? [st.names] : []);
 	let user_gains = [];
 	for (let m in uci_sections("camilladsp", "mixer"))
 		if (m.user_gains == "1")
-			push(user_gains, m.name);
+			push(user_gains, m[".name"]);
 	return { editable: editable, locked: locked, user_gains: user_gains };
 }
 
@@ -153,11 +167,15 @@ function filters_set(params) {
 			return { error: { code: ERR_INVALID_ARGUMENT,
 				message: "pipeline object { index, filters } required" } };
 
-		let ordered = uci_sections("camilladsp", "step");
-		sort(ordered, (a, b) => (+a.index) - (+b.index));
+		let ordered = pipeline_order();
 		if (free.index < 0 || free.index >= length(ordered))
 			return { error: { code: ERR_NOT_FOUND, message: "pipeline index out of range" } };
-		let st = ordered[free.index];
+		let name = ordered[free.index];
+		let st = pipeline_steps()[name];
+		if (!st)
+			return { error: { code: ERR_NOT_FOUND, message: `no pipeline step ${free.index}` } };
+		if (st.policy == "locked")
+			return { error: { code: ERR_PERMISSION_DENIED, message: `${name} is locked` } };
 		if (st.type != "Filter")
 			return { error: { code: ERR_INVALID_ARGUMENT,
 				message: `pipeline step ${free.index} is not a Filter block` } };
@@ -166,9 +184,7 @@ function filters_set(params) {
 			let c = uci.cursor();
 			c.load("camilladsp");
 
-			let old = st.names ?? [];
-			if (type(old) != "array")
-				old = [old];
+			let old = (type(st.names) == "array") ? st.names : ((st.names != null) ? [st.names] : []);
 			for (let n in old)
 				if (substr(n, 0, 2) == "u_")
 					c.delete("camilladsp", n);
@@ -178,11 +194,12 @@ function filters_set(params) {
 			for (let f in free.filters) {
 				i++;
 				let fname = `u_free_${i}`;
-				let sec = c.add("camilladsp", "filter");
-				c.set("camilladsp", sec, "name", fname);
+				/* NB: this ucode has no named cursor.add() -- create the
+				 * named section via the 3-arg set() form */
+				c.set("camilladsp", fname, "filter");
 				for (let k in f)
 					if (k != "name")
-						c.set("camilladsp", sec, k, f[k]);
+						c.set("camilladsp", fname, k, f[k]);
 				push(names, fname);
 			}
 			c.set("camilladsp", st[".section"], "names", names);
@@ -220,7 +237,8 @@ function filters_set(params) {
 		let c = uci.cursor();
 		c.load("camilladsp");   /* stage on a loaded cursor or add() is lost */
 
-		/* drop previous user filters of every touched slot */
+		/* drop previous user filters of every touched slot (named
+		 * sections: the filter section id IS its name) */
 		for (let sc in steps) {
 			for (let old in slots[sc].names)
 				c.delete("camilladsp", old);
@@ -231,11 +249,12 @@ function filters_set(params) {
 			for (let f in steps[sc]) {
 				i++;
 				let fname = `u_${sc}_${i}`;
-				let sec = c.add("camilladsp", "filter");
-				c.set("camilladsp", sec, "name", fname);
+				/* NB: this ucode has no named cursor.add() -- create the
+				 * named section via the 3-arg set() form */
+				c.set("camilladsp", fname, "filter");
 				for (let k in f)
 					if (k != "name")
-						c.set("camilladsp", sec, k, f[k]);
+						c.set("camilladsp", fname, k, f[k]);
 				push(names, fname);
 			}
 			c.set("camilladsp", slots[sc].step, "names", names);
@@ -275,6 +294,7 @@ function mix_set(params) {
 			else
 				g = (r.source == source) ? 1.0 : 0.0;
 			c.set("camilladsp", r[".section"], "gain", `${g}`);
+			c.set("camilladsp", r[".section"], "mute", "");
 		}
 		c.commit("camilladsp");
 	});
@@ -290,7 +310,7 @@ function mix_get() {
 			continue;
 		let routes = [];
 		for (let r in uci_sections("camilladsp", "mixroute"))
-			if (r.mixer == m.name)
+			if (r.mixer == m[".name"])
 				push(routes, r);
 		let one = 0, mix = 0;
 		for (let r in routes) {
@@ -300,7 +320,7 @@ function mix_get() {
 			else if (g == 0.5)
 				mix++;
 		}
-		out[m.name] = (one == length(routes)) ? "last"
+		out[m[".name"]] = (one == length(routes)) ? "last"
 			: (mix == length(routes)) ? "mix"
 			: (one > 0) ? "one"
 			: "custom";
@@ -322,23 +342,108 @@ function mix_get() {
 }
 
 /* detailed view for the mixer tab: per user_gains mixer the derived
- * state plus every route gain (linear), topology-ordered */
+ * state, channel labels (uci lists in_label/out_label, UI-only metadata
+ * genconf ignores), route gains (linear) + mute/inverted flags, and
+ * whether the channel counts are policy-locked (the mixer is referenced
+ * by a subchain step -> topology is provisioned). */
 function mixers_get() {
 	let states = mix_get();
+	let managed = {};
+	for (let st in uci_sections("camilladsp", "pipeline_step"))
+		if (st.policy == "locked" && st.type == "Mixer")
+			managed[st.mixer] = true;
 	let out = [];
 	for (let m in uci_sections("camilladsp", "mixer")) {
 		if (m.user_gains != "1")
 			continue;
 		let routes = [];
 		for (let r in uci_sections("camilladsp", "mixroute"))
-			if (r.mixer == m.name)
-				push(routes, { dest: r.dest, source: r.source, gain: +r.gain });
+			if (r.mixer == m[".name"])
+				push(routes, { dest: r.dest, source: r.source, gain: +r.gain,
+					mute: (r.mute == "1"), inverted: (r.inverted == "1") });
 		sort(routes, (a, b) => (+a.dest != +b.dest)
 			? (+a.dest - +b.dest) : (+a.source - +b.source));
-		push(out, { name: m.name, state: states[m.name] ?? "custom", routes: routes });
+		push(out, {
+			name: m[".name"],
+			state: states[m[".name"]] ?? "custom",
+			routes: routes,
+			in: +m.in ?? 2,
+			out: +m.out ?? 2,
+			in_label: (type(m.in_label) == "array") ? m.in_label : [],
+			out_label: (type(m.out_label) == "array") ? m.out_label : [],
+			channels_locked: managed[m[".name"]] == 1
+		});
 	}
 	return { mixers: out };
 }
+
+function mixers_managed(mixer) {
+	for (let st in uci_sections("camilladsp", "pipeline_step"))
+		if (st.policy == "locked" && st.type == "Mixer" && st.mixer == mixer)
+			return true;
+	return false;
+}
+
+/* mixer metadata: channel labels (always writable) and channel counts
+ * (only for free mixers -- a policy-managed mixer's topology is
+ * provisioned). Changing in/out rebuilds the routes as a diagonal
+ * identity mapping; gains/labels survive only where positions do. */
+function mix_set_meta(params) {
+	let mixer = params?.mixer;
+	let exposed = {};
+	for (let m in uci_sections("camilladsp", "mixer"))
+		if (m.user_gains == "1")
+			exposed[m[".name"]] = m;
+	if (!exposed[mixer])
+		return { error: { code: ERR_PERMISSION_DENIED, message: `mixer ${mixer} not exposed` } };
+
+	for (let k in [ "in_label", "out_label" ]) {
+		let v = (params ?? {})[k];
+		if (v != null && type(v) != "array")
+			return { error: { code: ERR_INVALID_ARGUMENT, message: `${k} must be a list` } };
+		for (let l in (v ?? []))
+			if (type(l) != "string" || length(l) > 16)
+				return { error: { code: ERR_INVALID_ARGUMENT,
+					message: `${k} entries: strings up to 16 chars` } };
+	}
+
+	let nin = params?.in, nout = params?.out;
+	if ((nin != null || nout != null) && mixers_managed(mixer))
+		return { error: { code: ERR_PERMISSION_DENIED,
+			message: "channel counts are locked by the pipeline policy" } };
+	if (nin != null && (type(nin) != "int" || nin < 1 || nin > 16))
+		return { error: { code: ERR_INVALID_ARGUMENT, message: "in must be 1..16" } };
+	if (nout != null && (type(nout) != "int" || nout < 1 || nout > 16))
+		return { error: { code: ERR_INVALID_ARGUMENT, message: "out must be 1..16" } };
+
+	return camilladsp_txn(() => {
+		let c = uci.cursor();
+		c.load("camilladsp");
+		for (let k in [ "in_label", "out_label" ]) {
+			let v = (params ?? {})[k];
+			if (v != null)
+				c.set("camilladsp", mixer, k, v);
+		}
+		if (nin != null || nout != null) {
+			c.set("camilladsp", mixer, "in", `${nin ?? exposed[mixer].in}`);
+			c.set("camilladsp", mixer, "out", `${nout ?? exposed[mixer].out}`);
+			/* rebuild: diagonal identity routes */
+			for (let r in uci_sections("camilladsp", "mixroute"))
+				if (r.mixer == mixer)
+					c.delete("camilladsp", r[".section"]);
+			let n = (nin != null) ? nin : +exposed[mixer].in;
+			for (let i = 0; i < n && i < ((nout != null) ? nout : +exposed[mixer].out); i++) {
+				let sec = c.add("camilladsp", "mixroute");
+				c.set("camilladsp", sec, "mixer", mixer);
+				c.set("camilladsp", sec, "dest", `${i}`);
+				c.set("camilladsp", sec, "source", `${i}`);
+				c.set("camilladsp", sec, "gain", "1.0");
+			}
+		}
+		c.commit("camilladsp");
+	});
+}
+
 
 /* manual gain set for one user_gains mixer ("Other" in the UI): gains
  * follow the existing locked route topology -- no route may be added
@@ -353,7 +458,7 @@ function mix_set_gains(params) {
 	let exposed = {};
 	for (let m in uci_sections("camilladsp", "mixer"))
 		if (m.user_gains == "1")
-			exposed[m.name] = true;
+			exposed[m[".name"]] = true;
 	if (!exposed[mixer])
 		return { error: { code: ERR_PERMISSION_DENIED, message: `mixer ${mixer} not exposed` } };
 
@@ -363,7 +468,10 @@ function mix_set_gains(params) {
 		if (r?.dest == null || r?.source == null || g != g || g < 0 || g > 10)
 			return { error: { code: ERR_INVALID_ARGUMENT,
 				message: "routes[] of {dest, source, gain 0..10} required" } };
-		wanted[`${r.dest}:${r.source}`] = g;
+		wanted[`${r.dest}:${r.source}`] = {
+			gain: g,
+			mute: (r.mute == 1 || r.mute == true) ? "1" : ""
+		};
 	}
 
 	let existing = {};
@@ -379,10 +487,39 @@ function mix_set_gains(params) {
 	return camilladsp_txn(() => {
 		let c = uci.cursor();
 		c.load("camilladsp");
-		for (let k in wanted)
-			c.set("camilladsp", existing[k], "gain", `${wanted[k]}`);
+		for (let k in wanted) {
+			c.set("camilladsp", existing[k], "gain", `${wanted[k].gain}`);
+			c.set("camilladsp", existing[k], "mute", wanted[k].mute);
+		}
 		c.commit("camilladsp");
 	});
+}
+
+
+/* set the optional human label of one pipeline block (uci pipeline_step
+ * option 'label'; UI-only metadata rendered as the step description by
+ * genconf). index = position in the `config pipeline` order. */
+function block_set_label(params) {
+	let idx = params?.index;
+	let label = params?.label ?? "";
+
+	if (type(idx) != "int" || idx < 0)
+		return { error: { code: ERR_INVALID_ARGUMENT, message: "index required" } };
+	if (type(label) != "string" || length(label) > 32 ||
+	    (length(label) > 0 && !match(label, /^[a-zA-Z0-9 _.-]+$/)))
+		return { error: { code: ERR_INVALID_ARGUMENT,
+			message: "label must be [a-zA-Z0-9 _.-] up to 32 chars" } };
+
+	let order = pipeline_order();
+	let name = order[idx];
+	if (!name || !pipeline_steps()[name])
+		return { error: { code: ERR_NOT_FOUND, message: `no pipeline step ${idx}` } };
+
+	let c = uci.cursor();
+	c.load("camilladsp");
+	c.set("camilladsp", name, "label", label);
+	c.commit("camilladsp");
+	return {};
 }
 
 const DSP_OPTIONS = [
@@ -426,7 +563,7 @@ function dsp_settings_set(values) {
 			let exposed_mixers = {};
 			for (let mixer in uci_sections("camilladsp", "mixer"))
 				if (mixer.user_gains == "1")
-					exposed_mixers[mixer.name] = true;
+					exposed_mixers[mixer[".name"]] = true;
 			for (let route in uci_sections("camilladsp", "mixroute")) {
 				if (!exposed_mixers[route.mixer])
 					continue;
@@ -445,49 +582,66 @@ function dsp_settings_set(values) {
 	return result;
 }
 
-/* Policy-safe pipeline model for the UI. Locked subchains deliberately
+/* Policy-safe pipeline model for the UI. Locked steps deliberately
  * expose no filter names, parameters, or internal topology: one opaque
  * node is the entire protected stage. */
 function dsp_pipeline_get() {
 	let slots = filters_slots();
-	let stages = [];
-	let steps = uci_sections("camilladsp", "step");
-	/* genconf sorts `option index` numerically before rendering. Match it. */
-	sort(steps, (a, b) => (+a.index) - (+b.index));
+	let mixers = {};
+	for (let m in uci_sections("camilladsp", "mixer"))
+		mixers[m[".name"]] = m;
+	let order = pipeline_order();
+	let steps = pipeline_steps();
+
+	/* protected when any pipeline_step carries a policy; a plain config
+	 * (no policies) renders everything fully editable */
+	let protected_cfg = false;
+	for (let n, st in steps)
+		if ((st.policy ?? "") != "")
+			protected_cfg = true;
 
 	/* The browser reads actual blocks/channels from GetConfigJson. This reply
 	 * is only the policy map that classifies each runtime pipeline index. */
-	for (let i = 0; i < length(steps); i++) {
-		let st = steps[i];
-		let name = st.subchain;
-		let slot = name ? slots[name] : null;
-		if (!slot) {
-			/* No manifest/subchain policy: this is a normal upstream
-			 * CamillaDSP configuration. The websocket is the authority and
-			 * its blocks are fully editable (not merely readable). */
-			push(stages, { index: i, kind: "free", label: st.type ?? "DSP block" });
+	let stages = [];
+	for (let i = 0; i < length(order); i++) {
+		let name = order[i];
+		let st = steps[name] ?? {};
+		/* optional uci `option label`: a human name for the block, shown
+		 * by the UIs (the step name stays authoritative in `label` so
+		 * the EQ save mapping keeps working) */
+		let disp = st.label ? st.label : null;
+		if (!protected_cfg) {
+			/* No policy: this is a normal upstream CamillaDSP
+			 * configuration. The websocket is the authority and its
+			 * blocks are fully editable (not merely readable). */
+			push(stages, { index: i, kind: "free", label: st.label ?? st.type ?? "DSP block", name: disp });
 			continue;
 		}
 		/* A mixer whose route gains are explicitly exposed by policy is
 		 * represented as one source-selection node, still without exposing
 		 * the rest of its protected routing structure. */
-		if (st.user_gains == "1") {
+		if (st.policy == "locked" && st.type == "Mixer" &&
+		    mixers[st.mixer]?.user_gains == "1") {
 			push(stages, {
 				index: i,
 				kind: "mixer",
-				label: "Source mixer: " + st.name
+				label: "Source mixer: " + st.mixer,
+				name: disp
 			});
-		} else if (slot.policy == "locked") {
+		} else if (st.policy == "locked") {
 			push(stages, {
 				index: i,
 				kind: "locked",
-				label: "Protected: " + name
+				label: "Protected: " + name,
+				name: disp
 			});
 		} else {
+			let slot = slots[name] ?? {};
 			push(stages, {
 				index: i,
 				kind: "editable",
 				label: name,
+				name: disp,
 				channels: slot.channels,
 				filters: length(slot.names),
 				max_steps: slot.max_steps
@@ -499,7 +653,8 @@ function dsp_pipeline_get() {
 }
 
 export {
-	filters_slots, filters_schema, filters_set, mix_set, mix_get,
-	mixers_get, mix_set_gains,
-	dsp_settings_get, dsp_settings_set, dsp_pipeline_get
+	pipeline_order, pipeline_steps, filters_slots, filters_schema,
+	filters_set, mix_set, mix_get, mixers_get, mix_set_gains,
+	mix_set_meta, block_set_label, dsp_settings_get, dsp_settings_set,
+	dsp_pipeline_get
 };

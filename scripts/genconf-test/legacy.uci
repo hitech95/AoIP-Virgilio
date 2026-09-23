@@ -1,13 +1,17 @@
+# test uci tree: legacy/no-policy config (plain upstream-style chain).
+# No pipeline_step carries a policy -> no manifest, fully editable.
+
 config camilladsp 'main'
 	option samplerate '48000'
 	option channels '2'
 	option capture 'Alsa:hw:CARD=Loopback,DEV=1'
 	option playback 'Alsa:hw:CARD=Loopback,DEV=0'
 	option format 'S16_LE'
-config mixer
-	option name 'srcmix'
+
+config mixer 'srcmix'
 	option in '2'
 	option out '2'
+
 config mixroute
 	option mixer 'srcmix'
 	option dest '0'
@@ -26,22 +30,24 @@ config mixroute
 	option mixer 'srcmix'
 	option dest '1'
 	option source '1'
-config filter
-	option name 'woofer_level'
+
+config filter 'woofer_level'
 	option type 'gain'
 	option gain '-2.0'
-config filter
-	option name 'woofer_lp'
+config filter 'woofer_lp'
 	option type 'lrlp'
 	option f '1800'
 	option order '4'
-config step
-	option index '10'
+
+config pipeline_step 'mix'
 	option type 'Mixer'
-	option name 'srcmix'
-config step
-	option index '20'
+	option mixer 'srcmix'
+config pipeline_step 'woofer'
 	option type 'Filter'
 	list channels '0'
 	list names 'woofer_level'
 	list names 'woofer_lp'
+
+config pipeline
+	list step 'mix'
+	list step 'woofer'

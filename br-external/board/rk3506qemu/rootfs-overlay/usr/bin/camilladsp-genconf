@@ -1,597 +1,633 @@
-#!/bin/sh
-# camilladsp-genconf - generate a camilladsp v4 YAML config from uci
-# (config camilladsp). Default output: /tmp/camilladsp.yml.
-#
-# Structure (generic pipeline, mirrors camilladsp devices/filters/mixers/pipeline):
-#
-#   config camilladsp 'main'   devices + global settings (see /etc/config/camilladsp)
-#   config filter              one filter node  (option name, type + params)
-#   config mixer               one mixer node   (option name, channels_in/out)
-#   config mixroute            one mixer source contribution (mixer,dest,source,gain,...)
-#   config step                one pipeline step, ordered by option index
-#                               (type Filter: list channels + list names
-#                                type Mixer: option name
-#                                editable sub chain slot: option subchain +
-#                                optional list names = user filters, validated
-#                                against the sub chain's allow list and
-#                                max_steps; the placeholder anchor
-#                                user_slot_<name> is always rendered first)
-#   config subchain            one logical sub chain: name + policy
-#                               (locked | child | free) + constraints
-#
-# Filter types and parameters:
-#   gain   gain(dB) [inverted] [mute]      conv  filename (text coeffs)
-#   hp|lp  f q                              lrhp|lrlp  f order
-#   hs|ls  f gain q|slope                   peak f gain q
-#   notch|ap  f q
-#
-# Sub chains (protected pipeline, see plan/protected-xover-pipeline.md):
-#   config subchain
-#       option name    unique sub chain name
-#       option policy  locked | child | free
-#       option channels '<n> [<n>...]'   (editable: bus channels the slot owns)
-#       option allow   '<uci filter types...>' (editable: allowed user filter types)
-#       option max_steps '<n>'           (editable, default 8)
-#       list   allowed_after '<anchor>'  (free: locked anchors it may relocate after)
-#   Every step carries option subchain '<name>'. An editable (child/free)
-#   sub chain is declared by ONE bare step (option index + option
-#   subchain, no type/filters): it renders a transparent placeholder
-#   (user_slot_<name>, Gain 0 dB) that anchors the user slot.
-#
-# Outputs (only when subchain sections exist):
-#   <out>.yml      the full config (format unchanged; placeholders rendered)
-#   <out>.policy   the policy spec consumed by
-#                    camilladsp <yml> --make-manifest <out>.policy
-# With no subchain sections the rendering is unchanged (except mixer
-# routes now always emit gain + scale: linear, see below).
-#
-# NB: mixer route gain in uci is LINEAR (0.5 = -6 dB, default 1.0).
-# camilladsp v4 interprets a bare gain as dB, so every rendered route
-# carries an explicit "scale: linear".
+#!/usr/bin/ucode -S
+/*
+ * camilladsp-genconf - generate the camilladsp v4 config (JSON, a YAML
+ * subset) + policy spec + inferno env sidecar from uci (config
+ * camilladsp). Default output: /tmp/camilladsp.yml.
+ *
+ * uci schema (named sections; NO backward-compatible parsing of the old
+ * anonymous-section schema):
+ *
+ *   config camilladsp 'main'     devices + global settings
+ *   config mixer '<name>'        one mixer (in, out, user_gains)
+ *   config filter '<name>'       one filter (type + params, description)
+ *   config mixroute              one mixer source contribution
+ *                                (mixer, dest, source, gain, ...)
+ *   config pipeline              pipeline ORDER: one 'list step' entry
+ *                                per pipeline_step, in order
+ *   config pipeline_step '<n>'   one pipeline step; the section id is
+ *                                the step (and sub chain) name:
+ *                                  option policy  locked | child | free
+ *                                  option type    Filter | Mixer   (locked)
+ *                                  option mixer   <mixer-name>     (Mixer)
+ *                                  list channels  bus channels
+ *                                  list names     filter refs (locked:
+ *                                  fixed chain; child/free: user filters
+ *                                  rendered after the user_slot_<n>
+ *                                  placeholder anchor)
+ *                                  list allow / max_steps / (free)
+ *                                  list allowed_after <locked step names>
+ *                                  option label   human name ->
+ *                                  rendered as the step description
+ *
+ * A config where NO step carries `option policy` is an unprotected
+ * upstream-style config (fully editable, no policy file). When any step
+ * carries a policy, every step must. Each locked step is its own
+ * single-step anchor; a child/free step IS one editable slot (its
+ * section id names it).
+ *
+ * Outputs: <out> (JSON), <out minus .yml>.policy (only for protected
+ * configs), <out minus .yml>.env (inferno sidecar). Errors -> stderr
+ * prefixed 'camilladsp-genconf: ', exit 1.
+ *
+ * Self-contained ucode program (the target ucode has no module search
+ * path for .uc files).
+ */
 
-OUT="${1:-/tmp/camilladsp.yml}"
+import { writefile } from "fs";
+import * as uci from "uci";
 
-. /lib/functions.sh
+const VENDOR_COEFF_PREFIX = "/usr/share/camilladsp/coeffs";
 
-VENDOR_COEFF_PREFIX="/usr/share/camilladsp/coeffs"
-
-fail() {
-	echo "camilladsp-genconf: $*" >&2
-	exit 1
+function fail(msg) {
+	die(msg);
 }
 
-config_load camilladsp 2>/dev/null || true
-
-# ---- main --------------------------------------------------------------------
-
-config_get CH main channels 2
-config_get PBCH main output_channels ""
-[ -n "$PBCH" ] || PBCH="$CH"
-config_get RATE main samplerate 44100
-config_get CHUNK main chunksize 1024
-config_get FORMAT main format S16_LE
-config_get WAVHDR main wav_header 1
-config_get CAP main capture "RawFile:/dev/zero"
-config_get PB main playback "File:/dev/null"
-
-case "$WAVHDR" in
-0|no|off|false) WAVHDR="false" ;;
-*) WAVHDR="true" ;;
-esac
-
-[ "$CH" -ge 1 ] 2>/dev/null || fail "bad channels '$CH'"
-[ "$PBCH" -ge 1 ] 2>/dev/null || fail "bad output_channels '$PBCH'"
-
-# ---- collect nodes -----------------------------------------------------------
-# NB: must run while the camilladsp uci state is loaded; the inferno
-# sidecar below re-loads a different config and replaces it.
-
-FILTER_IDS=""
-_flt_cb() {
-	local id="$1" v
-	config_get v "$id" name ""
-	[ -n "$v" ] || fail "filter section '$id' missing name"
-	FILTER_IDS="$FILTER_IDS $id"
-	for k in name type f q gain order slope inverted mute filename clip_limit; do
-		config_get v "$id" "$k" ""
-		eval "FLT_${id}_${k}=\"\$v\""
-	done
-}
-config_foreach _flt_cb filter
-
-MIXER_IDS=""
-_mixer_cb() {
-	local id="$1" v
-	config_get v "$id" name ""
-	[ -n "$v" ] || fail "mixer section '$id' missing name"
-	MIXER_IDS="$MIXER_IDS $id"
-	for k in name in out user_gains; do
-		config_get v "$id" "$k" ""
-		eval "MX_${id}_${k}=\"\$v\""
-	done
-}
-config_foreach _mixer_cb mixer
-
-ROUTE_IDS=""
-_route_cb() {
-	local id="$1"
-	ROUTE_IDS="$ROUTE_IDS $id"
-	for k in mixer dest source gain inverted mute; do
-		config_get v "$id" "$k" ""
-		eval "RT_${id}_${k}=\"\$v\""
-	done
-}
-config_foreach _route_cb mixroute
-
-SUBCHAIN_IDS=""
-_subchain_cb() {
-	local id="$1" v
-	config_get v "$id" name ""
-	[ -n "$v" ] || fail "subchain section '$id' missing name"
-	SUBCHAIN_IDS="$SUBCHAIN_IDS $id"
-	for k in name policy channels allow max_steps; do
-		config_get v "$id" "$k" ""
-		eval "SC_${id}_${k}=\"\$v\""
-	done
-	eval "SC_${id}_AFTER=\"\""
-	_sc_after_cb() { eval "SC_${id}_AFTER=\"\${SC_${id}_AFTER}\${SC_${id}_AFTER:+ }\$1\""; }
-	config_list_foreach "$id" allowed_after _sc_after_cb
-}
-config_foreach _subchain_cb subchain
-
-# steps: collect "index section-id" lines, sort numerically
-_STEP_RAW=""
-_step_cb() {
-	local id="$1" v idx
-	config_get idx "$id" index ""
-	[ -n "$idx" ] || fail "step '$id' missing index"
-	_STEP_RAW="${_STEP_RAW}${idx} $id
-"
-	for k in type name subchain; do
-		config_get v "$id" "$k" ""
-		eval "SP_${id}_${k}=\"\$v\""
-	done
-	eval "SP_${id}_CH=\"\"; SP_${id}_NAMES=\"\""
-	_step_ch_cb() { eval "SP_${id}_CH=\"\${SP_${id}_CH}\${SP_${id}_CH:+ }\$1\""; }
-	config_list_foreach "$id" channels _step_ch_cb
-	_step_nm_cb() { eval "SP_${id}_NAMES=\"\${SP_${id}_NAMES}\${SP_${id}_NAMES:+ }\$1\""; }
-	config_list_foreach "$id" names _step_nm_cb
-}
-config_foreach _step_cb step
-STEP_ORDER=$(printf '%s' "$_STEP_RAW" | sort -n | while read _i _id; do printf '%s ' "$_id"; done)
-
-# ---- inferno env sidecar ------------------------------------------------------
-# When capture/playback is 'Inferno', camilladsp hosts an inferno instance
-# (inside the inferno ALSA plugin). Its INFERNO_* settings are derived here:
-# shared schema in /etc/config/inferno, name defaults to the system
-# hostname, channel counts follow the camilladsp devices. The init script
-# passes the file to the daemon as environment.
-# NB: this re-loads the inferno uci config; all camilladsp nodes were
-# collected above.
-
-ENVOUT="${OUT%.yml}.env"
-CAP_INFERNO=""
-PB_INFERNO=""
-case "$CAP" in Inferno) CAP_INFERNO=1 ;; esac
-case "$PB" in Inferno) PB_INFERNO=1 ;; esac
-
-if [ -n "$CAP_INFERNO" ] || [ -n "$PB_INFERNO" ]; then
-	config_load inferno 2>/dev/null || true
-	config_get INAME main name ""
-	config_get IIF main interface eth1
-	config_get ICLK main clock_path /tmp/ptp-usrvclock
-	config_get IRX main rx_channels ""
-	config_get ITX main tx_channels ""
-	[ -n "$IRX" ] || { [ -n "$CAP_INFERNO" ] && IRX="$CH" || IRX=0; }
-	[ -n "$ITX" ] || { [ -n "$PB_INFERNO" ] && ITX="$PBCH" || ITX=0; }
-	[ -n "$INAME" ] || INAME=$(uci -q get system.@system[0].hostname 2>/dev/null) || INAME="rk3506qemu"
-	{
-		# NB: this RUST_LOG configures the *inferno* instance (tracing env
-		# filter) hosted inside camilladsp, NOT camilladsp itself: camilladsp
-		# uses flexi_logger via --custom_log_spec (see init script, uci
-		# camilladsp.main.logspec).
-		echo "RUST_LOG=warn"
-		echo "INFERNO_NAME=$INAME"
-		echo "INFERNO_BIND_IP=$IIF"
-		echo "INFERNO_CLOCK_PATH=$ICLK"
-		echo "INFERNO_RX_CHANNELS=$IRX"
-		echo "INFERNO_TX_CHANNELS=$ITX"
-		echo "INFERNO_SAMPLE_RATE=$RATE"
-	} > "$ENVOUT"
-fi
-
-# ---- sub chain validation ----------------------------------------------------
-# Runs only when subchain sections exist. Fails early (refuse to render):
-# a broken partition must never produce a config.
-
-# resolve a filter name -> its uci type (empty when undefined)
-filter_type_of() {
-	for _fid in $FILTER_IDS; do
-		eval "[ \"\$FLT_${_fid}_name\" = \"\$1\" ] && { printf '%s' \"\${FLT_${_fid}_type}\"; return 0; }"
-	done
-	return 0
+function words(s) {
+	if (type(s) == "array")
+		return filter(s, (w) => length(`${w}`) > 0);
+	return filter(split(`${s ?? ""}`, /\s+/), (w) => length(w) > 0);
 }
 
-SC_BYNAME=""
-for id in $SUBCHAIN_IDS; do
-	eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
-	case " $SC_BYNAME " in *" $_n "*) fail "duplicate subchain name '$_n'" ;; esac
-	SC_BYNAME="$SC_BYNAME $_n"
-	case "$_p" in
-	locked|child|free) ;;
-	*) fail "subchain '$_n': bad policy '$_p' (locked|child|free)" ;;
-	esac
-	if [ "$_p" != locked ]; then
-		eval "_c=\"\$SC_${id}_channels\"; _a=\"\$SC_${id}_allow\"; _m=\"\$SC_${id}_max_steps\""
-		[ -n "$_c" ] || fail "subchain '$_n' (policy $_p) needs channels="
-		[ -n "$_a" ] || fail "subchain '$_n' (policy $_p) needs allow="
-		[ -z "$_m" ] && eval "SC_${id}_max_steps=8"
-	fi
-done
-
-if [ -n "$SUBCHAIN_IDS" ]; then
-	# every step must be classified
-	for id in $STEP_ORDER; do
-		eval "_s=\"\$SP_${id}_subchain\""
-		[ -n "$_s" ] || fail "step '$id' has no subchain (subchains are declared)"
-		case " $SC_BYNAME " in *" $_s "*) ;; *) fail "step '$id' references unknown subchain '$_s'" ;; esac
-	done
-	# every subchain needs at least one step; editable: exactly one bare slot
-	for id in $SUBCHAIN_IDS; do
-		eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
-		_cnt=0
-		for sid in $STEP_ORDER; do
-			eval "[ \"\$SP_${sid}_subchain\" = \"\$_n\" ]" && _cnt=$((_cnt + 1))
-		done
-		[ "$_cnt" -ge 1 ] || fail "subchain '$_n' has no steps"
-		if [ "$_p" != locked ] && [ "$_cnt" -gt 1 ]; then
-			fail "subchain '$_n' (policy $_p) must have exactly one slot step"
-		fi
-	done
-	# steps of each subchain must be contiguous; editable steps are bare slots;
-	# remember the sub chain order (first appearance in STEP_ORDER)
-	SC_ORDER=""
-	_prev=""
-	for id in $STEP_ORDER; do
-		eval "_s=\"\$SP_${id}_subchain\"; _t=\"\$SP_${id}_type\"; _nm=\"\$SP_${id}_NAMES\""
-		case " $_prev " in
-		" $_s ") ;;
-		*)
-			case " $SC_ORDER " in *" $_s "*) fail "subchain '$_s' steps are not contiguous" ;; esac
-			SC_ORDER="$SC_ORDER $_s"
-			_prev="$_s"
-			;;
-		esac
-		_scid=""
-		for sid in $SUBCHAIN_IDS; do
-			eval "[ \"\$SC_${sid}_name\" = \"\$_s\" ] && _scid=\$sid"
-		done
-		eval "_p=\"\$SC_${_scid}_policy\""
-		if [ "$_p" != locked ]; then
-			[ -z "$_t" ] || fail "subchain '$_s' slot step '$id' must have no type"
-			# user steps: names allowed on editable slots, validated
-			# against the sub chain constraints (allow / max_steps)
-			eval "_a=\"\$SC_${_scid}_allow\"; _m=\"\$SC_${_scid}_max_steps\""
-			_cntu=0
-			for _f in $_nm; do
-				_ft="$(filter_type_of "$_f")"
-				[ -n "$_ft" ] || fail "subchain '$_s': user filter '$_f' is not defined"
-				case " $_a " in *" $_ft "*) ;;
-					*) fail "subchain '$_s': filter type '$_ft' (of '$_f') not in allow list" ;;
-				esac
-				_cntu=$((_cntu + 1))
-			done
-			if [ -n "$_m" ] && [ "$_cntu" -gt "$_m" ]; then
-				fail "subchain '$_s': $_cntu user steps exceed max_steps=$_m"
-			fi
-		else
-			[ -n "$_t" ] || fail "step '$id' (locked subchain '$_s') missing type"
-		fi
-	done
-	# the last sub chain must be locked: nothing may follow the protection tail
-	_last=$(printf '%s' "$SC_ORDER" | awk '{print $NF}')
-	for id in $SUBCHAIN_IDS; do
-		eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
-		[ "$_n" = "$_last" ] && [ "$_p" != locked ] && fail "last subchain '$_n' must be locked"
-	done
-	# free groups: allowed_after must name locked anchors
-	for id in $SUBCHAIN_IDS; do
-		eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\"; _af=\"\$SC_${id}_AFTER\""
-		[ "$_p" = free ] || continue
-		for a in $_af; do
-			_aid=""
-			for sid in $SUBCHAIN_IDS; do
-				eval "_an=\"\$SC_${sid}_name\"; _ap=\"\$SC_${sid}_policy\""
-				[ "$_an" = "$a" ] && { [ "$_ap" = locked ] || fail "free subchain '$_n': allowed_after '$_a' is not locked"; _aid=$sid; }
-			done
-			[ -n "$_aid" ] || fail "free subchain '$_n': allowed_after references unknown anchor '$_a'"
-		done
-	done
-	# locked conv filters must use the vendor read-only coefficient path
-	for id in $SUBCHAIN_IDS; do
-		eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
-		[ "$_p" = locked ] || continue
-		for sid in $STEP_ORDER; do
-			eval "_s=\"\$SP_${sid}_subchain\""
-			[ "$_s" = "$_n" ] || continue
-			eval "_names=\"\$SP_${sid}_NAMES\""
-			for fname in $_names; do
-				for fid in $FILTER_IDS; do
-					eval "_fn=\"\$FLT_${fid}_name\"; _ft=\"\$FLT_${fid}_type\"; _ff=\"\$FLT_${fid}_filename\""
-					[ "$_fn" = "$fname" ] || continue
-					if [ "$_ft" = conv ]; then
-						case "$_ff" in
-						"$VENDOR_COEFF_PREFIX"/*) ;;
-						*) fail "locked subchain '$_n': conv filter '$fname' filename must be under $VENDOR_COEFF_PREFIX" ;;
-						esac
-					fi
-				done
-			done
-		done
-	done
-fi
-
-# ---- devices -----------------------------------------------------------------
-
-cap_yaml() {
-	_type="${1%%:*}"
-	_val="${1#*:}"
-	[ "$_val" = "$1" ] && _val=""
-	case "$_type" in
-	WavFile)
-		printf '  capture:\n    type: WavFile\n    filename: %s\n' "$_val" ;;
-	RawFile)
-		printf '  capture:\n    type: RawFile\n    channels: %s\n    filename: %s\n    format: %s\n' "$CH" "$_val" "$FORMAT" ;;
-	Alsa)
-		printf '  capture:\n    type: Alsa\n    channels: %s\n    device: %s\n' "$CH" "$_val" ;;
-	Inferno)
-		# Dante RX via the inferno ALSA plugin (settings: /etc/config/inferno,
-		# exported as INFERNO_* env by the init script)
-		printf '  capture:\n    type: Alsa\n    channels: %s\n    device: inferno\n' "$CH" ;;
-	Stdin)
-		printf '  capture:\n    type: Stdin\n    channels: %s\n    format: %s\n' "$CH" "$FORMAT" ;;
-	*)
-		echo "camilladsp-genconf: unknown capture spec: $1" >&2; return 1 ;;
-	esac
+function has_word(list, w) {
+	for (let x in list)
+		if (x == w) return true;
+	return false;
 }
 
-pb_yaml() {
-	_type="${1%%:*}"
-	_val="${1#*:}"
-	[ "$_val" = "$1" ] && _val=""
-	case "$_type" in
-	File)
-		printf '  playback:\n    type: File\n    channels: %s\n    filename: %s\n    format: %s\n    wav_header: %s\n' "$PBCH" "$_val" "$FORMAT" "$WAVHDR" ;;
-	Alsa)
-		printf '  playback:\n    type: Alsa\n    channels: %s\n    device: %s\n' "$PBCH" "$_val" ;;
-	Inferno)
-		# Dante TX via the inferno ALSA plugin
-		printf '  playback:\n    type: Alsa\n    channels: %s\n    device: inferno\n' "$PBCH" ;;
-	Stdout)
-		printf '  playback:\n    type: Stdout\n    channels: %s\n    format: %s\n' "$PBCH" "$FORMAT" ;;
-	*)
-		echo "camilladsp-genconf: unknown playback spec: $1" >&2; return 1 ;;
-	esac
+/*
+ * uci string -> JSON number, preserving the written form: integers
+ * ("48000") stay int, decimals ("0.5") become double. Unparseable
+ * values pass through as strings (camilladsp will reject them).
+ */
+function num(v, dflt) {
+	if (v == null || v == "" || type(v) == "array" || type(v) == "object")
+		return dflt;
+	let s = `${v}`;
+	if (match(s, /^\s*-?[0-9]+\s*$/))
+		return int(s);
+	if (match(s, /^\s*-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?\s*$/)) {
+		let n = json(s);
+		return (n == null) ? s : n;
+	}
+	return s;
 }
 
-# ---- filter emission ---------------------------------------------------------
-
-emit_filter_yaml() {
-	local id="$1"
-	local name type f q gain order slope inverted mute filename
-	eval "name=\"\$FLT_${id}_name\"; type=\"\$FLT_${id}_type\"; f=\"\$FLT_${id}_f\"; q=\"\$FLT_${id}_q\"; gain=\"\$FLT_${id}_gain\"; order=\"\$FLT_${id}_order\"; slope=\"\$FLT_${id}_slope\"; inverted=\"\$FLT_${id}_inverted\"; mute=\"\$FLT_${id}_mute\"; filename=\"\$FLT_${id}_filename\"; clip_limit=\"\$FLT_${id}_clip_limit\""
-
-	[ -n "$type" ] || fail "filter '$name' missing type"
-
-	case "$type" in
-	gain)
-		[ -n "$gain" ] || fail "filter '$name' (gain) needs gain="
-		printf '  %s:\n    type: Gain\n    parameters:\n      gain: %s\n' "$name" "$gain"
-		[ "$inverted" = "1" ] && printf '      inverted: true\n'
-		[ "$mute" = "1" ] && printf '      mute: true\n'
-		;;
-	conv)
-		[ -n "$filename" ] || fail "filter '$name' (conv) needs filename="
-		printf '  %s:\n    type: Conv\n    parameters:\n      type: Raw\n      format: TEXT\n      filename: %s\n' "$name" "$filename"
-		;;
-	limiter)
-		[ -n "$clip_limit" ] || fail "filter '$name' (limiter) needs clip_limit="
-		printf '  %s:\n    type: Limiter\n    parameters:\n      clip_limit: %s\n' "$name" "$clip_limit"
-		[ "$inverted" = "1" ] && printf '      soft_clip: true\n'
-		;;
-	hp|lp)
-		[ -n "$f" ] || fail "filter '$name' ($type) needs f="
-		[ -z "$q" ] && q=0.707
-		local ytype="Highpass"; [ "$type" = lp ] && ytype="Lowpass"
-		printf '  %s:\n    type: Biquad\n    parameters:\n      type: %s\n      freq: %s\n      q: %s\n' "$name" "$ytype" "$f" "$q"
-		;;
-	lrhp|lrlp)
-		[ -n "$f" ] || fail "filter '$name' ($type) needs f="
-		[ -z "$order" ] && order=4
-		local ytype="LinkwitzRileyHighpass"; [ "$type" = lrlp ] && ytype="LinkwitzRileyLowpass"
-		printf '  %s:\n    type: BiquadCombo\n    parameters:\n      type: %s\n      freq: %s\n      order: %s\n' "$name" "$ytype" "$f" "$order"
-		;;
-	hs|ls)
-		[ -n "$f" ] && [ -n "$gain" ] || fail "filter '$name' ($type) needs f= and gain="
-		local ytype="Highshelf"; [ "$type" = ls ] && ytype="Lowshelf"
-		printf '  %s:\n    type: Biquad\n    parameters:\n      type: %s\n      freq: %s\n      gain: %s\n' "$name" "$ytype" "$f" "$gain"
-		if [ -n "$slope" ]; then
-			printf '      slope: %s\n' "$slope"
-		else
-			[ -z "$q" ] && q=0.707
-			printf '      q: %s\n' "$q"
-		fi
-		;;
-	peak)
-		[ -n "$f" ] && [ -n "$gain" ] || fail "filter '$name' (peak) needs f= and gain="
-		[ -z "$q" ] && q=1.0
-		printf '  %s:\n    type: Biquad\n    parameters:\n      type: Peaking\n      freq: %s\n      gain: %s\n      q: %s\n' "$name" "$f" "$gain" "$q"
-		;;
-	notch|ap)
-		[ -n "$f" ] || fail "filter '$name' ($type) needs f="
-		[ -z "$q" ] && q=0.707
-		local ytype="Notch"; [ "$type" = ap ] && ytype="Allpass"
-		printf '  %s:\n    type: Biquad\n    parameters:\n      type: %s\n      freq: %s\n      q: %s\n' "$name" "$ytype" "$f" "$q"
-		;;
-	*)
-		fail "filter '$name': unknown type '$type'" ;;
-	esac
-	return 0
+/* "<path>.yml" -> "<path>" (only ONE trailing .yml is stripped) */
+function stem(path) {
+	return (substr(path, length(path) - 4) == ".yml")
+		? substr(path, 0, length(path) - 4) : path;
 }
 
-# ---- output ------------------------------------------------------------------
-
-KNOWN_FLT=""
-for id in $FILTER_IDS; do
-	eval "KNOWN_FLT=\"\$KNOWN_FLT \${FLT_${id}_name}\""
-done
-# editable sub chains add their placeholder filter definitions
-PLACEHOLDERS=""
-for id in $SUBCHAIN_IDS; do
-	eval "_n=\"\$SC_${id}_name\"; _p=\"\$SC_${id}_policy\""
-	[ "$_p" != locked ] && PLACEHOLDERS="$PLACEHOLDERS user_slot_${_n}"
-done
-KNOWN_FLT="$KNOWN_FLT$PLACEHOLDERS"
-KNOWN_MX=""
-for id in $MIXER_IDS; do
-	eval "KNOWN_MX=\"\$KNOWN_MX \${MX_${id}_name}\""
-done
-
-yaml_list() {
-	# "a b c" -> "[a, b, c]"
-	_out="["; _sep=""
-	for _v in $1; do _out="${_out}${_sep}${_v}"; _sep=", "; done
-	printf '%s]' "$_out"
+function section(cursor, config, name) {
+	try { cursor.load(config); } catch (e) {}
+	try { return cursor.get_all(config, name) ?? {}; } catch (e) { return {}; }
 }
 
-{
-	printf 'devices:\n'
-	printf '  samplerate: %s\n  chunksize: %s\n' "$RATE" "$CHUNK"
-	cap_yaml "$CAP" || exit 1
-	pb_yaml "$PB" || exit 1
+function sections(cursor, config, stype) {
+	let out = [];
+	cursor.foreach(config, stype, (s) => { push(out, s); });
+	return out;
+}
 
-	if [ -n "$MIXER_IDS" ]; then
-		printf 'mixers:\n'
-		for id in $MIXER_IDS; do
-			eval "_n=\"\$MX_${id}_name\"; _in=\"\$MX_${id}_in\"; _out=\"\$MX_${id}_out\""
-			printf '  %s:\n    channels:\n      in: %s\n      out: %s\n    mapping:\n' "$_n" "$_in" "$_out"
-			_d=0
-			while [ "$_d" -lt "$_out" ]; do
-				_first=1
-				for rid in $ROUTE_IDS; do
-					eval "_rm=\"\$RT_${rid}_mixer\"; _rd=\"\$RT_${rid}_dest\""
-					[ "$_rm" = "$_n" ] || continue
-					[ "$_rd" = "$_d" ] || continue
-					if [ "$_first" = 1 ]; then
-						printf '      - dest: %s\n        sources:\n' "$_d"
-						_first=0
-					fi
-					eval "_rs=\"\$RT_${rid}_source\"; _rg=\"\$RT_${rid}_gain\"; _ri=\"\$RT_${rid}_inverted\"; _rmt=\"\$RT_${rid}_mute\""
-					# uci mixer gain is LINEAR (default 1.0); v4 reads a bare
-					# gain as dB -> always emit gain + scale: linear
-					[ -z "$_rg" ] && _rg=1.0
-					printf '          - channel: %s\n            gain: %s\n            scale: linear\n' "$_rs" "$_rg"
-					[ "$_ri" = "1" ] && printf '            inverted: true\n'
-					[ "$_rmt" = "1" ] && printf '            mute: true\n'
-				done
-				_d=$((_d + 1))
-			done
-		done
-	fi
+/* ---- model collection ----------------------------------------------------- */
 
-	if [ -n "$FILTER_IDS" ] || [ -n "$PLACEHOLDERS" ]; then
-		printf 'filters:\n'
-		# transparent slot anchors for editable sub chains (Gain 0 dB)
-		for ph in $PLACEHOLDERS; do
-			printf '  %s:\n    type: Gain\n    parameters:\n      gain: 0\n' "$ph"
-		done
-		for id in $FILTER_IDS; do
-			emit_filter_yaml "$id" || exit 1
-		done
-	fi
+function collect(cursor) {
+	try { cursor.load("camilladsp"); } catch (e) {}
 
-	[ -n "$STEP_ORDER" ] && printf 'pipeline:\n'
-	for id in $STEP_ORDER; do
-		eval "_t=\"\$SP_${id}_type\"; _n=\"\$SP_${id}_name\"; _ch=\"\$SP_${id}_CH\"; _nm=\"\$SP_${id}_NAMES\"; _s=\"\$SP_${id}_subchain\""
-		if [ -n "$SUBCHAIN_IDS" ]; then
-			# editable sub chain slot: render the placeholder step
-			_scid=""
-			for sid in $SUBCHAIN_IDS; do
-				eval "[ \"\$SC_${sid}_name\" = \"\$_s\" ] && _scid=\$sid"
-			done
-			eval "_p=\"\$SC_${_scid}_policy\""
-			if [ "$_p" != locked ]; then
-				eval "_c=\"\$SC_${_scid}_channels\""
-				_uy=""
-				for _n in $_nm; do _uy="${_uy}${_uy:+, }$_n"; done
-				printf '  - type: Filter\n    channels: %s\n    names: [user_slot_%s%s]\n' \
-					"$(yaml_list "$_c")" "$_s" "${_uy:+, $_uy}"
-				continue
-			fi
-		fi
-		case "$_t" in
-		Filter|filter)
-			_chy=""; for c in $_ch; do _chy="${_chy}${_chy:+, }$c"; done
-			_nmy=""; for n in $_nm; do
-				case " $KNOWN_FLT " in *" $n "*) ;; *) fail "step references unknown filter '$_n' -> '$n'" ;; esac
-				_nmy="${_nmy}${_nmy:+, }$n"
-			done
-			[ -n "$_nmy" ] || fail "Filter step needs list names"
-			printf '  - type: Filter\n'
-			[ -n "$_chy" ] && printf '    channels: [%s]\n' "$_chy"
-			printf '    names: [%s]\n' "$_nmy"
-			;;
-		Mixer|mixer)
-			case " $KNOWN_MX " in *" $_n "*) ;; *) fail "step references unknown mixer '$_n'" ;; esac
-			printf '  - type: Mixer\n    name: %s\n' "$_n"
-			;;
-		*)
-			fail "step has bad type '$_t' (Filter|Mixer)" ;;
-		esac
-	done
-} > "$OUT"
+	let main = section(cursor, "camilladsp", "main");
 
-# ---- policy spec (only when sub chains are declared) ---------------------------
+	let m = {
+		main: {
+			channels: main.channels ?? "2",
+			output_channels: main.output_channels ?? "",
+			samplerate: main.samplerate ?? "44100",
+			chunksize: main.chunksize ?? "1024",
+			format: main.format ?? "S16_LE",
+			wav_header: main.wav_header ?? "1",
+			capture: main.capture ?? "RawFile:/dev/zero",
+			playback: main.playback ?? "File:/dev/null",
+			/* output_channels falls back to channels */
+			pbch: (main.output_channels != null && `${main.output_channels}` != "")
+				? `${main.output_channels}` : (main.channels ?? "2")
+		},
+		/* pipeline order: the 'list step' entries, in order */
+		order: [],
+		mixers: {}, mixer_order: [],
+		filters: {}, filter_order: [],
+		routes: [],
+		steps: {}
+	};
 
-if [ -n "$SUBCHAIN_IDS" ]; then
-	POLICYOUT="${OUT%.yml}.policy"
-	{
-		printf 'subchains:\n'
-		for scn in $SC_ORDER; do
-			_scid=""
-			for sid in $SUBCHAIN_IDS; do
-				eval "[ \"\$SC_${sid}_name\" = \"\$scn\" ] && _scid=\$sid"
-			done
-			eval "_p=\"\$SC_${_scid}_policy\"; _c=\"\$SC_${_scid}_channels\"; _a=\"\$SC_${_scid}_allow\"; _m=\"\$SC_${_scid}_max_steps\"; _af=\"\$SC_${_scid}_AFTER\""
-			case "$_p" in
-			locked)
-				# rendered step range (0-based position in the pipeline list)
-				_first=""; _count=0; _pos=0
-				for sid in $STEP_ORDER; do
-					eval "_ss=\"\$SP_${sid}_subchain\""
-					if [ "$_ss" = "$scn" ]; then
-						[ -z "$_first" ] && _first=$_pos
-						_count=$((_count + 1))
-					fi
-					_pos=$((_pos + 1))
-				done
-				printf '  - policy: locked\n    name: %s\n    first_step: %s\n    steps: %s\n' "$scn" "$_first" "$_count"
-				;;
-			child)
-				printf '  - policy: child\n    name: %s\n    channels: %s\n    allow: %s\n    max_steps: %s\n' "$scn" "$(yaml_list "$_c")" "$(yaml_list "$_a")" "$_m"
-				;;
-			free)
-				printf '  - policy: free\n    name: %s\n    gaps: %s\n    channels: %s\n    allow: %s\n    max_steps: %s\n' "$scn" "$(yaml_list "$_af")" "$(yaml_list "$_c")" "$(yaml_list "$_a")" "$_m"
-				;;
-			esac
-		done
-		# mixers whose route gains are free user state (source-mix
-		# selection); absent = every mixer fully locked
-		_ug=""
-		for sid in $MIXER_IDS; do
-			eval "_u=\"\$MX_${sid}_user_gains\"; _n=\"\$MX_${sid}_name\""
-			case "$_u" in 1|yes|on|true) _ug="$_ug $_n" ;; esac
-		done
-		[ -n "$_ug" ] && printf 'user_gains: %s\n' "$(yaml_list "$_ug")"
-	} > "$POLICYOUT"
-fi
+	/* pipeline order: the 'list step' entries of the (anonymous)
+	 * `config pipeline` section, in order */
+	let order = [];
+	for (let s in sections(cursor, "camilladsp", "pipeline"))
+		order = (type(s.step) == "array") ? s.step : words(s.step);
+	m.order = order;
+
+	for (let s in sections(cursor, "camilladsp", "mixer")) {
+		m.mixers[s[".name"]] = {
+			in: `${s.in ?? ""}`, out: `${s.out ?? ""}`,
+			user_gains: `${s.user_gains ?? ""}`
+		};
+		push(m.mixer_order, s[".name"]);
+	}
+
+	for (let s in sections(cursor, "camilladsp", "filter")) {
+		m.filters[s[".name"]] = {
+			type: `${s.type ?? ""}`,
+			f: `${s.f ?? ""}`, q: `${s.q ?? ""}`, gain: `${s.gain ?? ""}`,
+			order: `${s.order ?? ""}`, slope: `${s.slope ?? ""}`,
+			inverted: `${s.inverted ?? ""}`, mute: `${s.mute ?? ""}`,
+			filename: `${s.filename ?? ""}`, clip_limit: `${s.clip_limit ?? ""}`,
+			description: `${s.description ?? ""}`
+		};
+		push(m.filter_order, s[".name"]);
+	}
+
+	for (let s in sections(cursor, "camilladsp", "mixroute"))
+		push(m.routes, {
+			mixer: `${s.mixer ?? ""}`, dest: `${s.dest ?? ""}`,
+			source: `${s.source ?? ""}`, gain: `${s.gain ?? ""}`,
+			inverted: `${s.inverted ?? ""}`, mute: `${s.mute ?? ""}`
+		});
+
+	for (let s in sections(cursor, "camilladsp", "pipeline_step")) {
+		m.steps[s[".name"]] = {
+			policy: `${s.policy ?? ""}`,
+			type: `${s.type ?? ""}`, mixer: `${s.mixer ?? ""}`,
+			channels: (type(s.channels) == "array") ? s.channels : [],
+			names: (type(s.names) == "array") ? s.names : [],
+			allow: (type(s.allow) == "array") ? s.allow : [],
+			max_steps: `${s.max_steps ?? ""}`,
+			after: (type(s.allowed_after) == "array") ? s.allowed_after : [],
+			label: `${s.label ?? ""}`
+		};
+	}
+
+	return m;
+}
+
+/* ---- inferno env sidecar (written before validation, shell parity) -------- */
+
+function write_env_sidecar(m, cursor, out) {
+	let cap_inf = (m.main.capture == "Inferno");
+	let pb_inf = (m.main.playback == "Inferno");
+	if (!cap_inf && !pb_inf) return;
+
+	let inf = section(cursor, "inferno", "main");
+	let iname = `${inf.name ?? ""}`;
+	if (iname == "") {
+		let sys = section(cursor, "system", "@system[0]");
+		iname = `${sys.hostname ?? ""}`;
+	}
+	if (iname == "") iname = "rk3506qemu";
+
+	let irx = `${inf.rx_channels ?? ""}`;
+	if (irx == "") irx = cap_inf ? `${m.main.channels}` : "0";
+	let itx = `${inf.tx_channels ?? ""}`;
+	if (itx == "") itx = pb_inf ? `${m.main.pbch}` : "0";
+
+	/* NB: RUST_LOG configures the *inferno* instance hosted inside
+	 * camilladsp (tracing env filter), not camilladsp itself. */
+	writefile(stem(out) + ".env", join("\n", [
+		"RUST_LOG=warn",
+		`INFERNO_NAME=${iname}`,
+		`INFERNO_BIND_IP=${inf.interface ?? "eth1"}`,
+		`INFERNO_CLOCK_PATH=${inf.clock_path ?? "/tmp/ptp-usrvclock"}`,
+		`INFERNO_RX_CHANNELS=${irx}`,
+		`INFERNO_TX_CHANNELS=${itx}`,
+		`INFERNO_SAMPLE_RATE=${m.main.samplerate}`
+	]) + "\n");
+}
+
+/* ---- validation (fails early: never render a broken plan) ------------------ */
+
+function validate(m) {
+	if (!match(m.main.channels, /^[0-9]+$/) || int(m.main.channels) < 1)
+		fail(sprintf("bad channels '%s'", m.main.channels));
+	if (!match(m.main.pbch, /^[0-9]+$/) || int(m.main.pbch) < 1)
+		fail(sprintf("bad output_channels '%s'", m.main.pbch));
+
+	/* pipeline order must exist and reference every step exactly once */
+	if (length(m.order) == 0)
+		fail("pipeline order missing (config pipeline / list step)");
+	let seen = {};
+	for (let n in m.order) {
+		if (!m.steps[n])
+			fail(sprintf("pipeline order references unknown step '%s'", n));
+		if (seen[n]) fail(sprintf("pipeline order lists step '%s' more than once", n));
+		seen[n] = true;
+	}
+	for (let n, st in m.steps)
+		if (!seen[n])
+			fail(sprintf("step '%s' is not listed in the pipeline order", n));
+
+	/* protected vs plain: when any step carries a policy, all must */
+	let protected_cfg = false;
+	for (let n, st in m.steps)
+		if (st.policy != "") protected_cfg = true;
+	if (protected_cfg)
+		for (let n, st in m.steps)
+			if (st.policy == "")
+				fail(sprintf("step '%s' has no policy (locked|child|free)", n));
+
+	m.protected = protected_cfg;
+	if (!protected_cfg) return;
+
+	for (let n, st in m.steps) {
+		if (st.policy != "locked" && st.policy != "child" && st.policy != "free")
+			fail(sprintf("step '%s': bad policy '%s' (locked|child|free)", n, st.policy));
+		if (st.policy != "locked") {
+			if (length(st.channels) == 0)
+				fail(sprintf("step '%s' (policy %s) needs channels=", n, st.policy));
+			if (length(st.allow) == 0)
+				fail(sprintf("step '%s' (policy %s) needs allow=", n, st.policy));
+			if (st.max_steps == "") st.max_steps = "8";
+			if (st.type != "")
+				fail(sprintf("step '%s' (policy %s) must not carry a type", n, st.policy));
+		} else if (st.type == "") {
+			fail(sprintf("step '%s' (locked) missing type", n));
+		}
+	}
+
+	/* the last pipeline entry must be locked: nothing follows the tail */
+	let last = m.order[length(m.order) - 1];
+	if (m.steps[last].policy != "locked")
+		fail(sprintf("last step '%s' must be locked", last));
+
+	/* child/free slots: user filters defined + allowed + within max_steps */
+	for (let n, st in m.steps) {
+		if (st.policy == "locked") continue;
+		let cntu = 0;
+		for (let fname in st.names) {
+			let f = m.filters[fname];
+			if (!f) fail(sprintf("step '%s': user filter '%s' is not defined", n, fname));
+			if (!has_word(st.allow, f.type))
+				fail(sprintf("step '%s': filter type '%s' (of '%s') not in allow list", n, f.type, fname));
+			cntu++;
+		}
+		if (match(st.max_steps, /^[0-9]+$/) && cntu > int(st.max_steps))
+			fail(sprintf("step '%s': %d user steps exceed max_steps=%s", n, cntu, st.max_steps));
+	}
+
+	/* free steps: allowed_after must name locked steps */
+	for (let n, st in m.steps) {
+		if (st.policy != "free") continue;
+		for (let a in st.after) {
+			let anchor = m.steps[a];
+			if (!anchor)
+				fail(sprintf("free step '%s': allowed_after references unknown step '%s'", n, a));
+			if (anchor.policy != "locked")
+				fail(sprintf("free step '%s': allowed_after '%s' is not locked", n, a));
+		}
+	}
+
+	/* locked conv filters must use the vendor read-only coefficient path */
+	for (let n, st in m.steps) {
+		if (st.policy != "locked") continue;
+		for (let fname in st.names) {
+			let f = m.filters[fname];
+			if (f && f.type == "conv" &&
+			    substr(f.filename, 0, length(VENDOR_COEFF_PREFIX) + 1) != VENDOR_COEFF_PREFIX + "/")
+				fail(sprintf("locked step '%s': conv filter '%s' filename must be under %s", n, fname, VENDOR_COEFF_PREFIX));
+		}
+	}
+}
+
+/* ---- devices ---------------------------------------------------------------- */
+
+function render_device(m, capture) {
+	let spec = capture ? m.main.capture : m.main.playback;
+	let type = spec, val = "";
+	let i = index(spec, ":");
+	if (i >= 0) { type = substr(spec, 0, i); val = substr(spec, i + 1); }
+
+	let ch = int(m.main.channels);
+	let pbch = int(m.main.pbch);
+	let fmt = m.main.format;
+	let wavhdr = !match(m.main.wav_header, /^(0|no|off|false)$/);
+
+	if (capture) {
+		if (type == "WavFile") return { type: "WavFile", filename: val };
+		if (type == "RawFile") return { type: "RawFile", channels: ch, filename: val, format: fmt };
+		if (type == "Alsa") return { type: "Alsa", channels: ch, device: val };
+		if (type == "Inferno" && i < 0) {
+			/* Dante RX via the inferno ALSA plugin (settings:
+			 * /etc/config/inferno, exported as INFERNO_* env) */
+			return { type: "Alsa", channels: ch, device: "inferno" };
+		}
+		if (type == "Stdin") return { type: "Stdin", channels: ch, format: fmt };
+		fail(sprintf("unknown capture spec: %s", spec));
+	}
+
+	if (type == "File")
+		return { type: "File", channels: pbch, filename: val, format: fmt, wav_header: wavhdr };
+	if (type == "Alsa") return { type: "Alsa", channels: pbch, device: val };
+	if (type == "Inferno" && i < 0)
+		/* Dante TX via the inferno ALSA plugin */
+		return { type: "Alsa", channels: pbch, device: "inferno" };
+	if (type == "Stdout") return { type: "Stdout", channels: pbch, format: fmt };
+	fail(sprintf("unknown playback spec: %s", spec));
+}
+
+/* ---- filters ------------------------------------------------------------------ */
+
+function render_filter(name, f) {
+	if (f.type == "") fail(sprintf("filter '%s' missing type", name));
+
+	let t, p;
+
+	switch (f.type) {
+		case "gain":
+			if (f.gain == "") fail(sprintf("filter '%s' (gain) needs gain=", name));
+			t = "Gain";
+			p = { gain: num(f.gain, 0) };
+			if (f.inverted == "1") p.inverted = true;
+			if (f.mute == "1") p.mute = true;
+			break;
+
+		case "conv":
+			if (f.filename == "") fail(sprintf("filter '%s' (conv) needs filename=", name));
+			t = "Conv";
+			p = { type: "Raw", format: "TEXT", filename: f.filename };
+			break;
+
+		case "limiter":
+			if (f.clip_limit == "") fail(sprintf("filter '%s' (limiter) needs clip_limit=", name));
+			t = "Limiter";
+			p = { clip_limit: num(f.clip_limit, 0) };
+			if (f.inverted == "1") p.soft_clip = true;
+			break;
+
+		case "hp":
+		case "lp":
+			if (f.f == "") fail(sprintf("filter '%s' (%s) needs f=", name, f.type));
+			t = "Biquad";
+			p = {
+				type: (f.type == "hp") ? "Highpass" : "Lowpass",
+				freq: num(f.f, 0),
+				q: num((f.q != "") ? f.q : "0.707", 0)
+			};
+			break;
+
+		case "lrhp":
+		case "lrlp":
+			if (f.f == "") fail(sprintf("filter '%s' (%s) needs f=", name, f.type));
+			t = "BiquadCombo";
+			p = {
+				type: (f.type == "lrhp") ? "LinkwitzRileyHighpass" : "LinkwitzRileyLowpass",
+				freq: num(f.f, 0),
+				order: num((f.order != "") ? f.order : "4", 0)
+			};
+			break;
+
+		case "hs":
+		case "ls":
+			if (f.f == "" || f.gain == "")
+				fail(sprintf("filter '%s' (%s) needs f= and gain=", name, f.type));
+			t = "Biquad";
+			p = {
+				type: (f.type == "hs") ? "Highshelf" : "Lowshelf",
+				freq: num(f.f, 0),
+				gain: num(f.gain, 0)
+			};
+			if (f.slope != "") p.slope = num(f.slope, 0);
+			else p.q = num((f.q != "") ? f.q : "0.707", 0);
+			break;
+
+		case "peak":
+			if (f.f == "" || f.gain == "")
+				fail(sprintf("filter '%s' (peak) needs f= and gain=", name));
+			t = "Biquad";
+			p = {
+				type: "Peaking",
+				freq: num(f.f, 0),
+				gain: num(f.gain, 0),
+				q: num((f.q != "") ? f.q : "1.0", 0)
+			};
+			break;
+
+		case "notch":
+		case "ap":
+			if (f.f == "") fail(sprintf("filter '%s' (%s) needs f=", name, f.type));
+			t = "Biquad";
+			p = {
+				type: (f.type == "notch") ? "Notch" : "Allpass",
+				freq: num(f.f, 0),
+				q: num((f.q != "") ? f.q : "0.707", 0)
+			};
+			break;
+
+		case "bp":
+			if (f.f == "") fail(sprintf("filter '%s' (bp) needs f=", name));
+			t = "Biquad";
+			p = { type: "Bandpass", freq: num(f.f, 0), q: num((f.q != "") ? f.q : "0.707", 0) };
+			break;
+
+		default:
+			fail(sprintf("filter '%s': unknown type '%s'", name, f.type));
+	}
+
+	let def = { type: t, parameters: p };
+	if (f.description != "") def.description = f.description;
+	return def;
+}
+
+/* ---- config + policy rendering -------------------------------------------------- */
+
+function render(m) {
+	let cfg = {
+		devices: {
+			samplerate: num(m.main.samplerate, 44100),
+			chunksize: num(m.main.chunksize, 1024),
+			capture: render_device(m, true),
+			playback: render_device(m, false)
+		}
+	};
+
+	/* mixers */
+	if (length(m.mixer_order) > 0) {
+		let mixers = {};
+		for (let name in m.mixer_order) {
+			let mx = m.mixers[name];
+			let nin = (mx.in != "" && match(mx.in, /^[0-9]+$/)) ? int(mx.in) : 2;
+			let nout = (mx.out != "" && match(mx.out, /^[0-9]+$/)) ? int(mx.out) : 2;
+			let mapping = [];
+			for (let d = 0; d < nout; d++) {
+				let entry = null;
+				for (let r in m.routes) {
+					if (r.mixer != name || r.dest != `${d}`) continue;
+					if (entry == null) {
+						entry = { dest: d, sources: [] };
+						push(mapping, entry);
+					}
+					/* uci mixer gain is LINEAR (default 1.0); v4 reads a
+					 * bare gain as dB -> always emit gain + scale linear */
+					let src = {
+						channel: num(r.source, 0),
+						gain: num((r.gain != "") ? r.gain : "1.0", 1.0),
+						scale: "linear"
+					};
+					if (r.inverted == "1") src.inverted = true;
+					if (r.mute == "1") src.mute = true;
+					push(entry.sources, src);
+				}
+			}
+			mixers[name] = { channels: { in: nin, out: nout }, mapping: mapping };
+		}
+		cfg.mixers = mixers;
+	}
+
+	/* filters: transparent slot anchors (Gain 0 dB) first, then defs */
+	let slots = [];
+	if (m.protected)
+		for (let n in m.order)
+			if (m.steps[n].policy != "locked")
+				push(slots, n);
+
+	if (length(m.filter_order) > 0 || length(slots) > 0) {
+		let filters = {};
+		for (let n in slots) {
+			let ph = `user_slot_${n}`;
+			filters[ph] = { type: "Gain", parameters: { gain: 0 } };
+		}
+		for (let n in m.filter_order)
+			filters[n] = render_filter(n, m.filters[n]);
+		cfg.filters = filters;
+	}
+
+	/* pipeline (in config pipeline list order) */
+	let pipe = [];
+	for (let n in m.order) {
+		let st = m.steps[n];
+
+		/* editable slot: render the placeholder step */
+		if (m.protected && st.policy != "locked") {
+			let names = [`user_slot_${n}`];
+			for (let fname in st.names) push(names, fname);
+			let step = {
+				type: "Filter",
+				channels: map(st.channels, (c) => num(c, c)),
+				names: names
+			};
+			if (st.label != "") step.description = st.label;
+			push(pipe, step);
+			continue;
+		}
+
+		if (st.type == "Filter" || st.type == "filter") {
+			let names = [];
+			for (let fname in st.names) {
+				if (!m.filters[fname])
+					fail(sprintf("step '%s' references unknown filter '%s'", n, fname));
+				push(names, fname);
+			}
+			if (length(names) == 0) fail("Filter step needs list names");
+			let step = { type: "Filter" };
+			if (length(st.channels) > 0)
+				step.channels = map(st.channels, (c) => num(c, c));
+			step.names = names;
+			if (st.label != "") step.description = st.label;
+			push(pipe, step);
+		} else if (st.type == "Mixer" || st.type == "mixer") {
+			if (!m.mixers[st.mixer])
+				fail(sprintf("step '%s' references unknown mixer '%s'", n, st.mixer));
+			let step = { type: "Mixer", name: st.mixer };
+			if (st.label != "") step.description = st.label;
+			push(pipe, step);
+		} else {
+			fail(sprintf("step '%s' has bad type '%s' (Filter|Mixer)", n, st.type));
+		}
+	}
+	if (length(pipe) > 0) cfg.pipeline = pipe;
+
+	/* policy spec (only for protected configs) */
+	if (!m.protected)
+		return { config: cfg, policy: null };
+
+	let subs = [];
+	for (let n in m.order) {
+		let st = m.steps[n];
+		let pos = index(m.order, n);
+		if (st.policy == "locked") {
+			/* each locked step is its own single-step anchor */
+			push(subs, { policy: "locked", name: n, first_step: pos, steps: 1 });
+		} else if (st.policy == "child") {
+			push(subs, {
+				policy: "child", name: n,
+				channels: map(st.channels, (c) => num(c, c)),
+				allow: st.allow,
+				max_steps: match(st.max_steps, /^[0-9]+$/) ? int(st.max_steps) : st.max_steps
+			});
+		} else {
+			push(subs, {
+				policy: "free", name: n,
+				gaps: st.after,
+				channels: map(st.channels, (c) => num(c, c)),
+				allow: st.allow,
+				max_steps: match(st.max_steps, /^[0-9]+$/) ? int(st.max_steps) : st.max_steps
+			});
+		}
+	}
+
+	let pol = { subchains: subs };
+	let truthy = { "1": true, "yes": true, "on": true, "true": true };
+	let ug = [];
+	for (let n in m.mixer_order)
+		if (truthy[m.mixers[n].user_gains]) push(ug, n);
+	if (length(ug) > 0) pol.user_gains = ug;
+
+	return { config: cfg, policy: pol };
+}
+
+/* ---- entry points --------------------------------------------------------- */
+
+/* uci cursor: honors UCI_CONFIG_DIR/UCI_DELTA_DIR when set (test rigs) */
+function uci_cursor() {
+	let dir = getenv("UCI_CONFIG_DIR");
+	if (dir != null && `${dir}` != "")
+		return uci.cursor(dir, getenv("UCI_DELTA_DIR") ?? "/tmp/.uci");
+	return uci.cursor();
+}
+
+/* Render + write everything for the uci state. Raises a die() exception
+ * on validation failure (the caller decides how to report it). */
+function generate(out) {
+	let cursor = uci_cursor();
+
+	let m = collect(cursor);          /* structural collection errors */
+	write_env_sidecar(m, cursor, out); /* written pre-validation */
+	validate(m);
+
+	let r = render(m);
+	writefile(out, sprintf("%J\n", r.config));
+	if (r.policy != null)
+		writefile(stem(out) + ".policy", sprintf("%J\n", r.policy));
+}
+
+/* CLI entry: camilladsp-genconf [outfile] */
+function main(argv) {
+	let out = (length(argv) > 0 && `${argv[0]}` != "") ? argv[0] : "/tmp/camilladsp.yml";
+
+	try {
+		generate(out);
+	} catch (e) {
+		let msg = (type(e) == "string") ? e : (e?.message ?? sprintf("%J", e));
+		warn(`camilladsp-genconf: ${msg}\n`);
+		exit(1);
+	}
+}
+
+/* CLI entry point */
+main(ARGV);
