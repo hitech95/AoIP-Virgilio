@@ -27,7 +27,14 @@ rm -f "${TARGET_DIR}"/etc/init.d/S50nginx
 # assets -- radio/FIR/wav are user data, not image content).
 rm -f "${TARGET_DIR}"/etc/rc.d/S96mpd "${TARGET_DIR}"/etc/rc.d/S96aoip-bridge \
 	"${TARGET_DIR}"/usr/bin/mpd-ctl
-rm -rf "${TARGET_DIR}"/usr/share/camilladsp "${TARGET_DIR}"/usr/share/mpd
+# purge the camilladsp package extras, but KEEP the vendor coeffs dir the
+# locked conv filters point at (rootfs-overlay/usr/share/camilladsp/coeffs;
+# this script runs AFTER the overlay, a plain rm -rf would reap it too)
+if [ -d "${TARGET_DIR}"/usr/share/camilladsp ]; then
+	find "${TARGET_DIR}"/usr/share/camilladsp -mindepth 1 -maxdepth 1 \
+		! -name coeffs -exec rm -rf {} +
+fi
+rm -rf "${TARGET_DIR}"/usr/share/mpd
 
 # OpenWrt-style volatile layout: /var and /run are symlinks into the tmpfs
 # (/tmp, mounted by procd early). Keeps logs, run sockets, lock files and
