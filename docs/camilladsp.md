@@ -141,11 +141,17 @@ channels. `option user_gains '1'` marks the mixer's route **gains as
 free user state** (source-mix selection via the websocket — 100% ch0 /
 100% ch1 / (ch0+ch1)/2 are just gain presets); without it, or without a
 protected pipeline, the mixer is fully locked by the manifest.
+UI-only metadata on the mixer section: `list in_label` / `list out_label`
+(human names for the input/output channels, shown by the web UIs —
+`CH{n}` when unset; camilladsp-genconf ignores them). When the mixer is
+referenced by a subchain step, the web UI disables the `in`/`out` counts
+(the topology is provisioned).
 Each `mixroute` section is one contribution: `option mixer` (which
 mixer), `dest` (output channel), `source` (input channel), `gain`
 (**linear**, default 1.0), optional `inverted`/`mute` (`1`). Several
 mixroutes with the same `dest` sum into that output. Unrouted outputs
-are silent.
+are silent. A mute on every route of one `dest` acts as an
+output-level mute in the UI.
 
 Per sample the mixer computes:
 
@@ -205,6 +211,7 @@ Notes:
 | `type` | `Filter` or `Mixer` (locked sub chains only). |
 | `channels` (list, Filter) | Input channels of the step. Omit = all. |
 | `names` (list, Filter) | Filters applied **in series** to those channels. |
+| `label` | Optional human name for the block (UI-only; genconf ignores it, the policy slot name stays authoritative). |
 | `name` (Mixer) | Which mixer node to apply. |
 
 ### `config subchain` — protected pipeline (sub chains)

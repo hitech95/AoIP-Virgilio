@@ -5,7 +5,7 @@
  * Built over dsp.uc (protected pipeline: manifest-driven slots,
  * plan/webui.md §9). */
 
-import { filters_schema, filters_set, mix_set, mixers_get, mix_set_gains,
+import { filters_schema, filters_set, mix_set, mixers_get, mix_set_gains, mix_set_meta, block_set_label,
 	dsp_settings_get, dsp_settings_set, dsp_pipeline_get } from "dsp";
 import { ubus_call } from "ubusx";
 import { ERR_UNKNOWN } from "util";
@@ -28,6 +28,8 @@ const dsp_modules = {
 		get_pipeline: (params) => dsp_pipeline_get(),
 		/* mixer tab: quick presets (source) or manual route gains */
 		get_mixers: (params) => mixers_get(),
+		save_mixer_meta: (params) => mix_set_meta(params),
+		set_block_label: (params) => block_set_label(params),
 		save_mixer: (params) => (params?.routes != null)
 			? mix_set_gains(params) : mix_set(params)
 	}
