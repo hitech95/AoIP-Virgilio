@@ -761,7 +761,7 @@ index 0000000..a9e7058
 +        "gain" => "Gain",
 +        "conv" => "Conv",
 +        "delay" => "Delay",
-+        "hp" | "lp" | "hs" | "ls" | "peak" | "notch" | "ap" => "Biquad",
++        "hp" | "lp" | "hs" | "ls" | "peak" | "notch" | "ap" | "bp" => "Biquad",
 +        "lrhp" | "lrlp" => "BiquadCombo",
 +        "Gain" => "Gain",
 +        "Biquad" => "Biquad",
