@@ -14,7 +14,7 @@
       <el-button type="primary" :loading="saving" :disabled="!connected"
         :title="$t('Persist the live edits of every editable block (and mixer route gains) to UCI')"
         class="page-save" @click="saveAll">{{ $t('Save') }}</el-button>
-      <el-tag :type="connected ? 'success' : 'danger'" class="conn-tag">
+      <el-tag :type="connected ? 'success' : 'danger'" size="large" class="conn-tag">
         {{ connected ? $t('Connected') : $t('Offline') }}
       </el-tag>
     </header>

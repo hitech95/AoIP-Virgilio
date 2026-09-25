@@ -21,6 +21,9 @@
           <template #label="{ label }">
             <span class="sel-name">{{ label }}</span>
             <span class="sel-tags">
+              <el-tag v-if="selectedLocked" size="small" type="info" effect="plain" class="sel-chip">
+                {{ $t('Protected') }}
+              </el-tag>
               <el-tag v-if="selectedStepInfo" size="small" type="primary" effect="light" class="sel-chip">
                 {{ selectedStepInfo.names.length }} {{ $t('filters') }}
               </el-tag>
@@ -32,6 +35,9 @@
             <div class="opt-row">
               <span class="opt-name">{{ stepName(s) }}</span>
               <span class="opt-tags">
+                <el-tag v-if="stageOf(s.index)?.kind === 'locked'" size="small" type="info" effect="plain">
+                  {{ $t('Protected') }}
+                </el-tag>
                 <el-tag size="small" type="primary" effect="light">{{ s.names.length }} {{ $t('filters') }}</el-tag>
                 <el-tag v-for="c in s.channels" :key="c" size="small" type="success" effect="light">{{ channelLabel(c) }}</el-tag>
               </span>
@@ -351,17 +357,16 @@ export default defineComponent({
         labelCtx.$message?.error?.(labelCtx.$t('Cannot add a band to this block'))
     }
 
-    /* policy tag: only for states the selector does NOT already show --
-     * editable blocks are named by their slot in the selector, a second
-     * "slot: X" tag would be redundant */
+    /* policy tag: only for states the selector does NOT already show.
+     * Locked blocks are tagged "Protected" in the selector itself; the
+     * read-only controls speak for themselves. */
     const policyTag = computed(() => {
       const stage = stageOf(eq.selectedStepIndex)
       if (!stage) return null
       switch (stage.kind) {
         case 'editable':
-          return null
         case 'locked':
-          return { type: 'danger' as const, text: labelCtx.$t('protected — read only') }
+          return null
         case 'mixer':
           return { type: 'warning' as const, text: labelCtx.$t('mixer') }
         default:
@@ -447,6 +452,7 @@ export default defineComponent({
       pipelineStages,
       filtersSchema,
       policyTag,
+      stageOf,
       // exposed for the Options-API hooks below
       _measure: measure,
       _loadPolicies: loadPolicies,
