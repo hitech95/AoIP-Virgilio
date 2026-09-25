@@ -646,7 +646,9 @@ function dsp_pipeline_get() {
 			push(stages, {
 				index: i,
 				kind: "locked",
-				label: "Protected: " + name,
+				/* plain name: the UIs mark locked stages with a
+				 * Protected tag, a text prefix would duplicate it */
+				label: name,
 				name: disp
 			});
 		} else {

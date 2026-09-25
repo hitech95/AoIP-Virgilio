@@ -296,7 +296,7 @@ export default {
         ])
         this.stageNames = {}
         for (const s of pipe?.stages ?? [])
-          if (s.name) this.stageNames[s.label?.replace(/^Protected: /, '') ?? s.index] = s.name
+          if (s.name) this.stageNames[s.label ?? s.index] = s.name
         if (st && Number.isFinite(Number(st.volume)))
           this.mainVolume = Math.max(-60, Math.min(0, Number(st.volume)))
         this.schema = schema
