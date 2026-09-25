@@ -7,12 +7,30 @@
 // ===== COORDINATE MAPPING =====
 
 /**
- * Map frequency to X coordinate (base-10 logarithmic)
+ * Map frequency to X coordinate (base-10 logarithmic) over 10 Hz..fMax.
  */
 export function freqToX(freq: number, width: number, fMax = 30000): number {
   const fMin = 10
   const xNorm = (Math.log10(freq) - Math.log10(fMin)) / (Math.log10(fMax) - Math.log10(fMin))
   return xNorm * width
+}
+
+/**
+ * General form with an explicit frequency range (the SVG curve renderer
+ * and the focus fills sample arbitrary ranges).
+ */
+export function freqToXRange(freq: number, width: number, freqMin = 10, freqMax = 30000): number {
+  const xNorm = (Math.log10(freq) - Math.log10(freqMin)) / (Math.log10(freqMax) - Math.log10(freqMin))
+  return xNorm * width
+}
+
+/**
+ * Map gain (dB) to Y on an explicit range (linear scale, inverted for SVG).
+ */
+export function gainToYRange(gainDb: number, height: number, gainMin = -24, gainMax = 24): number {
+  const gainRange = gainMax - gainMin
+  const normalized = (gainMax - gainDb) / gainRange
+  return normalized * height
 }
 
 /**

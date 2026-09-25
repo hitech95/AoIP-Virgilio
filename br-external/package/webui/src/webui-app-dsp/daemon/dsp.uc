@@ -159,61 +159,9 @@ function camilladsp_txn(apply) {
 
 function filters_set(params) {
 	let steps = params?.steps ?? {};
-	let free = params?.pipeline;
 
-	if (type(steps) != "object" && free == null)
+	if (type(steps) != "object")
 		return { error: { code: ERR_INVALID_ARGUMENT, message: "steps object required" } };
-
-	/* Free edit: the pipeline step has no subchain policy (or none is
-	 * available). Write the user filters straight into the uci step section
-	 * rendered at this pipeline position -- no allow/max_steps constraints,
-	 * still behind the genconf dry-run + manifest layers. Only user-owned
-	 * (u_*) filters are replaced; anything else stays untouched. */
-	if (free != null) {
-		if (type(free) != "object" || free.index == null ||
-		    type(free.filters) != "array")
-			return { error: { code: ERR_INVALID_ARGUMENT,
-				message: "pipeline object { index, filters } required" } };
-
-		let ordered = pipeline_order();
-		if (free.index < 0 || free.index >= length(ordered))
-			return { error: { code: ERR_NOT_FOUND, message: "pipeline index out of range" } };
-		let name = ordered[free.index];
-		let st = pipeline_steps()[name];
-		if (!st)
-			return { error: { code: ERR_NOT_FOUND, message: `no pipeline step ${free.index}` } };
-		if (st.policy == "locked")
-			return { error: { code: ERR_PERMISSION_DENIED, message: `${name} is locked` } };
-		if (st.type != "Filter")
-			return { error: { code: ERR_INVALID_ARGUMENT,
-				message: `pipeline step ${free.index} is not a Filter block` } };
-
-		return camilladsp_txn(() => {
-			let c = uci.cursor();
-			c.load("camilladsp");
-
-			let old = (type(st.names) == "array") ? st.names : ((st.names != null) ? [st.names] : []);
-			for (let n in old)
-				if (substr(n, 0, 2) == "u_")
-					c.delete("camilladsp", n);
-
-			let names = [];
-			let i = 0;
-			for (let f in free.filters) {
-				i++;
-				let fname = `u_free_${i}`;
-				/* NB: this ucode has no named cursor.add() -- create the
-				 * named section via the 3-arg set() form */
-				c.set("camilladsp", fname, "filter");
-				for (let k in f)
-					if (k != "name")
-						c.set("camilladsp", fname, k, f[k]);
-				push(names, fname);
-			}
-			c.set("camilladsp", st[".section"], "names", names);
-			c.commit("camilladsp");
-		});
-	}
 
 	let slots = filters_slots();
 
@@ -268,42 +216,6 @@ function filters_set(params) {
 			c.set("camilladsp", slots[sc].step, "names", names);
 		}
 
-		c.commit("camilladsp");
-	});
-}
-
-/* source-select presets for user_gains mixers (srcmix): every route's
- * gain set by source contribution -- '0' (all ch0), '1' (all ch1),
- * 'mix' (equal blend, 0.5 linear) */
-function mix_set(params) {
-	let mixer = params?.mixer;
-	let source = params?.source;
-	let valid_src = false;
-	for (let s in [ "0", "1", "mix" ])
-		if (s == source)
-			valid_src = true;
-	if (!valid_src)
-		return { error: { code: ERR_INVALID_ARGUMENT, message: "source must be 0, 1 or mix" } };
-
-	let routes = [];
-	for (let r in uci_sections("camilladsp", "mixroute"))
-		if (r.mixer == mixer)
-			push(routes, r);
-	if (length(routes) == 0)
-		return { error: { code: ERR_NOT_FOUND, message: `mixer ${mixer} has no routes` } };
-
-	return camilladsp_txn(() => {
-		let c = uci.cursor();
-		c.load("camilladsp");
-		for (let r in routes) {
-			let g;
-			if (source == "mix")
-				g = 0.5;
-			else
-				g = (r.source == source) ? 1.0 : 0.0;
-			c.set("camilladsp", r[".section"], "gain", `${g}`);
-			c.set("camilladsp", r[".section"], "mute", "");
-		}
 		c.commit("camilladsp");
 	});
 }
@@ -670,7 +582,7 @@ function dsp_pipeline_get() {
 
 export {
 	pipeline_order, pipeline_steps, filters_slots, filters_schema,
-	filters_set, mix_set, mix_get, mixers_get, mix_set_gains,
+	filters_set, mix_get, mixers_get, mix_set_gains,
 	mix_set_meta, block_set_label, dsp_settings_get, dsp_settings_set,
 	dsp_pipeline_get
 };

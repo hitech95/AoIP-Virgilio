@@ -113,8 +113,19 @@ export default {
       this.uploading = false
     },
     async del(name) {
-      await this.$oui.call('files', 'delete', { name })
-      await this.reload()
+      try {
+        await this.$confirm(
+          this.$t('Delete profile "{name}"? This cannot be undone.', { name }),
+          this.$t('Delete'),
+          { type: 'warning', confirmButtonText: this.$t('Delete'), cancelButtonText: this.$t('Cancel') }
+        )
+      } catch { return /* dismissed */ }
+      try {
+        await this.$oui.call('files', 'delete', { name })
+        await this.reload()
+      } catch (e) {
+        this.$message.error(this.$t('Update failed') + (e?.message ? `: ${e.message}` : ''))
+      }
     },
     async fetchDoc(name) {
       const r = await this.$oui.call('files', 'read', { name })

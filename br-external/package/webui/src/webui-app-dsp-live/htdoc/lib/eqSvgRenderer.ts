@@ -6,6 +6,7 @@
 
 import type { EqBand } from './filterResponse'
 import { DEFAULT_SAMPLE_RATE, sumResponseDb, generateLogFrequencies } from './filterResponse'
+import { freqToXRange as freqToX, gainToYRange as gainToY } from './eqPlotMath'
 
 export interface CurveOptions {
   width: number
@@ -17,25 +18,6 @@ export interface CurveOptions {
   gainMax?: number
   /** DSP sample rate: the response is only defined up to Nyquist. */
   sampleRate?: number
-}
-
-/**
- * Map frequency to X coordinate (log scale)
- */
-export function freqToX(freq: number, width: number, freqMin = 10, freqMax = 30000): number {
-  const logMin = Math.log10(freqMin)
-  const logMax = Math.log10(freqMax)
-  const xNorm = (Math.log10(freq) - logMin) / (logMax - logMin)
-  return xNorm * width
-}
-
-/**
- * Map gain (dB) to Y coordinate (linear scale, inverted for SVG)
- */
-export function gainToY(gainDb: number, height: number, gainMin = -24, gainMax = 24): number {
-  const gainRange = gainMax - gainMin
-  const normalized = (gainMax - gainDb) / gainRange
-  return normalized * height
 }
 
 /**

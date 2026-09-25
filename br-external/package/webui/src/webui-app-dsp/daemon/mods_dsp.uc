@@ -5,7 +5,7 @@
  * Built over dsp.uc (protected pipeline: manifest-driven slots,
  * plan/webui.md §9). */
 
-import { filters_schema, filters_set, mix_set, mixers_get, mix_set_gains, mix_set_meta, block_set_label,
+import { filters_schema, filters_set, mixers_get, mix_set_gains, mix_set_meta, block_set_label,
 	dsp_settings_get, dsp_settings_set, dsp_pipeline_get } from "dsp";
 import { ubus_call } from "ubusx";
 import { ERR_UNKNOWN } from "util";
@@ -15,8 +15,13 @@ const dsp_modules = {
 		status: (params) => ubus_call("camilladsp", "status") ??
 			{ error: { code: ERR_UNKNOWN, message: "camilladsp not reachable" } },
 		volume_set: (params) => {
-			let r = ubus_call("camilladsp", "volume_set",
-				{ volume: params?.volume ?? 0 });
+			/* attenuation-only control; the FE fader spans -60..0 dB.
+			 * Clamp server-side so a rogue client cannot blast gain. */
+			let vol = +(params?.volume ?? 0);
+			if (vol != vol)
+				vol = 0;
+			vol = (vol < -100) ? -100 : (vol > 0) ? 0 : vol;
+			let r = ubus_call("camilladsp", "volume_set", { volume: vol });
 			return (r == null)
 				? { error: { code: ERR_UNKNOWN, message: "camilladsp not reachable" } }
 				: (r ?? {});
@@ -30,8 +35,7 @@ const dsp_modules = {
 		get_mixers: (params) => mixers_get(),
 		save_mixer_meta: (params) => mix_set_meta(params),
 		set_block_label: (params) => block_set_label(params),
-		save_mixer: (params) => (params?.routes != null)
-			? mix_set_gains(params) : mix_set(params)
+		save_mixer: (params) => mix_set_gains(params ?? {})
 	}
 };
 

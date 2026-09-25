@@ -67,7 +67,10 @@
     "Cancel": "Cancel",
     "Choose Other to edit the matrix; a cell click opens the gain dialog.": "Choose Other to edit the matrix; a cell click opens the gain dialog.",
     "Click to rename this output": "Click to rename this output",
-    "Clipping risk": "Clipping risk"
+    "Clipping risk": "Clipping risk",
+    "Delete profile \"{name}\"? This cannot be undone.": "Delete profile \"{name}\"? This cannot be undone.",
+    "Delete": "Delete",
+    "Update failed": "Update failed"
   },
   "it": {
     "Filters": "Filtri",
@@ -137,6 +140,9 @@
     "Cancel": "Annulla",
     "Choose Other to edit the matrix; a cell click opens the gain dialog.": "Scegli Altro per modificare la matrice; un clic su una cella apre la finestra del guadagno.",
     "Click to rename this output": "Clicca per rinominare questa uscita",
-    "Clipping risk": "Rischio di clipping"
+    "Clipping risk": "Rischio di clipping",
+    "Delete profile \"{name}\"? This cannot be undone.": "Eliminare il profilo \"{name}\"? L'operazione non è annullabile.",
+    "Delete": "Elimina",
+    "Update failed": "Aggiornamento non riuscito"
   }
 }
