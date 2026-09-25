@@ -34,6 +34,11 @@ $mobile-filter-height: 460px;
   }
 }
 
+/* teleported tab toolbars keep their intrinsic width inside the header */
+.eq-toolbar {
+  flex: 0 0 auto;
+}
+
 .bands-empty { margin: auto; }
 
 @media (max-width: $mobile-breakpoint) {

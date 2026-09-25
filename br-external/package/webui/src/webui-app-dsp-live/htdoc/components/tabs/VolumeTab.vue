@@ -333,12 +333,14 @@ export default {
     /* camilladsp fader set (Main=0, Aux1..4=1..4); live */
     async applyFader(idx) {
       const db = this.posToDb(this.faderPos(idx))
-      const body = await dsp.request('SetFaderVolume', [idx, db]).catch(e => e)
-      const value = body?.value
-      if (value && Number.isFinite(Number(value.volume))) {
-        this.faders[idx] = Number(value.volume)
-        this.faderPositions[idx] = this.dbToPos(Math.max(-60, Math.min(6, Number(value.volume))))
-      } else {
+      try {
+        const body = await dsp.request('SetFaderVolume', [idx, db])
+        const value = body?.value
+        if (value && Number.isFinite(Number(value.volume))) {
+          this.faders[idx] = Number(value.volume)
+          this.faderPositions[idx] = this.dbToPos(Math.max(-60, Math.min(6, Number(value.volume))))
+        }
+      } catch {
         this.$message.error(this.$t('Update failed'))
       }
       this.clearUserFader(idx)
@@ -374,30 +376,31 @@ export default {
     },
     inName(m, s) { return this.inLabels[s]?.trim() || `CH${s}` },
     outName(m, d) { return this.outLabels[d]?.trim() || `CH${d}` },
-    /* preset state from the live gains (mirrors the daemon mix_get):
-     * all routes at 0.5 = mix; a single source feeding every dest with
-     * the others at zero = that channel; anything else = custom */
+    /* preset state from the live gains. Strict: mix = every route at
+     * 0.5; a channel preset = EVERY route of that channel at exactly 1
+     * and every other route at exactly 0 (a single trimmed or open cell
+     * makes it custom). Anything else = custom. */
     deriveSel(m) {
-      let one = 0, mix = 0
       const routes = []
       for (const d of m.mapping)
         for (const s of (d.sources ?? [])) routes.push(s)
+      const eff = (r) => (r.mute ? 0 : this.routeLin(r))
+      let mix = 0
       for (const r of routes) {
-        const lin = r.mute ? 0 : this.routeLin(r)
-        if (Math.abs(lin - 1) < 1e-6) one++
-        else if (Math.abs(lin - 0.5) < 1e-6) mix++
+        if (Math.abs(eff(r) - 0.5) < 1e-6) mix++
       }
       if (routes.length && mix === routes.length) return 'mix'
-      if (one > 0) {
-        let sel = null
-        for (const d of m.mapping)
-          for (const s of (d.sources ?? [])) {
-            if (s.mute || Math.abs(this.routeLin(s) - 1) > 1e-6) continue
-            const ch = String(s.channel)
-            if (sel === null) sel = ch
-            else if (sel !== ch) return 'custom'
-          }
-        if (sel !== null) return sel
+      for (const ch of m.sources ?? []) {
+        let used = 0
+        let ok = true
+        for (const r of routes) {
+          const lin = eff(r)
+          if (String(r.channel) === String(ch)) {
+            if (Math.abs(lin - 1) < 1e-6) used++
+            else { ok = false; break }
+          } else if (Math.abs(lin) > 1e-6) { ok = false; break }
+        }
+        if (ok && used > 0) return String(ch)
       }
       return 'custom'
     },
@@ -419,17 +422,24 @@ export default {
       this.hover = null
       const cfg = JSON.parse(JSON.stringify(dsp.config.value ?? {}))
       const live = cfg.mixers?.[m.name]
-      if (!live) return false
+      if (!live) {
+        this.$message.error(this.$t('Update failed'))
+        return false
+      }
       live.mapping = mapping
       try {
         const confirmed = await dsp.uploadConfig(cfg)
-        if (confirmed && dsp.config.value) {
+        if (!confirmed) {
+          this.$message.error(this.$t('Update failed'))
+          return false
+        }
+        if (dsp.config.value) {
           initializeFromConfig(dsp.config.value)
           /* camilladsp applies asynchronously: sync from the local edit */
           m.mapping = JSON.parse(JSON.stringify(mapping))
           this.mixSel[m.name] = this.deriveSel(m)
         }
-        return !!confirmed
+        return true
       } catch (e) {
         this.$message.error(this.$t('Update failed') + (e?.value?.message ? `: ${e.value.message}` : ''))
         return false

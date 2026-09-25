@@ -127,15 +127,17 @@ function isOpen(): boolean {
   return !!ws && ws.readyState === WebSocket.OPEN
 }
 
-/* Responses carry no sequence number: they are matched by command name,
- * so only ONE request may be in flight at a time. The FIFO chain below
- * serializes every request through the previous one's settlement. */
-let chain: Promise<unknown> = Promise.resolve()
+/* Responses carry no sequence number: they are matched by command name.
+ * Commands of DIFFERENT names run in parallel; a request of a given name
+ * waits for the previous same-name request to settle first, so at most
+ * one request per name is ever in flight and responses can never be
+ * matched by the wrong pending entry. (A single global FIFO would let
+ * the meter/spectrum polling starve interactive commands.) */
+const lanes = new Map<string, Promise<unknown>>()
 
 /**
- * Send a command and wait for the matching response. Serialized: a
- * request is sent only after the previous one settled, so responses
- * cannot interleave or be matched by the wrong pending entry.
+ * Send a command and wait for the matching response. Same-name requests
+ * are serialized per command; different commands may interleave.
  */
 export function request<T = any>(command: string, value?: unknown): Promise<T> {
   const run = () =>
@@ -153,9 +155,10 @@ export function request<T = any>(command: string, value?: unknown): Promise<T> {
       ws!.send(JSON.stringify(value === undefined ? command : { [command]: value }))
     })
 
-  const serialized = chain.then(run, run)
-  /* keep the chain alive when a request rejects */
-  chain = serialized.catch(() => {})
+  const prev = lanes.get(command) ?? Promise.resolve()
+  const serialized = prev.then(run, run)
+  /* keep the lane alive when a request rejects */
+  lanes.set(command, serialized.catch(() => {}))
   return serialized
 }
 
