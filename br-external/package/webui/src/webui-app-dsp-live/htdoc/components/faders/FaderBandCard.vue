@@ -30,7 +30,7 @@
           :disabled="off">
           <template #reference>
             <button type="button" class="type-btn" :disabled="off"
-              :title="`Band ${bandIndex + 1} — ${band.type} (change type)`"
+              :title="$t('Band {n} — {type} (change type)', { n: bandIndex + 1, type: band.type })"
               :aria-label="$t('Change filter type for band {n}', { n: bandIndex + 1 })" @click.stop>
               <FilterIcon :type="band.type" />
             </button>
@@ -58,7 +58,8 @@
 
       <div class="switch-row">
         <el-switch size="small" :model-value="band.enabled"
-          :title="band.enabled ? 'Mute' : 'Unmute'" :aria-label="band.enabled ? 'Mute band' : 'Enable band'"
+          :title="band.enabled ? $t('Mute') : $t('Unmute')"
+          :aria-label="band.enabled ? $t('Mute band') : $t('Enable band')"
           :disabled="readOnly" @change="toggleMute" />
       </div>
 

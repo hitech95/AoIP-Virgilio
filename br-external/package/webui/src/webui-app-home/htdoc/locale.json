@@ -39,7 +39,9 @@
     "DSP": "DSP",
     "FS Rate": "FS Rate",
     "Running": "Running",
-    "Stopped": "Stopped"
+    "Stopped": "Stopped",
+    "Free": "Free",
+    "Shared": "Shared"
   },
   "it": {
     "CPU Usage": "Uso CPU",
@@ -81,6 +83,8 @@
     "DSP": "DSP",
     "FS Rate": "FS Rate",
     "Running": "In esecuzione",
-    "Stopped": "Fermato"
+    "Stopped": "Fermato",
+    "Free": "Libero",
+    "Shared": "Condivisa"
   }
 }

@@ -156,7 +156,14 @@
     "OK": "OK",
     "Click to rename this output": "Click to rename this output",
     "Choose Other to edit the matrix; a cell click opens the gain dialog.": "Choose Other to edit the matrix; a cell click opens the gain dialog.",
-    "Add a Volume filter using this fader to enable it": "Add a Volume filter using this fader to enable it"
+    "Add a Volume filter using this fader to enable it": "Add a Volume filter using this fader to enable it",
+    "Add a new EQ band to this block": "Add a new EQ band to this block",
+    "No mixers exposed by the policy. The source mixer is provisioned at build time.": "No mixers exposed by the policy. The source mixer is provisioned at build time.",
+    "Could not re-apply muted filters": "Could not re-apply muted filters",
+    "Mute band": "Mute band",
+    "Enable band": "Enable band",
+    "Unmute": "Unmute",
+    "Band {n} — {type} (change type)": "Band {n} — {type} (change type)"
   },
   "it": {
     "Filter Block": "Blocco filtri",
@@ -315,6 +322,13 @@
     "OK": "OK",
     "Click to rename this output": "Fare clic per rinominare questa uscita",
     "Choose Other to edit the matrix; a cell click opens the gain dialog.": "Scegliere Altro per modificare la matrice; un clic su una cella apre la finestra del guadagno.",
-    "Add a Volume filter using this fader to enable it": "Aggiungere un filtro Volume che usi questo fader per abilitarlo"
+    "Add a Volume filter using this fader to enable it": "Aggiungere un filtro Volume che usi questo fader per abilitarlo",
+    "Add a new EQ band to this block": "Aggiungi una nuova banda EQ a questo blocco",
+    "No mixers exposed by the policy. The source mixer is provisioned at build time.": "Nessun mixer esposto dalla policy. Il mixer sorgente è provisionato in fase di build.",
+    "Could not re-apply muted filters": "Impossibile riapplicare i filtri silenziati",
+    "Mute band": "Silenzia banda",
+    "Enable band": "Abilita banda",
+    "Unmute": "Riattiva",
+    "Band {n} — {type} (change type)": "Banda {n} — {type} (cambia tipo)"
   }
 }
