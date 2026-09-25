@@ -159,9 +159,8 @@ export function extractEqBandsFromConfig(
       ? Math.max(-24, Math.min(24, Number(preampSources[0]?.gain) || 0))
       : 0
   }
-  /* bands = the ENABLED filters of the block only. Disabled (muted)
-   * filters are simply absent: they become orphans restorable through
-   * the "Add filter" dropdown -- no more phantom bands after reload. */
+  /* bands = the enabled filters of the block only; disabled (muted)
+   * ones become orphans restorable through the "Add filter" dropdown */
   const fullNames: string[] = [...enabledNames]
 
   const bands: EqBand[] = []
@@ -183,14 +182,12 @@ export function extractEqBandsFromConfig(
     const bandType = mapCamillaBiquadType(params.type)
     if (!bandType) continue // Skip unsupported biquad subtypes (e.g., LinkwitzTransform)
 
-    const enabled = true
-
     const freq = Number(params.freq || params.Frequency || 1000)
     const q = Number(params.q || params.Q || 1.41)
     const gain = Number(params.gain || params.Gain || 0)
 
     bands.push({
-      enabled,
+      enabled: true,
       type: bandType,
       freq: Math.max(10, Math.min(30000, freq)),
       gain: Math.max(-24, Math.min(24, gain)),
@@ -277,11 +274,11 @@ export function applyEqBandsToConfig(
 
     const params = filterDef.parameters as any
 
-    params.type = mapEqBandTypeToCamilla(band.type)
+    const camillaType = mapEqBandTypeToCamilla(band.type)
+    params.type = camillaType
     params.freq = band.freq
     params.q = band.q
 
-    const camillaType = mapEqBandTypeToCamilla(band.type)
     const biquadType = camillaType.charAt(0).toUpperCase() + camillaType.slice(1)
 
     if (isGainCapable(biquadType as BiquadType)) {

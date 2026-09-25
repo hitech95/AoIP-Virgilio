@@ -227,13 +227,6 @@ export function createSpectrumVizController(config: SpectrumVizControllerConfig)
       })
     },
 
-    setAnalyzerPeakConfig(cfg: { holdTimeSec: number; decayRateDbPerSec: number }): void {
-      analyzer.updateConfig({
-        holdTimeMs: cfg.holdTimeSec * 1000,
-        decayRateDbPerSec: cfg.decayRateDbPerSec,
-      })
-    },
-
     setHeatmapConfig(cfg: HeatmapConfig): void {
       currentHeatmapConfig = { ...cfg }
 
@@ -274,10 +267,6 @@ export function createSpectrumVizController(config: SpectrumVizControllerConfig)
 
     resetAverages(): void {
       analyzer.resetAverages()
-    },
-
-    isPolling(): boolean {
-      return pollingInterval !== null
     },
 
     destroy(): void {

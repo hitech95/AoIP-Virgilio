@@ -304,9 +304,6 @@ export function initializeFromConfig(cfg: CamillaDSPConfig): boolean {
 
     extractForSelection()
 
-    console.log(
-      `Loaded ${eq.bands.length} EQ bands from block ${eq.selectedStepIndex}, preamp ${eq.preampGain.toFixed(1)} dB`
-    )
     return true
   } catch (error) {
     console.error('Error initializing from config:', error)
@@ -333,33 +330,6 @@ export async function selectStep(pipelineIndex: number): Promise<void> {
   eq.selectedBandIndex = null
   extractForSelection()
 }
-
-/**
- * Clear EQ state
- */
-export function clearEqState(): void {
-  debouncedUpload.cancel()
-  editsPending = false
-  localRevision++
-  uploadQueue = Promise.resolve()
-  lastConfig = null
-  extractedData = null
-  eq.steps = []
-  eq.selectedStepIndex = null
-  eq.bands = []
-  eq.filterNames = []
-  eq.bandOrderNumbers = []
-  eq.preampGain = 0
-  eq.preampAvailable = false
-  eq.selectedBandIndex = null
-  eq.uploadStatus = { state: 'idle' }
-  soloSessionActive = false
-  soloSnapshot = null
-  eq.soloActiveBandIndex = null
-}
-
-// Actions (mutations with proper clamping/rounding + debounced upload)
-
 export function setBandFreq(index: number, freq: number) {
   if (eq.selectedStepIndex === null) return
   const updated = [...eq.bands]
@@ -580,12 +550,6 @@ export async function addOrphanFilter(filterName: string): Promise<boolean> {
 let soloSessionActive = false
 /** Snapshot of the selected block's names[], captured at session start. */
 let soloSnapshot: { stepIndex: number; names: string[] } | null = null
-
-/** Returns whether a solo-edit session is currently active. */
-export function isSoloSessionActive(): boolean {
-  return soloSessionActive
-}
-
 /**
  * Start a solo-edit session: mute every OTHER band of the selected block,
  * upload the temporary config directly (no debounce), and set the flag.

@@ -8,39 +8,6 @@ $mobile-filter-height: 460px;
 .eq-page {
   box-sizing: border-box;
   height: var(--eq-page-h, auto);
-
-  // Legacy BEM selectors retained for alternate EQ layouts.
-  &__header {
-    flex: 0 0 auto;
-    padding: 0;
-  }
-
-  &__body {
-    flex: 1;
-    min-height: 0;
-    gap: $layout-gap;
-  }
-
-  &__chart-aside.el-aside {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
-  }
-
-  &__filters-container {
-    min-width: 0;
-    min-height: 0;
-  }
-
-  &__filters-main {
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    padding: 0;
-  }
 }
 
 .eq-alert { margin-bottom: $layout-gap; }
@@ -69,56 +36,9 @@ $mobile-filter-height: 460px;
 
 .bands-empty { margin: auto; }
 
-.eq-toolbar {
-  flex: 0 0 auto;
-  --el-card-padding: 0;
-
-  .toolbar-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
-
-  .tb-glyph { color: var(--el-color-primary); }
-
-  .tb-label {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    color: var(--el-text-color-primary);
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
-  .tb-select {
-    width: $toolbar-select-width;
-    max-width: 100%;
-  }
-
-  .tb-spacer { flex: 1; }
-}
-
-.viz-card {
-  flex: 0 0 auto;
-  margin-top: $layout-gap;
-}
-
 @media (max-width: $mobile-breakpoint) {
   .eq-page {
     height: auto;
-
-    &__body {
-      flex: 0 0 auto;
-      flex-direction: column;
-    }
-
-    &__chart-aside {
-      width: 100% !important;
-      flex: 0 0 auto;
-    }
-
-    &__filters-main { min-height: $mobile-filter-height; }
   }
 
   .bands-col {

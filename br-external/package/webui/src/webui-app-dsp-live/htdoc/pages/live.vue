@@ -85,8 +85,9 @@ export default {
     }, 5000)
 
     // Development-only live reload (see scripts/webui/; keep the eq-dev
-    // query name for continuity with the existing tooling)
-    if (new URLSearchParams(window.location.search).has('eq-dev')) {
+    // query name for continuity with the existing tooling). Compiled out
+    // of production bundles.
+    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('eq-dev')) {
       let version = null
       this._devReloadTimer = setInterval(() => {
         void fetch(`/views/live.version?_=${Date.now()}`, { cache: 'no-store' })

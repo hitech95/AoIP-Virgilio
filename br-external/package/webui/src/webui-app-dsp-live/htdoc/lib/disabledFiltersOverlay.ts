@@ -81,17 +81,6 @@ export function saveDisabledFilters(state: DisabledFiltersState): void {
 }
 
 /**
- * Clear all disabled filters
- */
-export function clearDisabledFilters(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY)
-  } catch (error) {
-    console.error('Error clearing disabled filters:', error)
-  }
-}
-
-/**
  * Mark filter as disabled (adds to location list)
  */
 export function markFilterDisabled(filterName: string, stepKey: string, index: number): void {
@@ -118,15 +107,6 @@ export function markFilterDisabled(filterName: string, stepKey: string, index: n
 }
 
 /**
- * Mark filter as enabled globally (remove all locations from disabled list)
- */
-export function markFilterEnabled(filterName: string): void {
-  const state = loadDisabledFilters()
-  delete state.disabled[filterName]
-  saveDisabledFilters(state)
-}
-
-/**
  * Mark filter as enabled for a specific step (remove that step's location only)
  */
 export function markFilterEnabledForStep(filterName: string, stepKey: string): void {
@@ -144,14 +124,6 @@ export function markFilterEnabledForStep(filterName: string, stepKey: string): v
   }
 
   saveDisabledFilters(state)
-}
-
-/**
- * Check if filter is disabled (in any step)
- */
-export function isFilterDisabled(filterName: string): boolean {
-  const state = loadDisabledFilters()
-  return filterName in state.disabled && state.disabled[filterName].length > 0
 }
 
 /**
@@ -181,94 +153,3 @@ export function getDisabledFilterLocations(filterName: string): DisabledFilterLo
   return state.disabled[filterName] || []
 }
 
-/**
- * Remove all disabled filter locations for a specific step
- */
-export function removeDisabledLocationsForStep(stepKey: string): void {
-  const state = loadDisabledFilters()
-  const updated: Record<string, DisabledFilterLocation[]> = {}
-
-  for (const [filterName, locations] of Object.entries(state.disabled)) {
-    const filtered = locations.filter((loc) => loc.stepKey !== stepKey)
-    if (filtered.length > 0) {
-      updated[filterName] = filtered
-    }
-  }
-
-  state.disabled = updated
-  saveDisabledFilters(state)
-}
-
-/**
- * Remap disabled filter step indices after pipeline reorder
- */
-export function remapDisabledFiltersAfterPipelineReorder(fromIndex: number, toIndex: number): void {
-  if (fromIndex === toIndex) {
-    return
-  }
-
-  const state = loadDisabledFilters()
-  const updated: Record<string, DisabledFilterLocation[]> = {}
-
-  const computeNewIndex = (oldIndex: number): number => {
-    if (oldIndex === fromIndex) {
-      return toIndex
-    } else if (fromIndex < toIndex) {
-      if (oldIndex > fromIndex && oldIndex <= toIndex) {
-        return oldIndex - 1
-      }
-    } else {
-      if (oldIndex >= toIndex && oldIndex < fromIndex) {
-        return oldIndex + 1
-      }
-    }
-    return oldIndex
-  }
-
-  for (const [filterName, locations] of Object.entries(state.disabled)) {
-    updated[filterName] = locations.map((location) => {
-      const match = location.stepKey.match(/^Filter:ch(.+):idx(\d+)$/)
-      if (!match) {
-        return location
-      }
-
-      const channels = match[1]
-      const oldStepIndex = parseInt(match[2], 10)
-      const newStepIndex = computeNewIndex(oldStepIndex)
-
-      const newStepKey = `Filter:ch${channels}:idx${newStepIndex}`
-
-      return { ...location, stepKey: newStepKey }
-    })
-  }
-
-  state.disabled = updated
-  saveDisabledFilters(state)
-}
-
-/**
- * Remap disabled filter step key after Filter step channels change
- */
-export function remapDisabledFiltersAfterFilterStepChannelsChange(
-  oldStepKey: string,
-  newStepKey: string
-): void {
-  if (oldStepKey === newStepKey) {
-    return
-  }
-
-  const state = loadDisabledFilters()
-  const updated: Record<string, DisabledFilterLocation[]> = {}
-
-  for (const [filterName, locations] of Object.entries(state.disabled)) {
-    updated[filterName] = locations.map((location) => {
-      if (location.stepKey === oldStepKey) {
-        return { ...location, stepKey: newStepKey }
-      }
-      return location
-    })
-  }
-
-  state.disabled = updated
-  saveDisabledFilters(state)
-}

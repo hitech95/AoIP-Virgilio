@@ -322,10 +322,6 @@ export default {
     gain(f) {
       return f.gain != null ? `${f.gain} dB` : '—'
     },
-    sourceLabel(s) {
-      return s === '0' || s === '1' ? `${this.$t('Channel')} ${s}`
-        : s === 'mix' ? this.$t('Mix (L+R)/2') : s
-    },
     linToDb(g) {
       g = +g
       return (!g || g < 1e-5) ? -150 : +(20 * Math.log10(g)).toFixed(2)
@@ -455,26 +451,6 @@ export default {
       this.mixSel[m.name] = 'custom'
       this.cellDialog = false
     },
-    /* uniform offset over one output's cells (relative to pristine) */
-    auxTrim(name, dest) {
-      const p = this.mixPristine[name]
-      if (!p) return 0
-      const cur = this.mixEdits[name].filter(r => String(r.dest) === String(dest))
-      const old = p.rows.filter(r => String(r.dest) === String(dest))
-      if (!cur.length || cur.length !== old.length) return 0
-      const d = cur[0].dB - old[0].dB
-      return Math.max(-24, Math.min(24, Math.round(d * 2) / 2))
-    },
-    setAuxTrim(name, dest, v) {
-      const p = this.mixPristine[name]
-      if (!p) return
-      for (const row of this.mixEdits[name]) {
-        if (String(row.dest) !== String(dest)) continue
-        const old = p.rows.find(r => String(r.dest) === String(dest) && String(r.source) === String(row.source))
-        if (old) row.dB = Math.round((old.dB + v) * 100) / 100
-      }
-      this.mixSel[name] = 'custom'
-    },
     /* output labels: click the channel tag to rename (UCI out_label) */
     editingOut(name, idx) {
       return this.editOutMixer === name && String(this.editOutIdx) === String(idx)
@@ -583,8 +559,6 @@ export default {
 .slot-card, .saved-note { margin-bottom: 12px; }
 .general-form { max-width: 560px; }
 .hint { color: #888; font-size: 12px; margin-left: 8px; }
-.gains-table { margin-top: 12px; max-width: 480px; }\n.faders-form { max-width: 480px; }
-.main-fader { display: flex; align-items: center; gap: 16px; max-width: 480px; }
 .mixer-matrix { border-collapse: collapse; margin-top: 12px; }
 .mixer-matrix .matrix-cell {
   border: 1px solid var(--el-border-color-lighter);
@@ -617,14 +591,9 @@ export default {
 .fader-aux .fader-col .el-slider { margin-left: 14px; }
 .label-tag { cursor: pointer; }
 .mixer-hint { margin: 10px 0 4px; }
-.label-note { margin: 4px 0; }
-.fader { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .fader-label { font-size: 12px; color: var(--el-text-color-secondary); }
-.label-rows { margin: 8px 0; }
-.label-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; flex-wrap: wrap; }
 .ch-label { width: 110px; }
 .mixer-meta { margin-bottom: 4px; }
-.mx-icon { width: 14px; height: 14px; fill: var(--el-text-color-secondary); }
 /* fixed label column: the table must not change width in edit mode */
 .mixer-matrix .matrix-idx { width: 96px; min-width: 96px; max-width: 96px; }
 .mixer-matrix .matrix-idx .ch-label { width: 88px; }

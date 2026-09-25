@@ -57,8 +57,6 @@ import {
   regionSegments,
   generateFrequencyTicks,
 } from '../../lib/eqPlotMath'
-import type { FilterStepInfo } from '../../lib/camillaEqMapping'
-
 const plotFreqMax = computed(() => Math.min(30000, eq.sampleRate / 2))
 const octaveSegs = computed(() => octaveSegments(plotFreqMax.value))
 const regionSegs = computed(() => regionSegments(plotFreqMax.value))
@@ -70,9 +68,5 @@ const cellStyle = (s: { f1: number; f2: number }) => ({
   width: `calc(${xPct(s.f2) - xPct(s.f1)}% - 4px)`,
 })
 const majorTicks = computed(() => generateFrequencyTicks(plotFreqMax.value).majors)
-
-const currentStep = computed<FilterStepInfo | null>(
-  () => eq.steps.find((s) => s.index === eq.selectedStepIndex) ?? null
-)
 
 </script>

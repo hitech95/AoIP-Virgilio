@@ -86,7 +86,7 @@ export default {
       nodes: [], edges: [], error: '', config: null, policy: [], schema: null,
       orphanTarget: {},
       chLabels: { in: [], out: [] },
-      selected: null, selectedId: null, unprotected: false, applying: false,
+      selected: null, unprotected: false, applying: false,
       disabledFilters: {}, refreshing: false
     }
   },
@@ -355,18 +355,16 @@ export default {
       delete this.disabledFilters[orphan.name]
       this.config = { ...this.config }
       await this.apply()
-      this.$set ? null : (this.orphanTarget = { ...this.orphanTarget, [orphan.name]: undefined })
+      this.orphanTarget = { ...this.orphanTarget, [orphan.name]: undefined }
     },
     selectNode({ node }) {
       if (!node.selectable || node.data.kind === 'endpoint' || node.data.kind === 'locked') return
-      this.selectedId = node.id
       const index = +node.id.replace('stage-', '')
       this.selected = { id: node.id, data: node.data, step: this.config.pipeline[index] }
       this.buildGraph()
     },
     clearSelection() {
       this.selected = null
-      this.selectedId = null
       this.buildGraph()
     },
     filter(name) { return this.config?.filters?.[name] ?? this.disabledFilters[name]?.filter ?? loadSession()[name]?.def },

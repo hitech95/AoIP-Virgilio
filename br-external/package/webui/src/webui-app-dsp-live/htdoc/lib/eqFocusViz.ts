@@ -46,7 +46,6 @@ export function generatePeakingFillPath(band: EqBand, options: AreaOptions): str
   } = options
 
   const f0 = band.freq
-  const Q = band.q
 
   const sampleMin = Math.max(freqMin, f0 / 3)
   const sampleMax = Math.min(freqMax, sampleRate / 2, f0 * 3)
@@ -119,8 +118,6 @@ export function generatePassFilterTint(
 
   const f0 = band.freq
   const Q = band.q
-  const x0 = freqToX(f0, width, freqMin, freqMax)
-  void x0
 
   const tintWidthOctaves = 1.5 / Math.sqrt(Q)
   const fLeft = f0 / Math.pow(2, tintWidthOctaves / 2)

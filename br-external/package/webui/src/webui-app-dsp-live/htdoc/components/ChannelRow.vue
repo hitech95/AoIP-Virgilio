@@ -9,15 +9,7 @@
 export default {
   props: {
     label: String,
-    channels: { type: Array, default: () => [] },
-    /* optional per-index mixer labels; falls back to Ch{n} */
-    labels: { type: Array, default: () => [] }
-  },
-  methods: {
-    chName(channel) {
-      const l = this.labels?.[channel]
-      return (l && String(l).trim()) || `Ch ${channel}`
-    }
+    channels: { type: Array, default: () => [] }
   }
 }
 </script>

@@ -1,5 +1,5 @@
 /* mods_dsp -- BE module of webui-app-dsp: the generic/basic DSP
- * configuration surface. The FE modules webui-app-{eq,pipeline,filters}
+ * configuration surface. The FE modules webui-app-dsp + webui-app-dsp-live
  * depend on this module (see dsp.uc).
  *
  * Built over dsp.uc (protected pipeline: manifest-driven slots,

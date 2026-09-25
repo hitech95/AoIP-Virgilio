@@ -32,14 +32,6 @@ export const GAIN_CAPABLE_TYPES: BiquadType[] = [
   'Notch',
 ]
 
-/** Filter types that only use Q (no gain) */
-export const Q_ONLY_TYPES: BiquadType[] = [
-  'Highpass',
-  'Lowpass',
-  'Bandpass',
-  'Allpass',
-]
-
 /** Loose filter definition shape (subset manipulated by the EQ editor) */
 export interface FilterDef {
   type: string

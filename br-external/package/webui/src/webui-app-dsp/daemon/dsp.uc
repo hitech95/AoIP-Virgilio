@@ -1,8 +1,8 @@
 /*
  * dsp -- BE module for webui-app-dsp: generic/basic DSP configuration
  * (settings, protected-pipeline editing, mixers, runtime pipeline map).
- * The FE modules webui-app-{eq,pipeline,filters} depend on this module
- * (they call dsp.* over RPC; nothing else provides it).
+ * The FE apps webui-app-dsp (configuration/profiles) and webui-app-dsp-live
+ * depend on this module (they call dsp.* over RPC; nothing else does).
  *
  * Protected-pipeline editing (plan/webui.md §9): filters/mix on the uci
  * subchain model. Three validation layers:

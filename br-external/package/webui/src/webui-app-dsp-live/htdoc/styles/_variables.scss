@@ -57,21 +57,3 @@ html.dark {
   --band-10: hsl(0 0% 72%);
 }
 
-/* Band-scoped accent variables (used by band cards and plot tokens) */
-.eq-page .band {
-  --band-color: var(--band-1);
-  --band-ink: color-mix(in srgb, var(--band-color) 70%, var(--el-text-color-primary) 30%);
-  --band-muted: color-mix(in srgb, var(--band-color) 18%, transparent);
-}
-
-/* Shared filter-type icon (band cards + type picker) */
-.eq-page .icon {
-  width: 20px;
-  height: 20px;
-  color: var(--band-ink);
-  opacity: 0.95;
-}
-
-.eq-page .band[data-enabled='false'] .icon {
-  opacity: 0.55;
-}

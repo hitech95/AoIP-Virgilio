@@ -356,7 +356,6 @@ export default {
       if (!r) return '—'
       const db = linearToDb(this.routeLin(r))
       if (!Number.isFinite(db) || db <= -99) return '-∞'
-      if (db <= -0.005 && db >= -99) return String(+(db.toFixed(2)))
       return String(+(db.toFixed(2)))
     },
     destMuted(m, dest) {
@@ -611,7 +610,6 @@ export default {
   visibility: hidden;
 }
 
-.fader-hint,
 .vol-fader .fader-label {
   color: var(--el-text-color-secondary);
 }
@@ -632,9 +630,6 @@ export default {
 
 .fader-value {
   flex-shrink: 0;
-}
-
-.fader-value {
   min-width: 72px;
   text-align: center;
 }

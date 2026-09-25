@@ -245,10 +245,6 @@ function onQChange(v: number | undefined) {
   flex: 0 0 24px;
 }
 
-.order-icon {
-  flex: 0 0 24px;
-}
-
 .type-btn {
   width: 30px;
   height: 30px;
