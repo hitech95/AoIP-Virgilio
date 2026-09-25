@@ -141,6 +141,11 @@ channels. `option user_gains '1'` marks the mixer's route **gains as
 free user state** (source-mix selection via the websocket — 100% ch0 /
 100% ch1 / (ch0+ch1)/2 are just gain presets); without it, or without a
 protected pipeline, the mixer is fully locked by the manifest.
+Extra free route fields are opt-in through `list allow` (`gain` is
+always implied; `mute` is the only other value today — it lets the live
+matrix mute/unmute an output). The allow list is carried into the
+manifest, so uploads that change non-allowed fields are rejected by
+camilladsp; the web UI disables the corresponding controls.
 UI-only metadata on the mixer section: `list in_label` / `list out_label`
 (human names for the input/output channels, shown by the web UIs —
 `CH{n}` when unset; camilladsp-genconf ignores them). When the mixer is

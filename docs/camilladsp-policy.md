@@ -55,7 +55,7 @@ Notes:
 | region | policy applies | what is enforced |
 |---|---|---|
 | `devices` section | implicitly locked, always | full hash: samplerate, chunksize, capture/playback — device changes reroute audio, never a user action |
-| `mixers` section | pinned structure | channels in/out, dests, source routes, `scale`/`inverted`/`mute` flags hashed; **route `gain` is free only for mixers marked `user_gains`** (below) — unmarked mixers are hashed gains included (fully locked) |
+| `mixers` section | pinned structure | channels in/out, dests, source routes, `scale`/`inverted` flags hashed; for mixers marked `user_gains` the fields in the mixer's allow list are free (`gain` always; `mute` opt-in via `list allow` — below); unmarked mixers are hashed gains included (fully locked) |
 | `pipeline` steps of a `locked` sub chain | `locked` | step-by-step equality + content hash of the run; a flipped `bypassed: true` is a protection bypass and is rejected |
 | `pipeline` steps of a `child`/`free` sub chain | editable slot | Filter steps only, from the allow list, on owned channels, ≤ `max_steps`, after the group placeholder |
 | `processors` section / Processor steps | forbidden | rejected outright when a manifest is active (Compressor/NoiseGate/RACE cannot be spliced in) |
@@ -85,6 +85,7 @@ Notes:
 | option | description |
 |---|---|
 | `user_gains '1'` | marks the mixer's route **gains as free user state** — the source-mix selection (100% ch0 / 100% ch1 / (ch0+ch1)/2) is a pure gain preset. Structure stays pinned. Without it the mixer is fully locked, gains included. |
+| `list allow` | extra free route fields for a `user_gains` mixer (`gain` always implied; `mute` is the only other value today — enables the live-matrix destination mutes). genconf renders it into the policy (`mixer_allow`) and the manifest, so the validator accepts exactly those fields; anything else is rejected. Default: `[gain]`. |
 
 ### The allow list
 
@@ -154,6 +155,7 @@ respawned daemon, never a protection bypass).
 |---|---|
 | add/edit/remove own EQ in the slot (allowed type, owned channel, after the placeholder, ≤ max_steps) | **accepted** |
 | change route gains of a `user_gains` mixer (source mix) | **accepted** |
+| mute/unmute a destination of a `user_gains` mixer (route or source `mute`) | **accepted** only when the mixer's allow list grants `mute`; otherwise rejected |
 | swap editable groups within the same slot | **accepted** |
 | relocate a `free` group into an allowed gap | **accepted** |
 | edit/delete/move/`bypass` a locked step, its FIR path, its limiter | rejected |
