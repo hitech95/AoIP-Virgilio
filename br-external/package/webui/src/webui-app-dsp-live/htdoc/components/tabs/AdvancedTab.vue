@@ -1,8 +1,6 @@
 <template>
-  <section class="pipeline-page">
+  <section v-show="active" class="pipeline-page">
     <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
-    <el-alert type="info" :closable="false" show-icon
-      :title="unprotected ? $t('Unprotected configuration: live WebSocket controls are enabled.') : $t('Protected configuration: only policy-exposed controls are enabled.')" />
 
     <VueFlow v-if="nodes.length" :nodes="nodes" :edges="edges" :nodes-draggable="false"
       :nodes-connectable="false" :elements-selectable="true" :fit-view-on-init="true"
@@ -53,17 +51,20 @@
         @remove-source="removeSource" @add-source="addSource" @save-label="saveBlockLabel" />
     </div>
   </section>
+
 </template>
 
 <script>
 import { VueFlow } from '@vue-flow/core'
 import { Controls } from '@vue-flow/controls'
 import { Background } from '@vue-flow/background'
-import PipelineNode from '../components/PipelineNode.vue'
-import FilterBlockEditor from '../components/FilterBlockEditor.vue'
-import MixerBlockEditor from '../components/MixerBlockEditor.vue'
-import '../styles/pipeline.scss'
-import { sessionDisable, sessionForget, reconcileSession, loadSession, sessionTypeOf } from '../lib/filterSession'
+import PipelineNode from '../PipelineNode.vue'
+import FilterBlockEditor from '../FilterBlockEditor.vue'
+import MixerBlockEditor from '../MixerBlockEditor.vue'
+import '../../styles/pipeline.scss'
+import { sessionDisable, sessionForget, reconcileSession, loadSession, sessionTypeOf } from '../../lib/filterSession'
+import * as dsp from '../../dsp'
+import { initializeFromConfig } from '../../stores/eqStore'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/controls/dist/style.css'
 
@@ -71,15 +72,22 @@ const FILTER_TYPES = [
   'Peaking', 'Highpass', 'Lowpass', 'Highshelf', 'Lowshelf', 'Notch', 'Allpass'
 ].map(value => ({ value, label: value }))
 
+/* Advanced tab of the Live page (the former pipeline page). Uses the
+ * page-owned dsp.ts websocket (no private connection); refreshes on
+ * every activation so edits made in the EQ tab are picked up. */
 export default {
+  name: 'AdvancedTab',
   components: { VueFlow, Controls, Background, PipelineNode, FilterBlockEditor, MixerBlockEditor },
+  props: {
+    active: { type: Boolean, default: false }
+  },
   data() {
     return {
-      nodes: [], edges: [], error: '', ws: null, config: null, policy: [], schema: null,
+      nodes: [], edges: [], error: '', config: null, policy: [], schema: null,
       orphanTarget: {},
       chLabels: { in: [], out: [] },
       selected: null, selectedId: null, unprotected: false, applying: false,
-      disabledFilters: {}, sessionTimer: null
+      disabledFilters: {}, refreshing: false
     }
   },
   computed: {
@@ -134,55 +142,55 @@ export default {
         const m0 = mix?.mixers?.[0]
         this.chLabels = { in: m0?.in_label ?? [], out: m0?.out_label ?? [] }
       } catch { this.chLabels = { in: [], out: [] } }
-      await this.connect()
-      this.sessionTimer = setInterval(() => this.checkSession(), 5000)
     } catch (error) { this.error = error?.message ?? String(error) }
+    // first refresh as soon as the page-owned connection is up
+    this._stopConn = this.$watch(() => dsp.connectionState.value, state => {
+      if (state === 'connected' && !this.config) this.refresh()
+    }, { immediate: true })
   },
-  unmounted() { clearInterval(this.sessionTimer); this.ws?.close() },
+  unmounted() { this._stopConn?.() },
+  watch: {
+    // always resync on activation: EQ-tab uploads change the live config
+    active(v) { if (v && dsp.connectionState.value === 'connected') this.refresh() }
+  },
   methods: {
-    connect() {
-      return new Promise((resolve, reject) => {
-        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-        this.ws = new WebSocket(`${protocol}//${location.host}/ws`)
-        this.ws.onopen = async () => { try { await this.refresh(); resolve() } catch (error) { reject(error) } }
-        this.ws.onerror = () => reject(new Error(this.$t('CamillaDSP websocket connection failed')))
-      })
-    },
-    async checkSession() {
-      if (await this.$oui.isAlived()) return
-      clearInterval(this.sessionTimer)
-      this.ws?.close(1000, 'Session expired')
-      this.$router.replace('/login')
-    },
-    request(command, value) {
-      return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error(this.$t('{command} timed out', { command }))), 5000)
-        const onMessage = event => {
-          clearTimeout(timeout)
-          this.ws.removeEventListener('message', onMessage)
-          const reply = JSON.parse(event.data)
-          const body = reply[Object.keys(reply)[0]]
-          if (body?.result === 'Ok') { resolve(body.value); return }
-          const r = body?.result
-          const msg = typeof r === 'string' ? `${command}: ${r}`
-            : (r && typeof r === 'object' && Object.keys(r).length)
-              ? `${command}: ${Object.keys(r)[0]} ${Object.values(r)[0]}`
-              : `${command} failed`
-          reject(new Error(msg))
+    /* camilladsp command over the page-owned connection; the dsp client
+     * rejects with the reply body ({ result }) -- shape the message like
+     * the former private-socket client did. GetConfigJson replies also
+     * refresh the SHARED config cache (dsp.config): the page-level Save
+     * and the other tabs read from it */
+    async request(command, value) {
+      try {
+        const body = await dsp.request(command, value)
+        if (command === 'GetConfigJson') {
+          const v = body?.value
+          dsp.config.value = typeof v === 'string' ? JSON.parse(v) : v
         }
-        this.ws.addEventListener('message', onMessage)
-        this.ws.send(JSON.stringify(value === undefined ? command : { [command]: value }))
-      })
+        return body?.value
+      } catch (r) {
+        const result = r && typeof r === 'object' && 'result' in r ? r.result : r
+        const msg = typeof result === 'string' ? `${command}: ${result}`
+          : (result && typeof result === 'object' && Object.keys(result).length)
+            ? `${command}: ${Object.keys(result)[0]} ${Object.values(result)[0]}`
+            : `${command} failed`
+        throw new Error(msg)
+      }
     },
     async refresh() {
-      const value = await this.request('GetConfigJson')
-      this.config = typeof value === 'string' ? JSON.parse(value) : value
-      // disabled-filter session: entries whose removal was lost get
-      // re-disabled and the reconciled config uploaded once
-      if (reconcileSession(this.config).length)
-        this.request('SetConfigJson', JSON.stringify(this.config)).catch(() => {})
-      this.unprotected = !this.policy.length || this.policy.every(stage => stage.kind === 'free')
-      this.buildGraph()
+      if (this.refreshing) return
+      this.refreshing = true
+      try {
+        const value = await this.request('GetConfigJson')
+        this.config = typeof value === 'string' ? JSON.parse(value) : value
+        // disabled-filter session: entries whose removal was lost get
+        // re-disabled and the reconciled config uploaded once
+        if (reconcileSession(this.config).length)
+          this.request('SetConfigJson', JSON.stringify(this.config)).catch(() => {})
+        this.unprotected = !this.policy.length || this.policy.every(stage => stage.kind === 'free')
+        this.buildGraph()
+      } finally {
+        this.refreshing = false
+      }
     },
     stage(index) { return this.policy.find(stage => stage.index === index) },
     kind(index, step) {
@@ -218,7 +226,7 @@ export default {
         nodes.push({
           id, type: 'pipeline', selectable: kind !== 'locked', position: { x: depth * 280, y: this.channelY(outputs) },
           data: {
-            kind, label: kind === 'locked' ? (stage.name ?? stage.label) : (stage.name ?? (step.description || step.type)), inputs, outputs, detail, chIn, chOut,
+            kind, label: stage.name ?? stage.label ?? step.description ?? step.type, inputs, outputs, detail, chIn, chOut,
             bypassed: !!step.bypassed,
             filterLabels: step.type === 'Filter' ? (step.names ?? []).map(name => this.runtimeFilterLabel(name)) : [],
             destinations: mixer ? mixer.mapping.map(destination => ({ dest: destination.dest, mute: !!destination.mute, sources: destination.sources.map(source => ({ channel: source.channel, mute: !!source.mute, inverted: !!source.inverted })) })) : []
@@ -245,6 +253,7 @@ export default {
     /* camilladsp type -> uci name (mirror of genconf's vocabulary) */
     uciTypeName(f) {
       if (f.type === 'Gain') return 'gain'
+      if (f.type === 'Volume') return 'volume'
       if (f.type === 'Conv') return 'conv'
       if (f.type === 'Delay') return 'delay'
       const map = { Peaking: 'peak', Highshelf: 'hs', Lowshelf: 'ls', Highpass: 'hp',
@@ -424,7 +433,16 @@ export default {
        * without a selected block; the editors gate their own controls */
       if (this.applying) return
       this.applying = true
-      try { const selectedId = this.selected?.id; await this.request('SetConfigJson', JSON.stringify(this.config)); await this.refresh(); const node = this.nodes.find(item => item.id === selectedId); if (node) this.selectNode({ node }) }
+      try {
+        const selectedId = this.selected?.id
+        await this.request('SetConfigJson', JSON.stringify(this.config))
+        await this.refresh()
+        const node = this.nodes.find(item => item.id === selectedId)
+        if (node) this.selectNode({ node })
+        /* keep the EQ tab in sync: its store caches the previous
+         * config and would clobber these edits on the next upload */
+        initializeFromConfig(this.config)
+      }
       catch (error) {
         /* Error instances stringify to '{}' -- keep the real message */
         this.error = typeof error === 'string' ? error : (error?.message ?? String(error))
@@ -436,9 +454,15 @@ export default {
 }
 </script>
 
-<i18n src="../locale.json"/>
+<i18n src="../../locale.json"/>
 
 <style scoped>
+/* the flow canvas: viewport-relative minimum height (fits its
+   content, at least half the screen) */
+.flow {
+  min-height: 50vh;
+}
+
 .orphan-card { margin: 12px 0; }
 .orphan-row { display: flex; align-items: center; gap: 12px; margin: 6px 0; }
 .orphan-name { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }

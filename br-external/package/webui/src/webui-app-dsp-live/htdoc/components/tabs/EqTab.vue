@@ -1,13 +1,13 @@
 <template>
-  <el-container ref="pageEl" class="eq-page" :style="{ '--eq-page-h': pageHeight }">
+  <el-container v-show="active" ref="pageEl" class="eq-page" :style="{ '--eq-page-h': pageHeight }">
 
-    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon class="eq-alert" />
-
-    <el-header height="auto" class="toolbar">
-      <!-- Filter block selector: edits apply to ONE pipeline block at a time.
-           The save button lives here so the block context and its persistence
-           are one control group. -->
-      <el-space>
+    <!-- Toolbar: teleported into the Live page header (right side).
+         Rendered only while this tab is active; the page-level
+         connection tag lives outside the teleport. -->
+    <Teleport v-if="inDoc && active" to="#live-toolbar">
+      <!-- classed for the scoped rules below: the teleport moves this
+           OUTSIDE .eq-page, so .eq-page-prefixed selectors never match -->
+      <el-space class="eq-toolbar">
         <el-icon class="icon" :size="18">
           <Filter />
         </el-icon>
@@ -56,26 +56,13 @@
           </template>
         </el-dropdown>
 
-        <el-button
-          type="primary"
-          :loading="savingToUci"
-          :disabled="eq.selectedStepIndex === null"
-          :title="$t('Persist the selected block\'s live filters to UCI')"
-          @click="saveToUci"
-        >
-          {{ $t('Save') }}
-        </el-button>
-      </el-space>
-
-      <el-space>
         <el-tag v-if="policyTag" :type="policyTag.type" class="policy-tag">
           {{ policyTag.text }}
         </el-tag>
-        <el-tag :type="connected ? 'success' : 'danger'">
-          {{ connected ? $t('Connected') : $t('Offline') }}
-        </el-tag>
       </el-space>
-    </el-header>
+    </Teleport>
+
+    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon class="eq-alert" />
 
     <el-container class="body">
 
@@ -107,15 +94,8 @@
 </template>
 
 <style scoped>
-.eq-page .toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  position: relative;
-  box-sizing: border-box;
-
-  padding: 8px 0;
-  border-bottom: 1px solid var(--el-border-color);
+.eq-page .eq-alert {
+  margin: 0;
 }
 
 .eq-page .body {
@@ -127,21 +107,21 @@
   padding-block: 8px;
 }
 
-.eq-page .toolbar .icon {
+.eq-toolbar .icon {
   color: var(--el-color-primary);
 }
 
-.eq-page .toolbar .title {
+.eq-toolbar .title {
   color: var(--el-text-color-primary);
   white-space: nowrap;
 }
 
-.eq-page .toolbar .select {
+.eq-toolbar .select {
   width: 340px;
   max-width: 100%;
 }
 
-.eq-page .toolbar .policy-tag {
+.eq-toolbar .policy-tag {
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -150,25 +130,25 @@
 
 /* collapsed selection: stretch the EP wrapper so the label-slot content
    justifies exactly like an option row (name left, chips right) */
-.eq-page .select :deep(.el-select__selected-item.el-select__placeholder) {
+.eq-toolbar .select :deep(.el-select__selected-item.el-select__placeholder) {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
   width: 100%;
 }
-.eq-page .select .sel-name {
+.eq-toolbar .select .sel-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.eq-page .toolbar .opt-meta-inline {
+.eq-toolbar .opt-meta-inline {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   margin-left: 6px;
 }
-.eq-page .select .sel-tags {
+.eq-toolbar .select .sel-tags {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -233,31 +213,38 @@
 
 <script lang="ts">
 import { defineComponent, computed, ref, onBeforeUnmount, getCurrentInstance } from 'vue'
-import { Filter, ArrowDown } from '@element-plus/icons-vue'
-import EqPlotCard from '../components/chart/EqPlotCard.vue'
-import VizOptionsBar from '../components/VizOptionsBar.vue'
-import PreampCard from '../components/faders/FaderPreampCard.vue'
-import BandCard from '../components/faders/FaderBandCard.vue'
-import '../styles/eq.scss'
-import { eq, initializeFromConfig, selectStep, flushLiveEdits, addBand, addOrphanFilter } from '../stores/eqStore'
-import { loadSession, sessionTypeOf } from '../lib/filterSession'
-import { initializeVizOptions, setupVizOptionsPersistence } from '../stores/vizOptions'
-import * as dsp from '../dsp'
-import type { FilterStepInfo } from '../lib/camillaEqMapping'
-import { planSlotSave, type FiltersSchema, type PipelineStage } from '../lib/uciSync'
+import { useInDocument } from '../../lib/inDocument'
+import { Filter } from '@element-plus/icons-vue'
+import EqPlotCard from '../chart/EqPlotCard.vue'
+import VizOptionsBar from '../VizOptionsBar.vue'
+import PreampCard from '../faders/FaderPreampCard.vue'
+import BandCard from '../faders/FaderBandCard.vue'
+import '../../styles/eq.scss'
+import { eq, initializeFromConfig, selectStep, addBand, addOrphanFilter } from '../../stores/eqStore'
+import { loadSession, sessionTypeOf } from '../../lib/filterSession'
+import { initializeVizOptions, setupVizOptionsPersistence } from '../../stores/vizOptions'
+import * as dsp from '../../dsp'
+import type { FilterStepInfo } from '../../lib/camillaEqMapping'
+import type { FiltersSchema, PipelineStage } from '../../lib/uciSync'
 
 function scrollBandRail(event: WheelEvent): void {
   const rail = event.currentTarget as HTMLElement
   if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
   if (rail.scrollWidth <= rail.clientWidth + 1) return
-  event.preventDefault()
+  rail.preventDefault()
   rail.scrollLeft += event.deltaY
 }
 
+/* EQ tab of the Live page. The websocket connection, session guard and
+ * connection tag are owned by the Live page; this tab owns the block
+ * selection, band editing, chart and the save-to-UCI action. */
 export default defineComponent({
-  name: 'EqPage',
-  components: { EqPlotCard, VizOptionsBar, PreampCard, BandCard, ArrowDown },
-  setup() {
+  name: 'EqTab',
+  components: { EqPlotCard, VizOptionsBar, PreampCard, BandCard },
+  props: {
+    active: { type: Boolean, default: false },
+  },
+  setup(props) {
     const pageEl = ref<HTMLDivElement | null>(null)
     const error = ref('')
     // $t access inside setup (the shell installs vue-i18n globally; the
@@ -267,10 +254,13 @@ export default defineComponent({
     // (measured from the Oui scroll container; small screens fall back to auto).
     const pageHeight = ref('auto')
 
+    // Teleports into the Live header must wait until the shell attached
+    // this view to the document (see lib/inDocument.ts)
+    const inDoc = useInDocument(() => (pageEl.value?.$el ?? pageEl.value) as HTMLElement | null)
+
     // UCI policies: pipeline stage classification + editable slot schema.
     const pipelineStages = ref<PipelineStage[]>([])
     const filtersSchema = ref<FiltersSchema | null>(null)
-    const savingToUci = ref(false)
 
     const selectedStep = computed<number | null>({
       get: () => eq.selectedStepIndex,
@@ -278,8 +268,6 @@ export default defineComponent({
         if (v !== null) void selectStep(v)
       },
     })
-
-    const connected = computed(() => dsp.connectionState.value === 'connected')
 
     const stageOf = (index: number | null): PipelineStage | null =>
       index === null ? null : pipelineStages.value.find((s) => s.index === index) ?? null
@@ -391,11 +379,28 @@ export default defineComponent({
     let ro: ResizeObserver | null = null
 
     const measure = () => {
-      if (scrollWrap) {
-        pageHeight.value = `${Math.max(560, scrollWrap.clientHeight)}px`
-      } else {
+      const el = (pageEl.value?.$el ?? pageEl.value) as HTMLElement | null
+      if (!scrollWrap || !el) {
         pageHeight.value = 'auto'
+        return
       }
+      const elRect = el.getBoundingClientRect()
+      // v-show hides the tab with display:none: rects collapse to zero
+      if (!elRect.width && !elRect.height) return
+      // The page shares the Oui scroll content with the Live header above
+      // it: fill only the space that is actually left, so the tab never
+      // pushes the outer container into scrolling. Below the graph's
+      // 560px floor the page grows and the outer scrollbar is expected.
+      const wrapRect = scrollWrap.getBoundingClientRect()
+      const topOffset = elRect.top - wrapRect.top + scrollWrap.scrollTop
+      const view = el.parentElement
+      let below = 0
+      if (view) {
+        const cs = getComputedStyle(view)
+        below = parseFloat(cs.paddingBottom) + (parseFloat(cs.borderBottomWidth) || 0)
+      }
+      const avail = scrollWrap.clientHeight - topOffset - below
+      pageHeight.value = `${Math.max(560, Math.floor(avail))}px`
     }
 
     const loadPolicies = async (oui: any) => {
@@ -418,16 +423,15 @@ export default defineComponent({
       ro?.disconnect()
       ro = null
       window.removeEventListener('resize', measure)
-      dsp.disconnect()
     })
 
     return {
       pageEl,
+      inDoc,
       error,
       pageHeight,
       eq,
       selectedStep,
-      connected,
       selectStep,
       stepName,
       selectedStepInfo,
@@ -442,7 +446,6 @@ export default defineComponent({
       scrollBandRail,
       pipelineStages,
       filtersSchema,
-      savingToUci,
       policyTag,
       // exposed for the Options-API hooks below
       _measure: measure,
@@ -450,6 +453,7 @@ export default defineComponent({
       _scrollWrapRef: () => scrollWrap,
       _setScrollWrap: (el: HTMLElement | null) => (scrollWrap = el),
       _setRo: (o: ResizeObserver | null) => (ro = o),
+      _setChannelLabels: (l: string[]) => (channelLabels.value = l),
     }
   },
   mounted() {
@@ -458,16 +462,11 @@ export default defineComponent({
     initializeVizOptions()
     self._cleanupVizPersistence = setupVizOptionsPersistence()
 
-    // Fill the available viewport inside the Oui scroll container
-    const pageElement = (self.pageEl?.$el ?? self.pageEl) as HTMLElement | null
-    self._setScrollWrap(pageElement?.closest('.el-scrollbar__wrap') as HTMLElement | null)
-    self._measure()
-    if (self._scrollWrapRef()) {
-      const ro = new ResizeObserver(self._measure)
-      ro.observe(self._scrollWrapRef())
-      self._setRo(ro)
-    }
-    window.addEventListener('resize', self._measure)
+    // Fill the available viewport inside the Oui scroll container.
+    // The tab may still be hidden (display:none) at mount when the user
+    // lands on the Advanced tab first: re-measure on every activation.
+    self._remeasure = () => self._measure()
+    if (self.active) self._measureNow()
 
     // UCI policies for the save feature (daemon-side classification of every
     // runtime pipeline index + the editable slot schema).
@@ -476,11 +475,11 @@ export default defineComponent({
     // mixer channel labels for the chips (best effort)
     this.$oui.call('dsp', 'get_mixers').then(r => {
       const l = r?.mixers?.[0]?.in_label
-      if (Array.isArray(l)) channelLabels.value = l
+      if (Array.isArray(l)) self._setChannelLabels(l)
     }).catch(() => {})
 
-    // Connect to the CamillaDSP websocket proxy and load the running config
-    dsp.connect()
+    // Load the running config into the EQ store whenever the (page-owned)
+    // websocket connection establishes.
     self._stopConn = this.$watch(
       () => dsp.connectionState.value,
       async (state: string) => {
@@ -490,128 +489,42 @@ export default defineComponent({
             const cfg = await dsp.downloadConfig()
             if (cfg) initializeFromConfig(cfg)
           } catch (e: any) {
-            self.error = e?.value ?? self.$t('Unable to read CamillaDSP configuration')
+            self.error = e?.value ?? this.$t('Unable to read CamillaDSP configuration')
           }
         }
       },
       { immediate: true }
     )
-
-    // Surface upload errors as toasts
-    self._stopUpload = this.$watch(
-      () => eq.uploadStatus,
-      (status: any) => {
-        if (status?.state === 'error') {
-          self.$message?.error?.(
-            self.$t('Upload failed') + (status.message ? `: ${status.message}` : ''))
+  },
+  watch: {
+    active(v: boolean) {
+      // display:none breaks height measurement: re-measure on activation
+      if (v) (this as any)._measureNow?.()
+    },
+  },
+  methods: {
+    _measureNow() {
+      const self = this as any
+      const pageElement = (self.pageEl?.$el ?? self.pageEl) as HTMLElement | null
+      if (!self._scrollWrapRef()) {
+        self._setScrollWrap(pageElement?.closest('.el-scrollbar__wrap') as HTMLElement | null)
+        if (self._scrollWrapRef()) {
+          const ro = new ResizeObserver(self._remeasure)
+          ro.observe(self._scrollWrapRef())
+          self._setRo(ro)
         }
-      },
-      { deep: true }
-    )
-
-    // Session guard: bounce to login when the Oui session expires
-    self._sessionTimer = setInterval(() => {
-      void (async () => {
-        const alive = await self.$oui.isAlived()
-        if (alive) return
-        self.$router.replace('/login')
-      })()
-    }, 5000)
-
-    // Development-only live reload. scripts/webui/watch-eq.sh updates the
-    // version marker inside the running snapshot guest. Keeping this behind a
-    // query flag avoids polling in normal appliance use.
-    if (new URLSearchParams(window.location.search).has('eq-dev')) {
-      let version: string | null = null
-      self._devReloadTimer = setInterval(() => {
-        void fetch(`/views/eq.version?_=${Date.now()}`, { cache: 'no-store' })
-          .then((response) => (response.ok ? response.text() : null))
-          .then((nextVersion) => {
-            if (!nextVersion) return
-            if (version !== null && version !== nextVersion) {
-              window.location.reload()
-              return
-            }
-            version = nextVersion
-          })
-          .catch(() => { })
-      }, 1000)
-    }
+      }
+      self._measure()
+      window.addEventListener('resize', self._remeasure)
+    },
   },
   beforeUnmount() {
     const self = this as any
     self._stopConn?.()
-    self._stopUpload?.()
-    clearInterval(self._sessionTimer)
-    clearInterval(self._devReloadTimer)
     self._cleanupVizPersistence?.()
-    dsp.disconnect()
-  },
-  methods: {
-    /**
-     * Persist the selected block's live filters.
-     * - editable slot present: save_filters validates the slot policy
-     *   (locked chains are never written; allow/max_steps when set).
-     * - policies unset or unavailable: free edit — the daemon writes the
-     *   raw pipeline step (user-owned filters only) with a genconf dry-run.
-     */
-    async saveToUci() {
-      const self = this as any
-      const plan = planSlotSave(
-        self.pipelineStages as PipelineStage[],
-        self.filtersSchema as FiltersSchema | null,
-        eq.selectedStepIndex,
-        eq.bands
-      )
-      if (plan.errors.length) {
-        self.$message?.error?.(plan.errors.join(' '))
-        return
-      }
-
-      const payload = plan.mode === 'free'
-        ? { pipeline: { index: plan.pipelineIndex, filters: plan.steps } }
-        : { steps: { [plan.slot as string]: plan.steps } }
-
-      self.savingToUci = true
-      try {
-        // Commit pending live edits first so the saved state matches the UI.
-        await flushLiveEdits()
-
-        const result = await self.$oui.call('dsp', 'save_filters', payload)
-        if (result?.error) {
-          const message = plan.mode === 'free' && result.error.message === 'pipeline index out of range'
-            ? self.$t('Free edit cannot be persisted: UCI has no pipeline step for this live block. Import the runtime pipeline into UCI first so its topology can be saved safely.')
-            : result.error.message
-          self.$message?.error?.(message)
-          return
-        }
-
-        const target = plan.mode === 'free'
-          ? self.$t('pipeline step {index} (free edit)', { index: plan.pipelineIndex })
-          : self.$t('UCI slot "{slot}"', { slot: plan.slot })
-        self.$message?.success?.(
-          plan.steps.length === 1
-            ? self.$t('Saved {n} filter to {target}', { n: plan.steps.length, target })
-            : self.$t('Saved {n} filters to {target}', { n: plan.steps.length, target })
-        )
-
-        // The daemon rewrote filter sections and reloaded camilladsp:
-        // resync the cached config and refresh the policy view.
-        try {
-          const cfg = await dsp.downloadConfig()
-          if (cfg) initializeFromConfig(cfg)
-        } catch {
-          // Live state stays valid; the next block switch re-extracts.
-        }
-        await self._loadPolicies(self.$oui)
-      } catch (e: any) {
-        self.$message?.error?.(String(e))
-      } finally {
-        self.savingToUci = false
-      }
-    },
+    window.removeEventListener('resize', self._remeasure)
   },
 })
 </script>
 
-<i18n src="../locale.json"/>
+<i18n src="../../locale.json"/>

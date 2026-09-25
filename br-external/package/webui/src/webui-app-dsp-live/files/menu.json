@@ -1,14 +1,8 @@
 {
-    "/dsp/eq": {
-        "title": "EQ",
-        "view": "dsp-live-eq",
+    "/dsp/live": {
+        "title": "Live",
+        "view": "dsp-live-live",
         "index": 20,
-        "locales": { "en": "EQ", "it": "EQ" }
-    },
-    "/dsp/pipeline": {
-        "title": "Pipeline",
-        "view": "dsp-live-pipeline",
-        "index": 30,
-        "locales": { "en": "Pipeline", "it": "Pipeline" }
+        "locales": { "en": "Live", "it": "Live" }
     }
 }
