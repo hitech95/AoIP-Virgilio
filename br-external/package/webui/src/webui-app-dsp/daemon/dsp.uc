@@ -371,6 +371,11 @@ function mixers_get() {
 					mute: (r.mute == "1"), inverted: (r.inverted == "1") });
 		sort(routes, (a, b) => (+a.dest != +b.dest)
 			? (+a.dest - +b.dest) : (+a.source - +b.source));
+		/* free route fields per the policy (gain implied; "mute" gates
+		 * the live-matrix destination mutes) */
+		let allow = filter(map((type(m.allow) == "array") ? m.allow : words(m.allow ?? ""),
+			(a) => lc(`${a}`)), (a) => a == "mute");
+		push(allow, "gain");
 		push(out, {
 			name: m[".name"],
 			state: states[m[".name"]] ?? "custom",
@@ -379,7 +384,8 @@ function mixers_get() {
 			out: +m.out ?? 2,
 			in_label: (type(m.in_label) == "array") ? m.in_label : [],
 			out_label: (type(m.out_label) == "array") ? m.out_label : [],
-			channels_locked: managed[m[".name"]] == 1
+			channels_locked: managed[m[".name"]] == 1,
+			allow: allow
 		});
 	}
 	return { mixers: out };

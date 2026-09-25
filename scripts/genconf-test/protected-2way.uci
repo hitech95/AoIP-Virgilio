@@ -20,6 +20,7 @@ config mixer 'srcmix'
 	option user_gains '1'
 	option in '2'
 	option out '2'
+	list allow 'gain'
 
 config mixroute                # woofer feed = (L+R)/2
 	option mixer 'srcmix'

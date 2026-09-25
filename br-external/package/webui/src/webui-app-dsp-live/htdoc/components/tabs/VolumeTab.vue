@@ -109,7 +109,12 @@
             <el-tooltip v-if="destClips(m, d)" :content="$t('Clipping risk')" placement="top">
               <el-tag type="warning" effect="dark" class="clip-tag">!</el-tag>
             </el-tooltip>
-            <el-button :type="destMuted(m, d) ? 'danger' : 'info'" circle size="small"
+            <el-tooltip v-if="!canMute(m)" :content="$t('Muting is not allowed by the policy')" placement="top">
+              <el-button type="info" circle size="small" disabled>
+                <svg viewBox="0 0 24 24" class="mx-icon-mute"><path d="M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.84 14,18.7V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16C15.5,15.29 16.5,13.76 16.5,12M3,9V15H7L12,20V4L7,9H3Z" /></svg>
+              </el-button>
+            </el-tooltip>
+            <el-button v-else :type="destMuted(m, d) ? 'danger' : 'info'" circle size="small"
               @click="toggleDestMute(m, d)">
               <svg viewBox="0 0 24 24" class="mx-icon-mute"><path d="M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.84 14,18.7V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16C15.5,15.29 16.5,13.76 16.5,12M3,9V15H7L12,20V4L7,9H3Z" /></svg>
             </el-button>
@@ -313,7 +318,7 @@ export default {
             if (!sources.includes(s.channel)) sources.push(s.channel)
         sources.sort((a, b) => a - b)
         const dests = live.mapping.map(d => d.dest).sort((a, b) => a - b)
-        const mx = { name: m.name, mapping: live.mapping, sources, dests }
+        const mx = { name: m.name, mapping: live.mapping, sources, dests, allow: m.allow ?? ['gain'] }
         mixers.push(mx)
         this.mixSel[m.name] = this.deriveSel(mx)
       }
@@ -363,6 +368,10 @@ export default {
     destMuted(m, dest) {
       const d = m.mapping.find(x => x.dest === dest)
       return !!d?.mute
+    },
+    /* muting is a policy capability (mixer allow list) */
+    canMute(m) {
+      return (m.allow ?? ['gain']).includes('mute')
     },
     destClips(m, dest) {
       const d = m.mapping.find(x => x.dest === dest)

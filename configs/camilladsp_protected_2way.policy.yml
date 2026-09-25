@@ -36,3 +36,7 @@ subchains:
 # srcmix route gains are user-selectable (source mix: 100% ch0 /
 # 100% ch1 / (ch0+ch1)/2 are just gain presets). Absent = fully locked.
 user_gains: [srcmix]
+# free route fields per user-gains mixer ("gain" implied; "mute" enables
+# the live-matrix destination mutes)
+mixer_allow:
+  srcmix: [gain]

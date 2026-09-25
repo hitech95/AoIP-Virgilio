@@ -56,6 +56,8 @@ config mixer 'srcmix'
 	option in '2'
 	option out '2'
 	option user_gains '1'
+	list allow 'gain'
+	list allow 'gain'
 
 config mixroute
 	option mixer 'srcmix'

@@ -163,7 +163,8 @@
     "Mute band": "Mute band",
     "Enable band": "Enable band",
     "Unmute": "Unmute",
-    "Band {n} — {type} (change type)": "Band {n} — {type} (change type)"
+    "Band {n} — {type} (change type)": "Band {n} — {type} (change type)",
+    "Muting is not allowed by the policy": "Muting is not allowed by the policy"
   },
   "it": {
     "Filter Block": "Blocco filtri",
@@ -329,6 +330,7 @@
     "Mute band": "Silenzia banda",
     "Enable band": "Abilita banda",
     "Unmute": "Riattiva",
-    "Band {n} — {type} (change type)": "Banda {n} — {type} (cambia tipo)"
+    "Band {n} — {type} (change type)": "Banda {n} — {type} (cambia tipo)",
+    "Muting is not allowed by the policy": "Il silenziamento non è consentito dalla policy"
   }
 }

@@ -138,7 +138,14 @@ function collect(cursor) {
 	for (let s in sections(cursor, "camilladsp", "mixer")) {
 		m.mixers[s[".name"]] = {
 			in: `${s.in ?? ""}`, out: `${s.out ?? ""}`,
-			user_gains: `${s.user_gains ?? ""}`
+			user_gains: `${s.user_gains ?? ""}`,
+			/* free route fields for user_gains mixers ("gain" implied;
+			 * "mute" is the only extra the manifest knows) */
+			allow: filter(
+				map((type(s.allow) == "array") ? s.allow : words(s.allow ?? ""),
+					(a) => lc(`${a}`)),
+				(a) => a == "mute"
+			)
 		};
 		push(m.mixer_order, s[".name"]);
 	}
@@ -594,9 +601,16 @@ function render(m) {
 	let pol = { subchains: subs };
 	let truthy = { "1": true, "yes": true, "on": true, "true": true };
 	let ug = [];
-	for (let n in m.mixer_order)
-		if (truthy[m.mixers[n].user_gains]) push(ug, n);
-	if (length(ug) > 0) pol.user_gains = ug;
+	let mixer_allow = {};
+	for (let n in m.mixer_order) {
+		if (!truthy[m.mixers[n].user_gains]) continue;
+		push(ug, n);
+		mixer_allow[n] = ["gain", ...m.mixers[n].allow];
+	}
+	if (length(ug) > 0) {
+		pol.user_gains = ug;
+		pol.mixer_allow = mixer_allow;
+	}
 
 	return { config: cfg, policy: pol };
 }
