@@ -185,9 +185,12 @@ export default {
         // disabled-filter session: entries whose removal was lost get
         // re-disabled and the reconciled config uploaded once
         if (reconcileSession(this.config).length)
-          this.request('SetConfigJson', JSON.stringify(this.config)).catch(() => {})
+          this.request('SetConfigJson', JSON.stringify(this.config))
+            .catch(() => { this.$message.warning(this.$t('Could not re-apply muted filters')) })
         this.unprotected = !this.policy.length || this.policy.every(stage => stage.kind === 'free')
         this.buildGraph()
+      } catch (e) {
+        this.error = e?.value?.message ?? e?.message ?? String(e)
       } finally {
         this.refreshing = false
       }
@@ -318,17 +321,21 @@ export default {
     },
     async saveBlockLabel(label) {
       if (!this.selected) return
-      const r = await this.$oui.call('dsp', 'set_block_label', {
-        index: this.config.pipeline.indexOf(this.selected.step),
-        label: String(label ?? '').trim()
-      })
-      if (r?.error) this.$message.error(r.error.message)
-      else {
-        this.policy = (await this.$oui.call('dsp', 'get_pipeline')).stages ?? this.policy
-        this.buildGraph()
-        /* re-select so the editor follows the rebuilt node (label) */
-        const node = this.nodes.find(item => item.id === this.selected?.id)
-        if (node) this.selectNode({ node })
+      try {
+        const r = await this.$oui.call('dsp', 'set_block_label', {
+          index: this.config.pipeline.indexOf(this.selected.step),
+          label: String(label ?? '').trim()
+        })
+        if (r?.error) this.$message.error(r.error.message)
+        else {
+          this.policy = (await this.$oui.call('dsp', 'get_pipeline')).stages ?? this.policy
+          this.buildGraph()
+          /* re-select so the editor follows the rebuilt node (label) */
+          const node = this.nodes.find(item => item.id === this.selected?.id)
+          if (node) this.selectNode({ node })
+        }
+      } catch (e) {
+        this.$message.error(e?.message ?? String(e))
       }
     },
     async addOrphan(orphan) {

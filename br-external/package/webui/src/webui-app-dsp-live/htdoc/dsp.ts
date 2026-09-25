@@ -97,8 +97,7 @@ export function connect(): void {
 
   ws.onclose = () => {
     rejectAllPending('Websocket closed')
-    if (connectionState.value !== 'connecting') connectionState.value = 'error'
-    else connectionState.value = 'error'
+    connectionState.value = 'error'
     ws = null
     scheduleReconnect()
   }
@@ -128,9 +127,15 @@ function isOpen(): boolean {
   return !!ws && ws.readyState === WebSocket.OPEN
 }
 
+/* Responses carry no sequence number: they are matched by command name,
+ * so only ONE request may be in flight at a time. The FIFO chain below
+ * serializes every request through the previous one's settlement. */
+let chain: Promise<unknown> = Promise.resolve()
+
 /**
- * Send a command and wait for the matching response.
- * Serialized through a promise chain so responses cannot interleave.
+ * Send a command and wait for the matching response. Serialized: a
+ * request is sent only after the previous one settled, so responses
+ * cannot interleave or be matched by the wrong pending entry.
  */
 export function request<T = any>(command: string, value?: unknown): Promise<T> {
   const run = () =>
@@ -148,7 +153,10 @@ export function request<T = any>(command: string, value?: unknown): Promise<T> {
       ws!.send(JSON.stringify(value === undefined ? command : { [command]: value }))
     })
 
-  return run()
+  const serialized = chain.then(run, run)
+  /* keep the chain alive when a request rejects */
+  chain = serialized.catch(() => {})
+  return serialized
 }
 
 /**

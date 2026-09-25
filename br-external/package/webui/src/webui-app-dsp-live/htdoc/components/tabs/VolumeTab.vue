@@ -212,7 +212,9 @@ export default {
   watch: {
     async active(v) {
       if (v) {
-        await this.reload()
+        try {
+          await this.reload()
+        } catch (e) { this.error = e?.value?.message ?? e?.message ?? String(e) }
         this.startMeters()
       } else {
         this.stopMeters()
@@ -336,6 +338,8 @@ export default {
       if (value && Number.isFinite(Number(value.volume))) {
         this.faders[idx] = Number(value.volume)
         this.faderPositions[idx] = this.dbToPos(Math.max(-60, Math.min(6, Number(value.volume))))
+      } else {
+        this.$message.error(this.$t('Update failed'))
       }
       this.clearUserFader(idx)
     },
@@ -410,19 +414,26 @@ export default {
       return (sameRow && s !== null && h.s === String(s)) || (sameCol && d !== null && h.d === String(d)) ||
              (sameRow && s === null) || (sameCol && d === null)
     },
-    /* apply a new mapping to the running config + local model */
+    /* apply a new mapping to the running config + local model;
+     * resolves false (with a toast) when the upload fails */
     async applyMapping(m, mapping) {
       this.hover = null
       const cfg = JSON.parse(JSON.stringify(dsp.config.value ?? {}))
       const live = cfg.mixers?.[m.name]
-      if (!live) return
+      if (!live) return false
       live.mapping = mapping
-      const confirmed = await dsp.uploadConfig(cfg)
-      if (confirmed && dsp.config.value) {
-        initializeFromConfig(dsp.config.value)
-        /* camilladsp applies asynchronously: sync from the local edit */
-        m.mapping = JSON.parse(JSON.stringify(mapping))
-        this.mixSel[m.name] = this.deriveSel(m)
+      try {
+        const confirmed = await dsp.uploadConfig(cfg)
+        if (confirmed && dsp.config.value) {
+          initializeFromConfig(dsp.config.value)
+          /* camilladsp applies asynchronously: sync from the local edit */
+          m.mapping = JSON.parse(JSON.stringify(mapping))
+          this.mixSel[m.name] = this.deriveSel(m)
+        }
+        return !!confirmed
+      } catch (e) {
+        this.$message.error(this.$t('Update failed') + (e?.value?.message ? `: ${e.value.message}` : ''))
+        return false
       }
     },
     /* presets: 0 / mix / 1 (live); 'custom' only switches mode */
@@ -439,7 +450,8 @@ export default {
           s.gain = v === 'mix' ? 0.5 : (db === 0 ? 1 : 0)
           s.scale = 'linear'
         }
-      await this.applyMapping(m, mapping)
+      const ok = await this.applyMapping(m, mapping)
+      if (!ok) this.mixSel[m.name] = this.deriveSel(m)
     },
     openCell(m, dest, source) {
       this.cellMixer = m

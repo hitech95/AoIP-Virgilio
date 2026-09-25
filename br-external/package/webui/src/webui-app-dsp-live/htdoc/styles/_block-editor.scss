@@ -14,7 +14,7 @@
   }
 
   .editor-section, .destination { margin-top: 10px; border-color: var(--flow-border); background: var(--flow-node-alt); }
-  .editor-section :deep(.el-card__header), .destination :deep(.el-card__header) { border-bottom-color: var(--flow-border); }
+  .editor-section .el-card__header, .destination .el-card__header { border-bottom-color: var(--flow-border); }
   .source-table { --el-table-border-color: var(--flow-border); --el-table-header-bg-color: var(--flow-canvas); --el-table-tr-bg-color: var(--flow-node); --el-table-row-hover-bg-color: var(--el-fill-color); --el-table-text-color: var(--flow-text); --el-table-header-text-color: var(--flow-muted); width: 100%; }
   .source-table .el-select, .source-table .el-input-number { width: 100%; min-width: 0; }
   .bypass-switch.is-checked, .destination-mute.is-checked { --el-switch-on-color: var(--el-color-warning); }

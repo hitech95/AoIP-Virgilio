@@ -130,10 +130,18 @@ function genconf_check() {
 function camilladsp_txn(apply) {
 	let backup = readfile(CDSP_CONFIG);
 
-	apply();                       /* uci writes + commit */
+	/* a throw inside apply() must not skip the restore below */
+	let failed = null;
+	try {
+		apply();                   /* uci writes + commit */
+	} catch (e) {
+		failed = `uci write failed: ${e}`;
+	}
 
-	let err = genconf_check();
-	if (err) {
+	if (failed == null)
+		failed = genconf_check();
+
+	if (failed) {
 		/* render failed: restore the previous config atomically */
 		if (backup != null)
 			writefile(CDSP_CONFIG, backup);

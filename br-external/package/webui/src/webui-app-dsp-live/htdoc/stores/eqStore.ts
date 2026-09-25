@@ -289,7 +289,7 @@ export function initializeFromConfig(cfg: CamillaDSPConfig): boolean {
     // client), keeping the mute state stable across reloads
     const removed = reconcileSession(cfg)
     if (removed.length) {
-      void dsp.uploadConfig(cfg).catch(() => {})
+      void dsp.uploadConfig(cfg).catch((e) => console.warn('Unable to re-apply muted filters', e))
     }
 
     eq.steps = listFilterSteps(cfg)

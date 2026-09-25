@@ -162,23 +162,14 @@ export function createSpectrumVizController(config: SpectrumVizControllerConfig)
         })
         heatmapLayer.setConfig({ primarySeries })
 
-        renderer.resetOpacity()
+        /* stale feed: draw the last frame dimmed (the renderer clears
+         * each pass, so a fixed alpha here does not accumulate) */
+        if (Date.now() - lastFrameTime > staleThreshold) renderer.fadeOut(0.3)
+        else renderer.resetOpacity()
         renderer.render(staHeatNorm || staNorm || [], { mode: currentSpectrumMode })
       }
     } catch (error) {
       console.error('Spectrum poll error:', error)
-    }
-
-    checkStaleData()
-  }
-
-  /**
-   * Check for stale data and fade out if needed
-   */
-  function checkStaleData(): void {
-    const timeSinceLastFrame = Date.now() - lastFrameTime
-    if (timeSinceLastFrame > staleThreshold) {
-      renderer.fadeOut(0.3)
     }
   }
 
