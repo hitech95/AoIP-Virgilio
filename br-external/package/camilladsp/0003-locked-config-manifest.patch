@@ -63,7 +63,7 @@ new file mode 100644
 index 0000000..a9e7058
 --- /dev/null
 +++ b/src/config/manifest.rs
-@@ -0,0 +1,1591 @@
+@@ -0,0 +1,1592 @@
 +// CamillaDSP - A flexible tool for processing audio
 +// Copyright (C) 2026 Henrik Enquist
 +//
@@ -759,6 +759,7 @@ index 0000000..a9e7058
 +fn translate_allow(name: &str) -> Result<String, String> {
 +    let translated = match name {
 +        "gain" => "Gain",
++        "volume" => "Volume",
 +        "conv" => "Conv",
 +        "delay" => "Delay",
 +        "hp" | "lp" | "hs" | "ls" | "peak" | "notch" | "ap" | "bp" => "Biquad",

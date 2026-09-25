@@ -14,12 +14,12 @@ subchains:
   - policy: child
     name: user_in0
     channels: [0]
-    allow: [gain, peak, hs, ls, notch, ap, bp, hp, lp, conv]
+    allow: [gain, volume, peak, hs, ls, notch, ap, bp, hp, lp, conv]
     max_steps: 8
   - policy: child
     name: user_in1
     channels: [1]
-    allow: [gain, peak, hs, ls, notch, ap, bp, hp, lp, conv]
+    allow: [gain, volume, peak, hs, ls, notch, ap, bp, hp, lp, conv]
     max_steps: 8
   - policy: locked
     name: src_sel

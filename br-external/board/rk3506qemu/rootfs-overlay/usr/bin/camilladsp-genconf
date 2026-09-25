@@ -150,6 +150,8 @@ function collect(cursor) {
 			order: `${s.order ?? ""}`, slope: `${s.slope ?? ""}`,
 			inverted: `${s.inverted ?? ""}`, mute: `${s.mute ?? ""}`,
 			filename: `${s.filename ?? ""}`, clip_limit: `${s.clip_limit ?? ""}`,
+			fader: `${s.fader ?? ""}`, ramp_time: `${s.ramp_time ?? ""}`,
+			limit: `${s.limit ?? ""}`,
 			description: `${s.description ?? ""}`
 		};
 		push(m.filter_order, s[".name"]);
@@ -355,6 +357,14 @@ function render_filter(name, f) {
 			p = { gain: num(f.gain, 0) };
 			if (f.inverted == "1") p.inverted = true;
 			if (f.mute == "1") p.mute = true;
+			break;
+
+		case "volume":
+			if (f.fader == "") fail(sprintf("filter '%s' (volume) needs fader=", name));
+			t = "Volume";
+			p = { fader: f.fader };
+			if (f.ramp_time != "") p.ramp_time = num(f.ramp_time, 0);
+			if (f.limit != "") p.limit = num(f.limit, 0);
 			break;
 
 		case "conv":
