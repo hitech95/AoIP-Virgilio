@@ -1,7 +1,5 @@
 // Response plot: labels, graph surface, gain scale, and draggable band tokens.
 
-$plot-cell-gap: 4px;
-
 .eq-page {
   .plot-card {
     /* The aside reserves the accordion height first; this receives only the
@@ -19,7 +17,9 @@ $plot-cell-gap: 4px;
       flex: 0 0 var(--eq-align-head);
       height: var(--eq-align-head);
       box-sizing: border-box;
-      padding: 0 var(--eq-gainscale-w) 1px 0;
+      /* Inset by the plot border (1px) on both sides: the strips share the
+         exact box the SVG gridlines are drawn in. */
+      padding: 0 calc(var(--eq-gainscale-w) + 1px) 1px 1px;
       display: flex;
       flex-direction: column;
       gap: 2px;
@@ -43,22 +43,29 @@ $plot-cell-gap: 4px;
       height: var(--eq-axis-h);
       box-sizing: border-box;
       min-height: 0;
-      padding: 4px var(--eq-gainscale-w) 0 0;
+      padding: 4px calc(var(--eq-gainscale-w) + 1px) 0 1px;
       overflow: hidden;
     }
   }
 
+  /* The strip rows overlay the plot box exactly: cells are placed with the
+     same log mapping as the gridlines, so no gap/margin may offset them. */
   .octaves,
   .regions {
-    display: grid;
-    gap: $plot-cell-gap;
+    position: relative;
+    height: 16px;
+    min-width: 0;
   }
 
   .cell {
+    position: absolute;
+    top: 0;
     height: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
+    overflow: hidden;
+    white-space: nowrap;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.02em;
@@ -66,6 +73,7 @@ $plot-cell-gap: 4px;
     border-radius: 3px;
     background: var(--el-fill-color);
     color: var(--el-text-color-secondary);
+    box-sizing: border-box;
 
     &.spacer {
       background: transparent;

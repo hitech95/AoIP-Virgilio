@@ -90,32 +90,51 @@ export function formatFreq(freq: number): string {
   return `${freq}`
 }
 
-// ===== OCTAVE/REGION WIDTHS =====
+// ===== OCTAVE/REGION STRIP SEGMENTS =====
+
+export interface PlotSegment {
+  label: string
+  f1: number
+  f2: number
+  spacer?: boolean
+}
+
+const OCTAVE_FREQS = [32.7, 65.41, 130.81, 261.63, 523.25, 1046.5, 2093.0, 4186.01, 8372.02]
 
 /**
- * Calculate octave column widths (musical C starting frequencies)
- * Pre-C1 spacer (10->32.70), C1...C9, Post-C9 spacer (8372.02->30000)
+ * Octave strip segments in frequency space: pre-C1 spacer (10->32.70),
+ * C1..C9, post-C9 spacer down to fMax. Cells at or beyond fMax (Nyquist
+ * at low sample rates) are dropped and the last one is clamped, so the
+ * strip always ends exactly at the plot's right edge.
  */
-export function calcOctaveWidths(fMax = 30000): number[] {
-  const octaveFreqs = [32.7, 65.41, 130.81, 261.63, 523.25, 1046.5, 2093.0, 4186.01, 8372.02]
-  const widths: number[] = []
-  widths.push(Math.log10(octaveFreqs[0]) - Math.log10(10)) // pre-spacer
-  for (let i = 0; i < octaveFreqs.length; i++) {
-    const end = i < octaveFreqs.length - 1 ? octaveFreqs[i + 1] : octaveFreqs[i] * 2
-    widths.push(Math.log10(end) - Math.log10(octaveFreqs[i]))
+export function octaveSegments(fMax = 30000): PlotSegment[] {
+  if (fMax <= 10) return []
+  const first = OCTAVE_FREQS[0]
+  const segs: PlotSegment[] = []
+  if (first > fMax) return [{ label: '', f1: 10, f2: fMax, spacer: true }]
+  segs.push({ label: '', f1: 10, f2: first, spacer: true })
+  for (let i = 0; i < OCTAVE_FREQS.length; i++) {
+    const f1 = OCTAVE_FREQS[i]
+    if (f1 >= fMax) break
+    const end = i < OCTAVE_FREQS.length - 1 ? OCTAVE_FREQS[i + 1] : f1 * 2
+    segs.push({ label: `C${i + 1}`, f1, f2: Math.min(end, fMax) })
   }
-  widths.push(Math.log10(fMax) - Math.log10(octaveFreqs[octaveFreqs.length - 1] * 2)) // post-spacer
-  return widths
+  const lastEnd = segs[segs.length - 1].f2
+  if (lastEnd < fMax) segs.push({ label: '', f1: lastEnd, f2: fMax, spacer: true })
+  return segs
 }
 
 /**
- * Calculate region column widths (explicit frequency boundaries)
+ * Frequency-region strip segments; the last boundary is fMax so the
+ * TREBLE cell always ends with the plot.
  */
-export function calcRegionWidths(fMax = 30000): number[] {
-  const regionBoundaries = [10, 60, 250, 500, 2000, 4000, 6000, fMax]
-  const widths: number[] = []
-  for (let i = 0; i < regionBoundaries.length - 1; i++) {
-    widths.push(Math.log10(regionBoundaries[i + 1]) - Math.log10(regionBoundaries[i]))
+export function regionSegments(fMax = 30000): PlotSegment[] {
+  const bounds = [10, 60, 250, 500, 2000, 4000, 6000, fMax]
+  const labels = ['SUB', 'BASS', 'LOW MID', 'MID', 'HIGH MID', 'PRS', 'TREBLE']
+  const segs: PlotSegment[] = []
+  for (let i = 0; i < labels.length; i++) {
+    if (bounds[i] >= fMax) break
+    segs.push({ label: labels[i], f1: bounds[i], f2: Math.min(bounds[i + 1], fMax) })
   }
-  return widths
+  return segs
 }
