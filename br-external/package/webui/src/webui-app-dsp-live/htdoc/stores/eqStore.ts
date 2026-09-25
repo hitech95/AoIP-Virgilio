@@ -23,7 +23,7 @@ import { debounceCancelable } from '../lib/debounce'
 import * as dsp from '../dsp'
 import { clampFreqHz, clampGainDb, clampQ } from '../lib/eqParamClamp'
 import { disableFilterInStep, enableFilterInStep } from '../lib/filterEnablement'
-import { sessionDisable, sessionForget, reconcileSession, loadSession } from '../lib/filterSession'
+import { reconcileSession, loadSession } from '../lib/filterSession'
 
 // Upload debounce time (ms)
 const UPLOAD_DEBOUNCE_MS = 200
@@ -401,23 +401,15 @@ export async function toggleBandEnabled(index: number): Promise<void> {
   }
 
   try {
-    // Mute/unmute within THIS block only
-    // grayed (session-disabled) bands of this block: index maps 1:1
+    // Mute/unmute within THIS block only. The shared helpers own the
+    // session bookkeeping: a disable moves the definition out of the
+    // live config (camilladsp refuses unreferenced defs) and records
+    // the original position; an enable restores both.
     let updatedConfig
     if (isCurrentlyEnabled) {
       updatedConfig = disableFilterInStep(lastConfig, filterName, stepIndex)
-      // camilladsp refuses configs with unreferenced filter defs: the
-      // definition moves OUT of the live config and into the session
-      const def = updatedConfig.filters?.[filterName]
-      if (updatedConfig.filters) delete updatedConfig.filters[filterName]
-      sessionDisable(filterName, stepIndex, def)
     } else {
-      // restore: put the definition back, then re-add the name
-      const entry = loadSession()[filterName]
-      if (entry?.def && !lastConfig.filters?.[filterName])
-        lastConfig.filters[filterName] = entry.def
       updatedConfig = enableFilterInStep(lastConfig, filterName, stepIndex)
-      sessionForget(filterName)
     }
 
     lastConfig = updatedConfig

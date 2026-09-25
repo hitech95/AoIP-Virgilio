@@ -62,7 +62,8 @@ import PipelineNode from '../PipelineNode.vue'
 import FilterBlockEditor from '../FilterBlockEditor.vue'
 import MixerBlockEditor from '../MixerBlockEditor.vue'
 import '../../styles/pipeline.scss'
-import { sessionDisable, sessionForget, reconcileSession, loadSession, sessionTypeOf } from '../../lib/filterSession'
+import { sessionForget, reconcileSession, loadSession, sessionTypeOf, getStepKey } from '../../lib/filterSession'
+import { disableFilterInStep, enableFilterInStep } from '../../lib/filterEnablement'
 import * as dsp from '../../dsp'
 import { initializeFromConfig } from '../../stores/eqStore'
 import '@vue-flow/core/dist/style.css'
@@ -87,7 +88,7 @@ export default {
       orphanTarget: {},
       chLabels: { in: [], out: [] },
       selected: null, unprotected: false, applying: false,
-      disabledFilters: {}, refreshing: false
+      refreshing: false
     }
   },
   computed: {
@@ -124,10 +125,11 @@ export default {
        * visible and gain-editable, but never disable/remove/rename-able */
       const active = (this.selected.step.names ?? [])
         .map(name => ({ name, disabled: false, structural: name.startsWith('user_slot_') }))
-      const disabled = Object.entries(this.disabledFilters)
-        .filter(([, item]) => item.stepIndex === stepIndex)
-        .sort(([, a], [, b]) => a.index - b.index)
-        .map(([name]) => ({ name, disabled: true }))
+      const stepKey = getStepKey(this.selected.step.channels ?? [], stepIndex)
+      const disabled = Object.entries(loadSession())
+        .filter(([, e]) => e.positions && e.positions[stepKey] !== undefined)
+        .map(([name, e]) => ({ name, disabled: true, index: e.positions[stepKey] }))
+        .sort((a, b) => a.index - b.index)
       return [...active, ...disabled]
     }
   },
@@ -349,10 +351,9 @@ export default {
       this.config.filters[orphan.name] = def
       step.names = [...(step.names ?? []), orphan.name]
       sessionForget(orphan.name)
-      /* the orphan is CONSUMED: drop every disabled-view of it (the
-       * origin block's table row, the panel list) or it keeps showing
-       * as disabled on the block it came from */
-      delete this.disabledFilters[orphan.name]
+      /* the orphan is CONSUMED: forgetting the session entry drops
+       * every disabled-view of it (the origin block's table row, the
+       * panel list) or it keeps showing as disabled on the origin */
       this.config = { ...this.config }
       await this.apply()
       this.orphanTarget = { ...this.orphanTarget, [orphan.name]: undefined }
@@ -367,7 +368,7 @@ export default {
       this.selected = null
       this.buildGraph()
     },
-    filter(name) { return this.config?.filters?.[name] ?? this.disabledFilters[name]?.filter ?? loadSession()[name]?.def },
+    filter(name) { return this.config?.filters?.[name] ?? loadSession()[name]?.def },
     runtimeFilterLabel(name) { return this.filter(name)?.parameters?.type ?? this.filter(name)?.type ?? name },
     filterLabel(name) { const type = this.runtimeFilterLabel(name); return /^EQ\d+$/.test(name) ? `${type} filter` : `${type} · ${name}` },
     isBiquad(name) { return this.filter(name)?.type === 'Biquad' },
@@ -397,34 +398,23 @@ export default {
     },
     removeFilter(name) {
       if (this.isStructural(name)) return
-      const index = this.selected.step.names.indexOf(name); if (index >= 0) { this.selected.step.names.splice(index, 1); delete this.config.filters[name] } delete this.disabledFilters[name]; sessionForget(name); this.apply() },
+      const index = this.selected.step.names.indexOf(name); if (index >= 0) { this.selected.step.names.splice(index, 1); delete this.config.filters[name] } sessionForget(name); this.apply() },
     setFilterEnabled(name, enabled) {
       if (this.isStructural(name)) return
+      const stepIndex = this.config.pipeline.indexOf(this.selected.step)
       if (enabled) {
-        const entry = loadSession()[name]
-        const saved = this.disabledFilters[name] ??
-          { filter: entry?.def, stepIndex: entry?.stepIndex ?? this.config.pipeline.indexOf(this.selected.step), index: 0 }
-        if (!saved?.filter) return
-        if (!this.config.filters) this.config.filters = {}
-        this.config.filters[name] = saved.filter
-        this.config.pipeline[saved.stepIndex].names.splice(saved.index, 0, name)
-        delete this.disabledFilters[name]
-        sessionForget(name)
-        this.config = { ...this.config }
+        /* restores the definition and re-inserts the name at its
+         * recorded original position (appended when no record exists) */
+        this.config = enableFilterInStep(this.config, name, stepIndex)
       } else {
-        const stepIndex = this.config.pipeline.indexOf(this.selected.step)
         const index = this.selected.step.names.indexOf(name)
         /* idempotency guard: a repeated disable (double event, stale
-         * row) would splice(-1, ...) -- corrupting the block -- and
-         * clobber the session def with undefined */
+         * row) would splice(-1, ...) corrupting the block */
         if (index < 0) return
-        const def = this.config.filters[name]
-        this.disabledFilters[name] = { filter: def, stepIndex, index }
-        this.selected.step.names.splice(index, 1)
-        /* camilladsp refuses unreferenced defs: the definition moves to
-           the session store; the orphan panel restores from there */
-        if (this.config.filters) delete this.config.filters[name]
-        sessionDisable(name, stepIndex, def)
+        /* the definition moves to the session store: camilladsp
+         * refuses unreferenced defs; the orphan panel restores from
+         * there */
+        this.config = disableFilterInStep(this.config, name, stepIndex)
       }
       this.apply()
     },

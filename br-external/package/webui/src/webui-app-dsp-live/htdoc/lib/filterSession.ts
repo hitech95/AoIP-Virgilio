@@ -18,6 +18,17 @@ export interface SessionEntry {
   stepIndex: number
   /** camilladsp filter definition (type/parameters), for restore */
   def: any
+  /** original position per disabled step, so enable restores in place */
+  positions?: Record<string, number>
+}
+
+/**
+ * Stable key for a Filter step: "Filter:ch0,1:idxN" (channels sorted,
+ * pipeline index). Positions are recorded per step key.
+ */
+export function getStepKey(channels: number[], stepIndex: number): string {
+  const sortedCh = [...channels].sort((a, b) => a - b).join(',')
+  return `Filter:ch${sortedCh}:idx${stepIndex}`
 }
 
 export type FilterSession = Record<string, SessionEntry>
@@ -41,9 +52,42 @@ export function saveSession(s: FilterSession): void {
   }
 }
 
-export function sessionDisable(name: string, stepIndex: number, def: any): void {
+export function sessionDisable(
+  name: string,
+  stepIndex: number,
+  def: any,
+  stepKey?: string,
+  originalIndex?: number
+): void {
   const s = loadSession()
-  s[name] = { stepIndex, def }
+  const prev = s[name]
+  const entry: SessionEntry = {
+    stepIndex: prev?.stepIndex ?? stepIndex,
+    def: def ?? prev?.def,
+    positions: { ...(prev?.positions ?? {}) },
+  }
+  if (stepKey && originalIndex !== undefined && originalIndex >= 0)
+    entry.positions![stepKey] = originalIndex
+  s[name] = entry
+  saveSession(s)
+}
+
+/** Original index of the filter within a step, when disabled there. */
+export function sessionPositionOf(name: string, stepKey: string): number | null {
+  const positions = loadSession()[name]?.positions
+  return positions && positions[stepKey] !== undefined ? positions[stepKey] : null
+}
+
+/**
+ * The filter was re-enabled in one step: drop that position. When no
+ * position remains the filter is fully back in the config -- forget it.
+ */
+export function sessionForgetStep(name: string, stepKey: string): void {
+  const s = loadSession()
+  const entry = s[name]
+  if (!entry) return
+  if (entry.positions && stepKey in entry.positions) delete entry.positions[stepKey]
+  if (!entry.positions || Object.keys(entry.positions).length === 0) delete s[name]
   saveSession(s)
 }
 
