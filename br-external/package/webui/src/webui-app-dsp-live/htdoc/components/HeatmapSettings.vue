@@ -1,6 +1,6 @@
 <template>
-  <div class="heatmap-settings">
-    <div class="section">
+  <div class="heatmap-settings" :class="{ compact }">
+    <div class="section labelled" :class="{ span2: compact }">
       <span class="label">{{ $t('Mask') }}</span>
       <el-radio-group
         size="small"
@@ -11,9 +11,17 @@
         <el-radio-button value="bottom">{{ $t('Bottom') }}</el-radio-button>
         <el-radio-button value="full">{{ $t('Full') }}</el-radio-button>
       </el-radio-group>
+      <el-checkbox
+        v-if="compact"
+        size="small"
+        :model-value="highPrecision"
+        @update:model-value="(v: boolean) => emit('change', { highPrecision: v })"
+      >
+        {{ $t('High precision (slower, more stable)') }}
+      </el-checkbox>
     </div>
 
-    <div class="section">
+    <div v-if="!compact" class="section">
       <el-checkbox
         size="small"
         :model-value="highPrecision"
@@ -23,7 +31,7 @@
       </el-checkbox>
     </div>
 
-    <div v-for="p in params" :key="p.key" class="section knob-row">
+    <div v-for="p in params" :key="p.key" class="section labelled knob-row">
       <span class="label">{{ $t(p.label) }}</span>
       <el-slider
         class="knob-slider"
@@ -44,6 +52,8 @@
 import type { HeatmapMaskMode } from '../rendering/canvasLayers/SpectrumHeatmapLayer'
 
 const props = defineProps<{
+  /** two-column dense layout for inline (non-popover) use */
+  compact?: boolean
   maskMode: HeatmapMaskMode
   highPrecision: boolean
   alphaGamma: number
@@ -104,3 +114,51 @@ const params = [
 </script>
 
 <i18n src="../locale.json"/>
+
+<style scoped>
+/* inline (compact) layout: dense two-column grid that fits the viz bar */
+.heatmap-settings.compact {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 14px;
+  align-items: center;
+}
+
+.heatmap-settings.compact .section {
+  line-height: 1.2;
+}
+
+.heatmap-settings.compact .knob-row {
+  height: 24px;
+}
+
+.heatmap-settings.compact .section {
+  margin: 0;
+}
+
+.heatmap-settings.compact .section.labelled {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.heatmap-settings.compact .section.span2 {
+  grid-column: 1 / -1;
+}
+
+.heatmap-settings.compact .section.span2 .el-checkbox {
+  height: 24px;
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.heatmap-settings.compact .knob-slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.heatmap-settings.compact .knob-slider {
+  flex: 1;
+  min-width: 0;
+}
+</style>

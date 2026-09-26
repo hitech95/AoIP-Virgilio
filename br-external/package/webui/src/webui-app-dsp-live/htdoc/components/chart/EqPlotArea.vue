@@ -211,7 +211,7 @@ import {
   startSoloSession,
   endSoloSession,
 } from '../../stores/eqStore'
-import { vizOptions, resetAveragesTick, spectrumVizEnabled } from '../../stores/vizOptions'
+import { vizOptions, resetAveragesTick, spectrumVizEnabled, effectiveSmoothingMode } from '../../stores/vizOptions'
 import { createSpectrumVizController, type SpectrumVizController } from '../../rendering/spectrumVizController'
 import * as dsp from '../../dsp'
 import EqTokensLayer from './EqTokensLayer.vue'
@@ -359,7 +359,7 @@ function applyVizConfig() {
     showPeak: vizOptions.showPeak,
   })
   spectrumController?.setSpectrumMode(vizOptions.spectrumMode)
-  spectrumController?.setSmoothingMode(vizOptions.smoothingMode)
+  spectrumController?.setSmoothingMode(effectiveSmoothingMode.value)
   spectrumController?.setHeatmapConfig({
     enabled: vizOptions.heatmapEnabled,
     maskMode: vizOptions.heatmapMaskMode,
@@ -378,7 +378,7 @@ watch(
 )
 
 watch(
-  () => [vizOptions.spectrumMode, vizOptions.smoothingMode] as const,
+  () => [vizOptions.spectrumMode, effectiveSmoothingMode.value] as const,
   () => applyVizConfig()
 )
 

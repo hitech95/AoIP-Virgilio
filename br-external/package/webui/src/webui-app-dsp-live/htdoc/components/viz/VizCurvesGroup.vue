@@ -1,35 +1,24 @@
 <template>
-  <div
-    class="groupContainer expanded"
-    data-group="curves"
+  <VizSection
+    group-id="curves"
+    :expanded-width="200"
+    :title="$t('Spectrum Curves')"
+    :disabled="!vizOptions.spectrumEnabled"
+    :disabled-tooltip="$t('Enable the FFT spectrum to configure the analyzer')"
     :data-lta="vizOptions.showLTA ? 'on' : 'off'"
     :data-sta="vizOptions.showSTA ? 'on' : 'off'"
     :data-peak="vizOptions.showPeak ? 'on' : 'off'"
-    style="--expandedWidth: 200px"
   >
-    <div class="stubGlyph">
+    <template #glyph>
       <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
         <line class="glyphPeak" x1="4" y1="7" x2="20" y2="7" />
         <line class="glyphSta" x1="4" y1="12" x2="20" y2="12" />
         <line class="glyphLta" x1="4" y1="17" x2="20" y2="17" />
       </svg>
-    </div>
+    </template>
 
-    <div class="groupStub" role="button" tabindex="0" :aria-label="$t('Spectrum analyzer')"></div>
-
-    <div class="groupExpanded">
-      <div class="groupTitle">{{ $t('Spectrum Curves') }}</div>
-      <div class="row" :class="{ 'curves-disabled': !vizOptions.spectrumEnabled }">
-        <!-- FFT master switch: gates the whole spectrum pipeline -->
-        <VizChip
-          :active="vizOptions.spectrumEnabled"
-          :title="vizOptions.spectrumEnabled ? $t('Disable the FFT spectrum') : $t('Enable the FFT spectrum')"
-          @click="vizOptions.spectrumEnabled = !vizOptions.spectrumEnabled"
-        >
-          FFT
-        </VizChip>
-
-        <div class="waveStack">
+    <div class="row">
+      <div class="waveStack">
           <svg viewBox="0 0 120 24" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="eqLtaGrad" x1="0" y1="0" x2="120" y2="0" gradientUnits="userSpaceOnUse">
@@ -97,7 +86,6 @@
         <VizChip
           :active="vizOptions.showLTA"
           type="primary"
-          :disabled="!vizOptions.spectrumEnabled"
           :title="$t('Long-term average (slow)')"
           @click="vizOptions.showLTA = !vizOptions.showLTA"
         >
@@ -106,7 +94,6 @@
         <VizChip
           :active="vizOptions.showSTA"
           type="success"
-          :disabled="!vizOptions.spectrumEnabled"
           :title="$t('Short-term average (fast)')"
           @click="vizOptions.showSTA = !vizOptions.showSTA"
         >
@@ -115,14 +102,12 @@
         <VizChip
           :active="vizOptions.showPeak"
           type="warning"
-          :disabled="!vizOptions.spectrumEnabled"
           :title="$t('Peak hold')"
           @click="vizOptions.showPeak = !vizOptions.showPeak"
         >
           Peak
         </VizChip>
         <VizChip
-          :disabled="!vizOptions.spectrumEnabled"
           :title="$t('Reset STA/LTA/Peak averages')"
           :aria-label="$t('Reset averages')"
           @click="resetAveragesTick.count++"
@@ -133,13 +118,13 @@
           </svg>
         </VizChip>
       </div>
-    </div>
-  </div>
+    </VizSection>
 </template>
 
 <script setup lang="ts">
 import { vizOptions, resetAveragesTick } from '../../stores/vizOptions'
 import VizChip from '../VizChip.vue'
+import VizSection from '../viz/VizSection.vue'
 </script>
 
 <i18n src="../../locale.json"/>

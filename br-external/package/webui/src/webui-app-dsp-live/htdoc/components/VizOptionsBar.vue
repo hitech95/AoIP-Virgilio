@@ -26,7 +26,7 @@ const groups: AccordionStripGroup[] = [
   { id: 'tap', priority: 4, expandedWidth: 256 },
   { id: 'curves', priority: 1, expandedWidth: 200 },
   { id: 'smooth', priority: 2, expandedWidth: 190 },
-  { id: 'heatmap', priority: 3, expandedWidth: 210 },
+  { id: 'heatmap', priority: 3, expandedWidth: 300 },
   { id: 'tokens', priority: 5, expandedWidth: 270 },
 ]
 </script>

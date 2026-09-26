@@ -5,6 +5,7 @@
  */
 
 import { computed, reactive, watch, type WatchStopHandle } from 'vue'
+import type { SmoothingMode } from '../lib/fractionalOctaveSmoothing'
 import { loadVizOptions, saveVizOptions, type VizOptionsState } from '../lib/vizOptionsPersistence'
 
 export const vizOptions = reactive<VizOptionsState>(loadVizOptions())
@@ -12,6 +13,12 @@ export const vizOptions = reactive<VizOptionsState>(loadVizOptions())
 // Derived: overlay enabled if at least one series is on
 export const overlayEnabled = computed(
   () => vizOptions.showSTA || vizOptions.showLTA || vizOptions.showPeak
+)
+
+// The mode applied by the spectrum pipeline: 'off' while the smoothing
+// toggle in the section header is disabled
+export const effectiveSmoothingMode = computed(
+  () => (vizOptions.smoothingEnabled ? vizOptions.smoothingMode : 'off') as SmoothingMode
 )
 
 // Master gate: the FFT spectrum runs only when enabled.

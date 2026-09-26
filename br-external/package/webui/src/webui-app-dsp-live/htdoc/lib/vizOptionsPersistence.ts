@@ -18,6 +18,8 @@ export interface VizOptionsState {
   /** Master switch: enables/disables the FFT spectrum entirely */
   spectrumEnabled: boolean
   spectrumMode: 'pre' | 'post'
+  /** Curve smoothing on/off; the mode is remembered while off */
+  smoothingEnabled: boolean
   smoothingMode: SmoothingMode
   showSTA: boolean
   showLTA: boolean
@@ -47,6 +49,7 @@ export const DEFAULT_VIZ_OPTIONS: VizOptionsState = {
 
   spectrumEnabled: true,
   spectrumMode: 'pre',
+  smoothingEnabled: true,
   smoothingMode: '1/6',
   showSTA: true,
   showLTA: false,
@@ -83,6 +86,15 @@ export function validateVizOptions(state: Partial<VizOptionsState>): VizOptionsS
   const validSmoothingModes: SmoothingMode[] = ['off', '1/12', '1/6', '1/3']
   if (state.smoothingMode && validSmoothingModes.includes(state.smoothingMode)) {
     validated.smoothingMode = state.smoothingMode
+  }
+  // legacy migration: the on/off used to live inside the mode ('off')
+  if (typeof state.smoothingEnabled === 'boolean') {
+    validated.smoothingEnabled = state.smoothingEnabled
+  } else {
+    validated.smoothingEnabled = validated.smoothingMode !== 'off'
+  }
+  if (validated.smoothingEnabled && validated.smoothingMode === 'off') {
+    validated.smoothingMode = '1/6'
   }
 
   if (typeof state.spectrumEnabled === 'boolean') validated.spectrumEnabled = state.spectrumEnabled

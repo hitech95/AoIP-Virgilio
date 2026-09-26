@@ -1,11 +1,15 @@
 <template>
-  <div
-    class="groupContainer expanded"
-    data-group="tap"
+  <VizSection
+    group-id="tap"
+    :expanded-width="256"
+    :title="$t('Spectrum Signal Tap')"
+    toggle
+    :toggle-value="vizOptions.spectrumEnabled"
+    :toggle-title="vizOptions.spectrumEnabled ? $t('Disable the FFT spectrum') : $t('Enable the FFT spectrum')"
+    @update:toggle-value="(v) => (vizOptions.spectrumEnabled = v)"
     :data-sel="vizOptions.spectrumMode"
-    style="--expandedWidth: 256px"
   >
-    <div class="stubGlyph">
+    <template #glyph>
       <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
         <line class="g-line" x1="3" y1="12" x2="9.5" y2="12" />
         <rect class="g-block" x="9.5" y="9.5" width="5" height="5" rx="1" />
@@ -13,13 +17,9 @@
         <circle class="g-node" data-pos="post" cx="18" cy="12" r="3" />
         <line class="g-line" x1="14.5" y1="12" x2="21" y2="12" />
       </svg>
-    </div>
+    </template>
 
-    <div class="groupStub" role="button" tabindex="0" :aria-label="$t('Spectrum signal tap')"></div>
-
-    <div class="groupExpanded">
-      <div class="groupTitle">{{ $t('Spectrum Signal Tap') }}</div>
-      <div class="sigTapGroup" :data-sel="vizOptions.spectrumMode">
+    <div class="sigTapGroup" :data-sel="vizOptions.spectrumMode">
         <svg class="sigTap" viewBox="0 0 190 50" width="190" height="50" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <filter id="eqTapGlow" x="-100%" y="-100%" width="300%" height="300%">
@@ -70,13 +70,13 @@
             <text class="tapLabel" x="148" y="46">POST</text>
           </g>
         </svg>
-      </div>
     </div>
-  </div>
+  </VizSection>
 </template>
 
 <script setup lang="ts">
 import { vizOptions } from '../../stores/vizOptions'
+import VizSection from '../viz/VizSection.vue'
 </script>
 
 <i18n src="../../locale.json"/>

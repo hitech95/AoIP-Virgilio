@@ -31,15 +31,11 @@
     "Reset averages": "Reset averages",
     "Curve smoothing": "Curve smoothing",
     "Curve Smoothing": "Curve Smoothing",
-    "No smoothing (raw spectrum)": "No smoothing (raw spectrum)",
     "1/12-octave smoothing (most detail)": "1/12-octave smoothing (most detail)",
     "1/6-octave smoothing (balanced)": "1/6-octave smoothing (balanced)",
     "1/3-octave smoothing (smoothest)": "1/3-octave smoothing (smoothest)",
     "Off": "Off",
     "Heatmap": "Heatmap",
-    "On / Off": "On / Off",
-    "Heatmap settings": "Heatmap settings",
-    "Prefs": "Prefs",
     "Token visuals": "Token visuals",
     "Token Visuals": "Token Visuals",
     "Show per-band response curves": "Show per-band response curves",
@@ -163,7 +159,10 @@
     "Enable band": "Enable band",
     "Unmute": "Unmute",
     "Band {n} — {type} (change type)": "Band {n} — {type} (change type)",
-    "Muting is not allowed by the policy": "Muting is not allowed by the policy"
+    "Muting is not allowed by the policy": "Muting is not allowed by the policy",
+    "Enable curve smoothing": "Enable curve smoothing",
+    "Disable curve smoothing": "Disable curve smoothing",
+    "Enable or disable the heatmap": "Enable or disable the heatmap"
   },
   "it": {
     "Filter Block": "Blocco filtri",
@@ -197,15 +196,11 @@
     "Reset averages": "Azzera le medie",
     "Curve smoothing": "Smussatura delle curve",
     "Curve Smoothing": "Smussatura delle curve",
-    "No smoothing (raw spectrum)": "Nessuna smussatura (spettro grezzo)",
     "1/12-octave smoothing (most detail)": "Smussatura a 1/12 di ottava (massimo dettaglio)",
     "1/6-octave smoothing (balanced)": "Smussatura a 1/6 di ottava (equilibrata)",
     "1/3-octave smoothing (smoothest)": "Smussatura a 1/3 di ottava (la più morbida)",
     "Off": "Off",
     "Heatmap": "Mappa di calore",
-    "On / Off": "On / Off",
-    "Heatmap settings": "Impostazioni mappa di calore",
-    "Prefs": "Preferenze",
     "Token visuals": "Aspetto dei token",
     "Token Visuals": "Aspetto dei token",
     "Show per-band response curves": "Mostra le curve di risposta per banda",
@@ -329,6 +324,9 @@
     "Enable band": "Abilita banda",
     "Unmute": "Riattiva",
     "Band {n} — {type} (change type)": "Banda {n} — {type} (cambia tipo)",
-    "Muting is not allowed by the policy": "Il silenziamento non è consentito dalla policy"
+    "Muting is not allowed by the policy": "Il silenziamento non è consentito dalla policy",
+    "Enable curve smoothing": "Attiva la smussatura delle curve",
+    "Disable curve smoothing": "Disattiva la smussatura delle curve",
+    "Enable or disable the heatmap": "Abilita o disabilita la mappa di calore"
   }
 }

@@ -1,13 +1,14 @@
 <template>
-  <div
-    class="groupContainer expanded"
-    data-group="tokens"
+  <VizSection
+    group-id="tokens"
+    :expanded-width="270"
+    :title="$t('Token Visuals')"
     :data-curves="vizOptions.showPerBandCurves ? 'on' : 'off'"
     :data-bw="vizOptions.showBandwidthMarkers ? 'on' : 'off'"
     :data-solo="vizOptions.soloWhileEditing ? 'on' : 'off'"
-    :style="{ '--expandedWidth': '270px', '--tokenFill': String(vizOptions.bandFillOpacity) }"
+    :style="{ '--tokenFill': String(vizOptions.bandFillOpacity) }"
   >
-    <div class="stubGlyph">
+    <template #glyph>
       <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
         <line class="tokGlyph-base" x1="2.01" y1="15.19" x2="20" y2="15.19" />
 
@@ -25,13 +26,9 @@
 
         <circle class="tokGlyph-dot" cx="7.93" cy="8" r="3" />
       </svg>
-    </div>
+    </template>
 
-    <div class="groupStub" role="button" tabindex="0" :aria-label="$t('Token visuals')"></div>
-
-    <div class="groupExpanded">
-      <div class="groupTitle">{{ $t('Token Visuals') }}</div>
-      <div class="row">
+    <div class="row">
         <VizChip
           :active="vizOptions.showPerBandCurves"
           :aria-pressed="vizOptions.showPerBandCurves"
@@ -72,14 +69,14 @@
           />
         </span>
       </div>
-    </div>
-  </div>
+    </VizSection>
 </template>
 
 <script setup lang="ts">
 import { vizOptions } from '../../stores/vizOptions'
 import KnobDial from '../KnobDial.vue'
 import VizChip from '../VizChip.vue'
+import VizSection from '../viz/VizSection.vue'
 </script>
 
 <i18n src="../../locale.json"/>
