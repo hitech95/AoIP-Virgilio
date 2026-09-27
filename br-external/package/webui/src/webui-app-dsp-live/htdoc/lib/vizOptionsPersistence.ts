@@ -15,7 +15,9 @@ export interface VizOptionsState {
   version: number
 
   // Spectrum/analyzer settings
-  /** Master switch: enables/disables the FFT spectrum entirely */
+  /** Master switch: enables/disables the FFT spectrum entirely.
+   * NOT persisted: the FFT is computation heavy and always starts
+   * disabled on every page load. */
   spectrumEnabled: boolean
   spectrumMode: 'pre' | 'post'
   /** Curve smoothing on/off; the mode is remembered while off */
@@ -47,7 +49,7 @@ export interface VizOptionsState {
 export const DEFAULT_VIZ_OPTIONS: VizOptionsState = {
   version: STORAGE_VERSION,
 
-  spectrumEnabled: true,
+  spectrumEnabled: false,
   spectrumMode: 'pre',
   smoothingEnabled: true,
   smoothingMode: '1/6',
@@ -97,7 +99,8 @@ export function validateVizOptions(state: Partial<VizOptionsState>): VizOptionsS
     validated.smoothingMode = '1/6'
   }
 
-  if (typeof state.spectrumEnabled === 'boolean') validated.spectrumEnabled = state.spectrumEnabled
+  /* the FFT enable flag is deliberately not restored: computation heavy */
+  validated.spectrumEnabled = false
   if (typeof state.showSTA === 'boolean') validated.showSTA = state.showSTA
   if (typeof state.showLTA === 'boolean') validated.showLTA = state.showLTA
   if (typeof state.showPeak === 'boolean') validated.showPeak = state.showPeak
