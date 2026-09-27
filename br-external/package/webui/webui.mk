@@ -4,7 +4,7 @@
 # See plan/webui.md for the frozen contract and milestones.
 
 WEBUI_VERSION = 0.2.0
-WEBUI_SITE = $(BR2_EXTERNAL_RK3506QEMU_PATH)/package/webui
+WEBUI_SITE = $(BR2_EXTERNAL_VIRGILIO_PATH)/package/webui
 WEBUI_SITE_METHOD = local
 WEBUI_LICENSE = GPL-3.0-or-later (daemon, apps) / MIT (vendored oui parts)
 WEBUI_DEPENDENCIES = ucode nginx
@@ -14,7 +14,7 @@ WEBUI_DEPENDENCIES = ucode nginx
 # npm install needs network (same precedent as the camilladsp cargo build).
 define WEBUI_BUILD_FRONTEND
 	PATH=$(PATH) HOME=$(HOME) \
-		$(BR2_EXTERNAL_RK3506QEMU_PATH)/../scripts/webui/build-frontend.sh \
+		$(BR2_EXTERNAL_VIRGILIO_PATH)/../scripts/webui/build-frontend.sh \
 		$(@D)/frontend-staging
 endef
 

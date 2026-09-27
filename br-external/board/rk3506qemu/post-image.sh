@@ -4,7 +4,7 @@
 # and BR2_PACKAGE_HOST_GENIMAGE=y. Mode A (direct boot) needs neither.
 set -euo pipefail
 
-BOARD_DIR="${BR2_EXTERNAL_RK3506QEMU_PATH}/board/rk3506qemu"
+BOARD_DIR="${BR2_EXTERNAL_VIRGILIO_PATH}/board/rk3506qemu"
 GENIMAGE_TMP="${BUILD_DIR}/genimage.tmp"
 
 # TODO (Mode B): once idbloader.bin/u-boot.itb placeholders exist:

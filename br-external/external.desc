@@ -1,2 +1,2 @@
-name: RK3506QEMU
-desc: Test firmware for Rockchip RK3506 (Cortex-A7 + NEON) on QEMU virt
+name: VIRGILIO
+desc: Virgilio — OpenWrt-style firmware for Dante/AES67 DSP speakers

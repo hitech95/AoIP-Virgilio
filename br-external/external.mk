@@ -1,1 +1,2 @@
-include $(sort $(wildcard $(BR2_EXTERNAL_RK3506QEMU_PATH)/package/*/*.mk))
+include $(BR2_EXTERNAL_VIRGILIO_PATH)/rustflags.mk
+include $(sort $(wildcard $(BR2_EXTERNAL_VIRGILIO_PATH)/package/*/*.mk))
