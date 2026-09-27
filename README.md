@@ -32,6 +32,8 @@ capture busy-poll (D16/D17).
 ```sh
 git clone --recursive <this-repo>
 ./scripts/build.sh                          # Buildroot build (~30-60 min)
+# DEFCONFIG=<name>_defconfig ./scripts/build.sh   # other targets; each
+# defconfig builds in its own output/<variant>/ dir (required for archs)
 
 # bridge rig (docs/bridge-rig.md has the full walkthrough)
 sudo scripts/qemu-bridge.sh up              # br-dante 198.18.100.254/24 + taps
@@ -75,10 +77,15 @@ each sync. The helper defaults can be overridden with `EQ_QEMU_CONSOLE_PORT`,
   statime fork, …); local modifications live as patches in `br-external/`
 - `br-external/` — Buildroot external tree:
   - `package/` — OpenWrt stack + apps (uci, procd, netifd, ubox, statime,
-    inferno, camilladsp, mpd, …) with our patches
-  - `board/rk3506qemu/` — kernel/busybox fragments, rootfs overlay (procd
-    init scripts, uci defaults, asound.conf, mpd.conf, motd/profile),
-    post-build (module flattening, OpenWrt-style `/var → tmp` tmpfs layout)
+    inferno, camilladsp, …) with our patches; `virgilio-base` ships the
+    generic base files (procd init/rc.d layout, functions glue, motd) and
+    selects the uci/procd stack — app packages ship their own init scripts
+    and uci defaults (overridable per board) — see `docs/dependency-map.md`
+  - `board/common/` — device-independent post-build (module flattening,
+    OpenWrt-style `/var → tmp` tmpfs layout)
+  - `board/rk3506qemu/` — kernel/busybox fragments + board-specific rootfs
+    overlay (network topology, asound.conf, FIR coeffs, mpd/aoip-bridge rig
+    services, NIC fixup)
 - `scripts/` — build/run/bridge helpers, `dante-l2node.py` (ARC/Dante
   subscription tool), `statime-gm.toml` (host grand master)
 - `configs/` — reference camilladsp configs (crossover experiments)
