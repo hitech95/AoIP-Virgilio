@@ -99,96 +99,97 @@
   </el-container>
 </template>
 
-<style scoped>
-.eq-page .eq-alert {
-  margin: 0;
+<style scoped lang="scss">
+.eq-page {
+  .eq-alert {
+    margin: 0;
+  }
+
+  .body {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    /* Vertical spacing inside the page: margins would sit outside the flex
+       item's assigned height and re-introduce the outer scrollbar. */
+    padding-block: 8px;
+  }
+
+  .chart-aside {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .filters-container {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .visual-options {
+    flex: 0 0 var(--eq-vizbar-h);
+    position: relative;
+    min-width: 0;
+    width: 100%;
+    padding-right: var(--eq-gainscale-w);
+    box-sizing: border-box;
+  }
 }
 
-.eq-page .body {
-  flex: 1;
-  min-height: 0;
-  padding: 0;
-  /* Vertical spacing inside the page: margins would sit outside the flex
-     item's assigned height and re-introduce the outer scrollbar. */
-  padding-block: 8px;
-}
+.eq-toolbar {
+  .icon {
+    color: var(--el-color-primary);
+  }
 
-.eq-toolbar .icon {
-  color: var(--el-color-primary);
-}
+  .title {
+    color: var(--el-text-color-primary);
+    white-space: nowrap;
+  }
 
-.eq-toolbar .title {
-  color: var(--el-text-color-primary);
-  white-space: nowrap;
-}
+  .select {
+    width: 340px;
+    max-width: 100%;
+  }
 
-.eq-toolbar .select {
-  width: 340px;
-  max-width: 100%;
-}
+  .policy-tag {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-.eq-toolbar .policy-tag {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+  /* collapsed selection: stretch the EP wrapper so the label-slot content
+     justifies exactly like an option row (name left, chips right) */
+  .select :deep(.el-select__selected-item.el-select__placeholder) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    width: 100%;
+  }
 
-/* collapsed selection: stretch the EP wrapper so the label-slot content
-   justifies exactly like an option row (name left, chips right) */
-.eq-toolbar .select :deep(.el-select__selected-item.el-select__placeholder) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  width: 100%;
-}
-.eq-toolbar .select .sel-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.eq-toolbar .opt-meta-inline {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  margin-left: 6px;
-}
-.eq-toolbar .select .sel-tags {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
+  .sel-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-.eq-page .chart-aside {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-.eq-page .filters-container {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
-.eq-page .visual-options {
-  flex: 0 0 var(--eq-vizbar-h);
-  position: relative;
-  min-width: 0;
-  width: 100%;
-  padding-right: var(--eq-gainscale-w);
-  box-sizing: border-box;
+  .sel-tags {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
 }
 </style>
 
-<style>
+<style lang="scss">
 /* custom el-option rows: block name left, badge chips (filter count +
    one chip per channel) right. GLOBAL on purpose: the dropdown popper
    teleports to <body>, so scoped selectors (.eq-page ...) never match. */

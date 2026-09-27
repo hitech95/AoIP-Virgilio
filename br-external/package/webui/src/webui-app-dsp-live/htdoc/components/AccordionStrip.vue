@@ -1,13 +1,16 @@
 <!--
   AccordionStrip.vue - generic responsive horizontal accordion container.
-  Slotted groups must expose a matching data-group value for each definition.
+  Slotted sections must render the VizSection DOM contract with a matching
+  data-group value for each definition. The layout decisions live in
+  VizLayoutManager and reach the sections through the reactive
+  vizAccordionState; stub activation bubbles up as 'viz-stub-activate'.
 -->
 <template>
   <div ref="hostEl" class="accordion-strip visual-container">
-    <div ref="viewportEl" class="accordion-strip__viewport">
+    <div ref="viewportEl" class="accordion-strip__viewport" :class="viewportClass">
       <div class="accordion-strip__edge-fade accordion-strip__edge-fade--left"></div>
       <div class="accordion-strip__edge-fade accordion-strip__edge-fade--right"></div>
-      <div ref="stripEl" class="accordion-strip__content">
+      <div ref="stripEl" class="accordion-strip__content" @viz-stub-activate="onStubActivate">
         <slot />
       </div>
     </div>
@@ -15,13 +18,13 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { VizLayoutManager, type VizGroup } from '../lib/vizLayoutManager'
+import { vizAccordionState } from '../lib/vizAccordion'
 
 export interface AccordionStripGroup {
   id: string
   priority: number
-  expandedWidth: number
 }
 
 const props = defineProps<{ groups: AccordionStripGroup[]; stubWidth?: number }>()
@@ -32,15 +35,30 @@ const stripEl = ref<HTMLDivElement | null>(null)
 let layoutManager: VizLayoutManager | null = null
 let removeViewportListeners: (() => void) | null = null
 
+const viewportClass = computed(() => ({
+  constrained: vizAccordionState.constrained,
+  hasLeftOverflow: vizAccordionState.hasLeftOverflow,
+  hasRightOverflow: vizAccordionState.hasRightOverflow,
+}))
+
+function onStubActivate(e: Event) {
+  const id = (e as CustomEvent).detail?.groupId
+  layoutManager?.toggleChoice(id)
+}
+
 onMounted(() => {
   const host = hostEl.value
   const viewport = viewportEl.value
   const strip = stripEl.value
   if (!host || !viewport || !strip) return
 
+  /* the expanded width is owned by each section (--expandedWidth on
+   * its root); read it back so layout math always matches the CSS */
   const groups: VizGroup[] = props.groups.flatMap((group) => {
     const el = strip.querySelector(`[data-group='${group.id}']`) as HTMLElement | null
-    return el ? [{ ...group, el }] : []
+    if (!el) return []
+    const parsed = parseFloat(getComputedStyle(el).getPropertyValue('--expandedWidth'))
+    return [{ ...group, expandedWidth: Number.isFinite(parsed) ? parsed : 200 }]
   })
   if (groups.length !== props.groups.length) return
 
@@ -56,7 +74,7 @@ onMounted(() => {
   const threshold = 4
 
   const handlePointerDown = (event: PointerEvent) => {
-    if (!viewport.classList.contains('constrained')) return
+    if (!vizAccordionState.constrained) return
     down = true
     dragging = false
     startX = event.clientX
@@ -79,7 +97,7 @@ onMounted(() => {
   }
   const handlePointerCancel = () => finishPointer()
   const handleWheel = (event: WheelEvent) => {
-    if (!viewport.classList.contains('constrained') || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+    if (!vizAccordionState.constrained || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
     if (viewport.scrollWidth <= viewport.clientWidth + 1) return
     event.preventDefault()
     viewport.scrollLeft += event.deltaY

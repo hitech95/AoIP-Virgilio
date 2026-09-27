@@ -22,11 +22,13 @@ import VizSmoothGroup from './viz/VizSmoothGroup.vue'
 import VizHeatmapGroup from './viz/VizHeatmapGroup.vue'
 import VizTokensGroup from './viz/VizTokensGroup.vue'
 
+/* the expanded WIDTH lives in each section's :expanded-width prop and
+ * is read back from the DOM by the strip; only order priority is here */
 const groups: AccordionStripGroup[] = [
-  { id: 'tap', priority: 4, expandedWidth: 256 },
-  { id: 'curves', priority: 1, expandedWidth: 200 },
-  { id: 'smooth', priority: 2, expandedWidth: 190 },
-  { id: 'heatmap', priority: 3, expandedWidth: 300 },
-  { id: 'tokens', priority: 5, expandedWidth: 270 },
+  { id: 'tap', priority: 4 },
+  { id: 'curves', priority: 1 },
+  { id: 'smooth', priority: 2 },
+  { id: 'heatmap', priority: 3 },
+  { id: 'tokens', priority: 5 },
 ]
 </script>

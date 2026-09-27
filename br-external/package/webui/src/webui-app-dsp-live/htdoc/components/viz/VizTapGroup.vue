@@ -1,11 +1,12 @@
 <template>
   <VizSection
     group-id="tap"
-    :expanded-width="256"
     :title="$t('Spectrum Signal Tap')"
+    body-justify="center"
+    body-align="center"
     toggle
     :toggle-value="vizOptions.spectrumEnabled"
-    :toggle-title="vizOptions.spectrumEnabled ? $t('Disable the FFT spectrum') : $t('Enable the FFT spectrum')"
+    :toggle-title="$t('Enables the FFT spectrum analysis (computation heavy)')"
     @update:toggle-value="(v) => (vizOptions.spectrumEnabled = v)"
     :data-sel="vizOptions.spectrumMode"
   >
@@ -78,5 +79,175 @@
 import { vizOptions } from '../../stores/vizOptions'
 import VizSection from '../viz/VizSection.vue'
 </script>
+
+<style scoped lang="scss">
+.viz-section {
+  /* stub glyph */
+  .groupStub {
+    .g-line {
+      stroke: var(--el-border-color-darker);
+      stroke-width: 1.3;
+      stroke-linecap: round;
+    }
+
+    .g-block {
+      fill: var(--el-fill-color-dark);
+      stroke: var(--el-border-color-darker);
+      stroke-width: 1;
+    }
+
+    .g-node {
+      fill: var(--el-fill-color-darker);
+      stroke: var(--el-border-color-darker);
+      stroke-width: 1.4;
+      transition: fill 0.2s ease, stroke 0.2s ease;
+    }
+  }
+
+  &[data-sel='pre'] .g-node[data-pos='pre'],
+  &[data-sel='post'] .g-node[data-pos='post'] {
+    fill: var(--el-color-primary);
+    stroke: var(--el-color-primary);
+  }
+
+  /* body diagram */
+  .sigTapGroup {
+    display: block;
+  }
+
+  .sigTap {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .sigLine {
+    stroke: var(--el-border-color-darker);
+    stroke-width: 1.3;
+  }
+
+  .sigSegActive {
+    stroke: var(--el-color-primary);
+    stroke-width: 1.3;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .eqBlock {
+    fill: var(--el-fill-color-dark);
+    stroke: var(--el-border-color-darker);
+    stroke-width: 1;
+  }
+
+  .eqBlockCurve {
+    fill: none;
+    stroke: var(--el-color-primary);
+    stroke-width: 1;
+    stroke-linecap: round;
+    opacity: 0.6;
+  }
+
+  .eqBlockLabel,
+  .tapLabel {
+    fill: var(--el-text-color-secondary);
+    font-size: var(--el-font-size-extra-small);
+    font-family: var(--el-font-family);
+    text-anchor: middle;
+  }
+
+  .eqBlockLabel {
+    dominant-baseline: middle;
+  }
+
+  .tap {
+    cursor: pointer;
+
+    &:hover {
+      .tapNode,
+      .tapStem {
+        stroke: var(--el-color-primary);
+      }
+
+      .tapHead {
+        fill: var(--el-color-primary);
+      }
+
+      .tapLabel {
+        fill: var(--el-text-color-primary);
+      }
+    }
+  }
+
+  .tapNode {
+    fill: var(--el-fill-color-darker);
+    stroke: var(--el-border-color-darker);
+    stroke-width: 1.5;
+    transition: fill 0.2s ease, stroke 0.2s ease;
+  }
+
+  .tapStem {
+    stroke: var(--el-border-color-darker);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+    transition: stroke 0.2s ease;
+  }
+
+  .tapHead {
+    fill: var(--el-border-color-darker);
+    transition: fill 0.2s ease;
+  }
+
+  .tapLabel {
+    transition: fill 0.2s ease;
+    user-select: none;
+  }
+
+  &[data-sel='pre'] {
+    .sigSegActive.pre {
+      opacity: 1;
+    }
+
+    .tap[data-pos='pre'] {
+      .tapNode,
+      .tapStem,
+      .tapHead {
+        stroke: var(--el-color-primary);
+        fill: var(--el-color-primary);
+      }
+
+      .tapStem {
+        stroke-dasharray: none;
+      }
+
+      .tapLabel {
+        fill: var(--el-color-primary);
+      }
+    }
+  }
+
+  &[data-sel='post'] {
+    .sigSegActive.post {
+      opacity: 1;
+    }
+
+    .tap[data-pos='post'] {
+      .tapNode,
+      .tapStem,
+      .tapHead {
+        stroke: var(--el-color-primary);
+        fill: var(--el-color-primary);
+      }
+
+      .tapStem {
+        stroke-dasharray: none;
+      }
+
+      .tapLabel {
+        fill: var(--el-color-primary);
+      }
+    }
+  }
+}
+</style>
 
 <i18n src="../../locale.json"/>

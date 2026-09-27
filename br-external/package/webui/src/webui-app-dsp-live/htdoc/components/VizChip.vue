@@ -25,5 +25,7 @@ const props = withDefaults(
 
 defineEmits<{ (e: 'click', event: MouseEvent): void }>()
 
-const buttonType = computed(() => (props.active ? props.type : undefined))
+/* the type is kept when inactive too: plain styling + the series color
+ * on hover (LTA blue, STA green, Peak orange) */
+const buttonType = computed(() => props.type)
 </script>

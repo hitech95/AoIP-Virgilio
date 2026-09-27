@@ -1,14 +1,14 @@
 <template>
   <VizSection
     group-id="smooth"
-    :expanded-width="190"
     :title="$t('Curve Smoothing')"
     toggle
     :toggle-value="vizOptions.smoothingEnabled"
-    :toggle-title="vizOptions.smoothingEnabled ? $t('Disable curve smoothing') : $t('Enable curve smoothing')"
+    :toggle-title="$t('Enables spectrum curve smoothing')"
     @update:toggle-value="(v) => (vizOptions.smoothingEnabled = v)"
     :disabled="!vizOptions.spectrumEnabled"
     :disabled-tooltip="$t('Enable the FFT spectrum to configure the analyzer')"
+    :body-dimmed="!vizOptions.smoothingEnabled"
     :data-smooth="smoothLevel"
   >
     <template #glyph>
@@ -20,43 +20,27 @@
       </svg>
     </template>
 
-    <div class="row" :class="{ 'smooth-off': !vizOptions.smoothingEnabled }">
-      <VizChip
-        :class="{ active: vizOptions.smoothingMode === '1/12' }"
-        :active="vizOptions.smoothingMode === '1/12'"
-        :title="$t('1/12-octave smoothing (most detail)')"
-        @click="vizOptions.smoothingMode = '1/12'"
+    <div class="row">
+      <el-radio-group class="is-vertical-buttons" size="small"
+        :model-value="vizOptions.smoothingMode"
+        @update:model-value="(v) => (vizOptions.smoothingMode = v)"
       >
-        1/12 Oct
-      </VizChip>
-      <VizChip
-        :class="{ active: vizOptions.smoothingMode === '1/6' }"
-        :active="vizOptions.smoothingMode === '1/6'"
-        :title="$t('1/6-octave smoothing (balanced)')"
-        @click="vizOptions.smoothingMode = '1/6'"
-      >
-        1/6 Oct
-      </VizChip>
-      <VizChip
-        :class="{ active: vizOptions.smoothingMode === '1/3' }"
-        :active="vizOptions.smoothingMode === '1/3'"
-        :title="$t('1/3-octave smoothing (smoothest)')"
-        @click="vizOptions.smoothingMode = '1/3'"
-      >
-        1/3 Oct
-      </VizChip>
+        <el-radio-button value="1/12" :title="$t('1/12-octave smoothing (most detail)')">1/12 Oct</el-radio-button>
+        <el-radio-button value="1/6" :title="$t('1/6-octave smoothing (balanced)')">1/6 Oct</el-radio-button>
+        <el-radio-button value="1/3" :title="$t('1/3-octave smoothing (smoothest)')">1/3 Oct</el-radio-button>
+      </el-radio-group>
     </div>
   </VizSection>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { vizOptions } from '../../stores/vizOptions'
-import VizChip from '../VizChip.vue'
+import { vizOptions, effectiveSmoothingMode } from '../../stores/vizOptions'
 import VizSection from '../viz/VizSection.vue'
 
+/* the stub glyph follows the effective smoothing: off when the toggle is */
 const smoothLevel = computed(() => {
-  switch (vizOptions.smoothingMode) {
+  switch (effectiveSmoothingMode.value) {
     case 'off':
       return '0'
     case '1/12':
@@ -67,13 +51,39 @@ const smoothLevel = computed(() => {
       return '3'
   }
 })
+
 </script>
 
-<style scoped>
-/* the mode is remembered while smoothing is off */
-.smooth-off {
-  opacity: 0.5;
+<style scoped lang="scss">
+.viz-section {
+  /* the stacked Oct buttons need less width than 220 */
+  --expandedWidth: 170px;
+
+  .gSmooth {
+    fill: none;
+    stroke: var(--el-color-success);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  &[data-smooth='0'] .gSmooth[data-level='0'],
+  &[data-smooth='1'] .gSmooth[data-level='1'],
+  &[data-smooth='2'] .gSmooth[data-level='2'],
+  &[data-smooth='3'] .gSmooth[data-level='3'] {
+    opacity: 0.85;
+  }
 }
 </style>
 
+
 <i18n src="../../locale.json"/>
+
+<style scoped lang="scss">
+.viz-section {
+  /* the stacked Oct buttons need less width than 220 */
+  --expandedWidth: 190px;
+}
+</style>

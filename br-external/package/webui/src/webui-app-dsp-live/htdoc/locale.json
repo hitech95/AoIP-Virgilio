@@ -162,7 +162,11 @@
     "Muting is not allowed by the policy": "Muting is not allowed by the policy",
     "Enable curve smoothing": "Enable curve smoothing",
     "Disable curve smoothing": "Disable curve smoothing",
-    "Enable or disable the heatmap": "Enable or disable the heatmap"
+    "Enable or disable the heatmap": "Enable or disable the heatmap",
+    "High precision": "High precision",
+    "Enables the FFT spectrum analysis (computation heavy)": "Enables the FFT spectrum analysis (computation heavy)",
+    "Enables spectrum curve smoothing": "Enables spectrum curve smoothing",
+    "Enables the spectrum heatmap display": "Enables the spectrum heatmap display"
   },
   "it": {
     "Filter Block": "Blocco filtri",
@@ -327,6 +331,10 @@
     "Muting is not allowed by the policy": "Il silenziamento non è consentito dalla policy",
     "Enable curve smoothing": "Attiva la smussatura delle curve",
     "Disable curve smoothing": "Disattiva la smussatura delle curve",
-    "Enable or disable the heatmap": "Abilita o disabilita la mappa di calore"
+    "Enable or disable the heatmap": "Abilita o disabilita la mappa di calore",
+    "High precision": "Alta precisione",
+    "Enables the FFT spectrum analysis (computation heavy)": "Abilita l'analisi FFT dello spettro (pesante per la CPU)",
+    "Enables spectrum curve smoothing": "Attiva la smussatura delle curve dello spettro",
+    "Enables the spectrum heatmap display": "Abilita la visualizzazione della mappa di calore"
   }
 }

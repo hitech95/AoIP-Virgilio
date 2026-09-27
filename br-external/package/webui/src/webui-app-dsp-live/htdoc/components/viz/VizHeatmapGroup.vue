@@ -1,15 +1,15 @@
 <template>
   <VizSection
     group-id="heatmap"
-    :expanded-width="290"
     :title="$t('Heatmap')"
     dense
     toggle
     :toggle-value="vizOptions.heatmapEnabled"
-    :toggle-title="$t('Enable or disable the heatmap')"
+    :toggle-title="$t('Enables the spectrum heatmap display')"
     @update:toggle-value="(v) => (vizOptions.heatmapEnabled = v)"
     :disabled="!vizOptions.spectrumEnabled"
     :disabled-tooltip="$t('Enable the FFT spectrum to configure the analyzer')"
+    :body-dimmed="!vizOptions.heatmapEnabled"
     :data-power="vizOptions.heatmapEnabled ? 'on' : 'off'"
   >
     <template #glyph>
@@ -26,7 +26,7 @@
       </svg>
     </template>
 
-    <div class="heatmap-inline" :class="{ 'heatmap-off': !vizOptions.heatmapEnabled }">
+    <div class="heatmap-inline">
       <HeatmapSettings
         compact
         :mask-mode="vizOptions.heatmapMaskMode"
@@ -64,10 +64,33 @@ function applyHeatmapChange(changes: {
 }
 </script>
 
+<style scoped lang="scss">
+.viz-section {
+  .glyphHeatmap {
+    opacity: 0.3;
+    transition: opacity 0.28s ease;
+  }
+
+  &[data-power='on'] .glyphHeatmap {
+    opacity: 1;
+  }
+}
+
+.heatmap-inline {
+  width: 100%;
+  min-width: 0;
+  /* the settings body may exceed the fixed bar height: thin scroll */
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+</style>
+
 <i18n src="../../locale.json"/>
 
-<style scoped>
+<style scoped lang="scss">
 .heatmap-inline {
+  width: 100%;
   min-width: 0;
   /* the settings body may exceed the fixed bar height: thin scroll */
   max-height: 100%;
@@ -75,10 +98,5 @@ function applyHeatmapChange(changes: {
   scrollbar-width: thin;
 }
 
-/* settings are meaningless while the heatmap is off */
-.heatmap-off {
-  opacity: 0.5;
-  pointer-events: none;
-}
 </style>
 

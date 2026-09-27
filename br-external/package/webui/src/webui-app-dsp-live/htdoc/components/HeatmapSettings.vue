@@ -1,6 +1,6 @@
 <template>
   <div class="heatmap-settings" :class="{ compact }">
-    <div class="section labelled" :class="{ span2: compact }">
+    <div class="section labelled stacked" :class="{ span2: compact }">
       <span class="label">{{ $t('Mask') }}</span>
       <el-radio-group
         size="small"
@@ -11,14 +11,16 @@
         <el-radio-button value="bottom">{{ $t('Bottom') }}</el-radio-button>
         <el-radio-button value="full">{{ $t('Full') }}</el-radio-button>
       </el-radio-group>
-      <el-checkbox
-        v-if="compact"
+    </div>
+
+    <div v-if="compact" class="section labelled stacked" :class="{ span2: compact }">
+      <el-switch
         size="small"
         :model-value="highPrecision"
+        :aria-label="$t('High precision (slower, more stable)')"
         @update:model-value="(v: boolean) => emit('change', { highPrecision: v })"
-      >
-        {{ $t('High precision (slower, more stable)') }}
-      </el-checkbox>
+      />
+      <span class="label">{{ $t('High precision') }}</span>
     </div>
 
     <div v-if="!compact" class="section">
@@ -115,50 +117,44 @@ const params = [
 
 <i18n src="../locale.json"/>
 
-<style scoped>
-/* inline (compact) layout: dense two-column grid that fits the viz bar */
+<style scoped lang="scss">
+/* inline (compact) layout: fits the viz bar. Label-above-control rows;
+ * Element Plus components keep their default styling here. */
 .heatmap-settings.compact {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1px 14px;
+  gap: 2px 14px;
   align-items: center;
-}
-
-.heatmap-settings.compact .section {
-  line-height: 1.2;
-}
-
-.heatmap-settings.compact .knob-row {
-  height: 24px;
-}
-
-.heatmap-settings.compact .section {
-  margin: 0;
-}
-
-.heatmap-settings.compact .section.labelled {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.heatmap-settings.compact .section.span2 {
-  grid-column: 1 / -1;
-}
-
-.heatmap-settings.compact .section.span2 .el-checkbox {
-  height: 24px;
-  margin-left: auto;
-  margin-right: 0;
-}
-
-.heatmap-settings.compact .knob-slider {
-  flex: 1;
   min-width: 0;
-}
 
-.heatmap-settings.compact .knob-slider {
-  flex: 1;
-  min-width: 0;
+  .section {
+    margin: 0;
+    line-height: 1.2;
+
+    &.labelled {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    &.stacked {
+      flex-direction: column;
+      align-items: flex-start;
+
+      .label {
+        color: var(--el-text-color-secondary);
+      }
+    }
+
+    &.span2 {
+      grid-column: 1 / -1;
+    }
+
+    /* sliders hidden for now: the compact body only shows the mask mode
+     * and the precision toggle until the settings layout is redesigned */
+    &.labelled.knob-row {
+      display: none;
+    }
+  }
 }
 </style>

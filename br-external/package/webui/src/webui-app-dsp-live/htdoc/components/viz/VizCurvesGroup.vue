@@ -1,14 +1,26 @@
 <template>
   <VizSection
     group-id="curves"
-    :expanded-width="200"
     :title="$t('Spectrum Curves')"
     :disabled="!vizOptions.spectrumEnabled"
     :disabled-tooltip="$t('Enable the FFT spectrum to configure the analyzer')"
     :data-lta="vizOptions.showLTA ? 'on' : 'off'"
     :data-sta="vizOptions.showSTA ? 'on' : 'off'"
     :data-peak="vizOptions.showPeak ? 'on' : 'off'"
+    body-align="start"
+    body-justify="space-evenly"
   >
+    <template #header-actions>
+      <el-tooltip :content="$t('Reset STA/LTA/Peak averages')" placement="top">
+        <el-button size="small" :aria-label="$t('Reset averages')"
+          @click="resetAveragesTick.count++">
+          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+            <path d="M20 12a8 8 0 1 1-2.1-5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            <path d="M19.8 3.8v3.9h-3.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </el-button>
+      </el-tooltip>
+    </template>
     <template #glyph>
       <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
         <line class="glyphPeak" x1="4" y1="7" x2="20" y2="7" />
@@ -17,7 +29,7 @@
       </svg>
     </template>
 
-    <div class="row">
+    <div class="row curves-wave-row">
       <div class="waveStack">
           <svg viewBox="0 0 120 24" xmlns="http://www.w3.org/2000/svg">
             <defs>
@@ -81,16 +93,17 @@
             <rect class="staFill" x="2" y="0" width="116" height="24" fill="url(#eqStaWaveP)" filter="url(#eqStaGlow)" />
             <rect class="peakFill" x="2" y="0" width="116" height="24" fill="url(#eqPeakWaveP)" filter="url(#eqPeakGlow)" />
           </svg>
-        </div>
-
-        <VizChip
-          :active="vizOptions.showLTA"
-          type="primary"
-          :title="$t('Long-term average (slow)')"
-          @click="vizOptions.showLTA = !vizOptions.showLTA"
-        >
-          LTA
-        </VizChip>
+      </div>
+    </div>
+    <div class="row curves-chips-row">
+      <VizChip
+        :active="vizOptions.showLTA"
+        type="primary"
+        :title="$t('Long-term average (slow)')"
+        @click="vizOptions.showLTA = !vizOptions.showLTA"
+      >
+        LTA
+      </VizChip>
         <VizChip
           :active="vizOptions.showSTA"
           type="success"
@@ -107,16 +120,6 @@
         >
           Peak
         </VizChip>
-        <VizChip
-          :title="$t('Reset STA/LTA/Peak averages')"
-          :aria-label="$t('Reset averages')"
-          @click="resetAveragesTick.count++"
-        >
-          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-            <path d="M20 12a8 8 0 1 1-2.1-5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-            <path d="M19.8 3.8v3.9h-3.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </VizChip>
       </div>
     </VizSection>
 </template>
@@ -126,5 +129,76 @@ import { vizOptions, resetAveragesTick } from '../../stores/vizOptions'
 import VizChip from '../VizChip.vue'
 import VizSection from '../viz/VizSection.vue'
 </script>
+
+<style scoped lang="scss">
+.viz-section {
+  /* the animated wave bottom-aligns onto its row baseline */
+  .curves-wave-row {
+    align-items: flex-end;
+  }
+
+  /* stub glyph lines */
+  .glyphLta,
+  .glyphSta,
+  .glyphPeak {
+    opacity: 0.25;
+    transition: opacity 0.2s ease;
+  }
+
+  .glyphLta { stroke: var(--el-color-primary); }
+  .glyphSta { stroke: var(--el-color-success); }
+  .glyphPeak { stroke: var(--el-color-warning); }
+
+  &[data-lta='on'] .glyphLta,
+  &[data-sta='on'] .glyphSta,
+  &[data-peak='on'] .glyphPeak {
+    opacity: 1;
+  }
+
+  /* body: animated series wave */
+  .waveStack {
+    flex-shrink: 0;
+
+    svg {
+      width: 56px;
+      height: 20px;
+      display: block;
+    }
+  }
+
+  .waveFlat {
+    stroke: var(--el-border-color-darker);
+    stroke-width: 1.5;
+    transition: opacity 0.2s ease;
+  }
+
+  .ltaFill,
+  .staFill,
+  .peakFill {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  &[data-lta='on'] {
+    .ltaFill { opacity: 1; }
+    .waveFlat { opacity: 0; }
+  }
+
+  &[data-sta='on'] {
+    .staFill { opacity: 1; }
+    .waveFlat { opacity: 0; }
+  }
+
+  &[data-peak='on'] {
+    .peakFill { opacity: 1; }
+    .waveFlat { opacity: 0; }
+  }
+
+  /* wave gradient stops (Element Plus palette) */
+  #eqLtaGrad .stop { stop-color: var(--el-color-primary); }
+  #eqStaGrad .stop { stop-color: var(--el-color-success); }
+  #eqPeakGrad .stop { stop-color: var(--el-color-warning); }
+}
+</style>
 
 <i18n src="../../locale.json"/>
