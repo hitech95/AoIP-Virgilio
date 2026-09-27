@@ -60,10 +60,10 @@ index 09b385a..db9aa69 100644
              Ok(_) => {
 diff --git a/src/config/manifest.rs b/src/config/manifest.rs
 new file mode 100644
-index 0000000..a9e7058
+index 0000000..f203ff0
 --- /dev/null
 +++ b/src/config/manifest.rs
-@@ -0,0 +1,1652 @@
+@@ -0,0 +1,1637 @@
 +// CamillaDSP - A flexible tool for processing audio
 +// Copyright (C) 2026 Henrik Enquist
 +//
@@ -103,7 +103,7 @@ index 0000000..a9e7058
 +//! passing through `validate_config` is checked against it. Startup
 +//! then aborts on mismatch; websocket/Reload edits are rejected.
 +
-+use std::collections::{BTreeMap, HashSet};
++use std::collections::{BTreeMap, HashMap, HashSet};
 +use std::sync::OnceLock;
 +
 +use serde::{Deserialize, Serialize};
@@ -424,21 +424,6 @@ index 0000000..a9e7058
 +        return Err("processors are not allowed in a locked pipeline".to_string());
 +    }
 +
-+    // normalize the per-mixer free-field lists: lowercase, "gain" always
-+    // implied, unknown entries dropped ("mute" is the only extra today)
-+    let mut allows: MixerAllows = HashMap::new();
-+    for name in &user_gains {
-+        let mut fields: Vec<String> = spec
-+            .mixer_allow
-+            .as_ref()
-+            .and_then(|m| m.get(name))
-+            .cloned()
-+            .unwrap_or_default();
-+        fields.retain(|f| f == "mute");
-+        let mut list: Vec<String> = vec!["gain".to_string()];
-+        list.extend(fields);
-+        allows.insert(name.clone(), list);
-+    }
 +    let steps: Vec<PipelineStep> = conf.pipeline.clone().unwrap_or_default();
 +    let step_values: Vec<Value> = steps.iter().map(|s| canonical(s)).collect();
 +
@@ -613,7 +598,7 @@ index 0000000..a9e7058
 +            // embed the mixer STRUCTURE only
 +            let mut def_value = canonical(def);
 +            if user_gains.contains(mname) {
-+                strip_mixer_gains(&mut def_value, allows.get(mname).map(|v| v.as_slice()).unwrap_or(&["gain"]));
++                strip_mixer_gains(&mut def_value, allows.get(mname).map(|v| v.as_slice()).unwrap_or(&["gain".to_string()]));
 +            }
 +            mixers.insert(mname.to_string(), def_value);
 +        }
@@ -856,7 +841,7 @@ index 0000000..a9e7058
 +    if let Some(mixers_map) = value.as_object_mut() {
 +        for (name, mixer) in mixers_map.iter_mut() {
 +            if user_gains.contains(name) {
-+                strip_mixer_gains(mixer, allows.get(name).map(|v| v.as_slice()).unwrap_or(&["gain"]));
++                strip_mixer_gains(mixer, allows.get(name).map(|v| v.as_slice()).unwrap_or(&["gain".to_string()]));
 +            }
 +        }
 +    }
@@ -930,7 +915,7 @@ index 0000000..a9e7058
 +                    ));
 +                }
 +                let run = &step_values[*first_step..*first_step + *n];
-+                let body = run_body(conf, name, run, &user_gains);
++                let body = run_body(conf, name, run, &user_gains, &allows);
 +                subchains.push(SubChain::Locked {
 +                    name: name.clone(),
 +                    sha256: hash_value(&body),
