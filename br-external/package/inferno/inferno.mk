@@ -13,8 +13,8 @@ INFERNO_LICENSE_FILES = LICENSE
 INFERNO_DEPENDENCIES = alsa-lib
 
 INFERNO_CARGO_ENV = \
-	CARGO_TARGET_$(call UPPERCASE,$(RUSTC_TARGET_NAME))_RUSTFLAGS="--remap-path-prefix=$(HOST_DIR)=/usr -Clink-arg=-Wl,--allow-multiple-definition -C target-cpu=cortex-a7 -C target-feature=+neon -C target-feature=-crt-static" \
-	RUSTFLAGS="-C target-cpu=cortex-a7 -C target-feature=+neon -C target-feature=-crt-static"
+	CARGO_TARGET_$(call UPPERCASE,$(RUSTC_TARGET_NAME))_RUSTFLAGS="--remap-path-prefix=$(HOST_DIR)=/usr -Clink-arg=-Wl,--allow-multiple-definition $(VIRGILIO_RUST_CPU_FLAGS)" \
+	RUSTFLAGS="$(VIRGILIO_RUST_CPU_FLAGS)"
 
 define INFERNO_BUILD_CMDS
 	cd $(@D) && \
@@ -30,6 +30,7 @@ define INFERNO_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/bin/inferno2pipe
 	$(INSTALL) -D -m 0755 $(@D)/target/$(RUSTC_TARGET_NAME)/release/libasound_module_pcm_inferno.so \
 		$(TARGET_DIR)/usr/lib/alsa-lib/libasound_module_pcm_inferno.so
+	cp -a $(INFERNO_PKGDIR)/files/. $(TARGET_DIR)/
 endef
 
 $(eval $(cargo-package))

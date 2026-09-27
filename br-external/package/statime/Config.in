@@ -1,8 +1,12 @@
 config BR2_PACKAGE_STATIME
 	bool "statime (inferno-dev fork)"
 	depends on BR2_USE_MMU # Rust
+	select BR2_PACKAGE_UCODE
 	help
 	  PTP daemon (fork with PTPv1 / inferno support), required by inferno.
-	  Pinned commit from the inferno-dev branch.
+	  Pinned commit from the inferno-dev branch. Ships ptp-monitor
+	  (ucode: bridges the usrvclock export to ubus and procd hotplug),
+	  the procd init scripts and uci defaults; boards override the
+	  defaults via their rootfs overlay where needed.
 
 	  https://github.com/teodly/statime (fork of pendulum-project/statime)

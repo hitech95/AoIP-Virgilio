@@ -4,8 +4,9 @@
 # Features: ALSA backend always built on Linux; websocket for runtime control;
 # ubus for the native OpenWrt status object (patch 0004, ubus-zero git dep).
 # 32bit feature (float32 processing) is enabled: recommended on 32-bit CPUs.
-# Config is NOT shipped: it is generated at runtime from uci into /tmp
-# (see M6 config-generator integration).
+# No default config shipped: /usr/bin/camilladsp-genconf (ucode) generates it
+# at runtime from uci into /tmp (see M6 config-generator integration; the
+# init script and uci defaults live in virgilio-base).
 # v4.1.3 has no Cargo.lock in git, so vendoring is disabled and the build
 # runs with network (see DOWNLOAD_POST_PROCESS below).
 
@@ -16,13 +17,13 @@ CAMILLADSP_LICENSE = GPL-3.0 or MPL-2.0
 CAMILLADSP_LICENSE_FILES = LICENSE_GPLv3.txt LICENSE_MPL2.0.txt
 CAMILLADSP_DEPENDENCIES = alsa-lib
 
-# NEON: the armv7 rust target does not enable it by default. Must preserve the
-# arm link workaround that pkg-cargo.mk injects (-Clink-arg for multiple
-# definitions), so we include it explicitly. musl defaults to crt-static
-# (+crt-static) which tries -lasound statically; use dynamic linking instead.
+# Rust target tuning (NEON/cpu/-crt-static) is per-arch: see
+# rustflags.mk at the external tree root; it must preserve the arm link
+# workaround that pkg-cargo.mk injects (-Clink-arg for multiple
+# definitions), kept below in the generic part.
 CAMILLADSP_CARGO_ENV = \
-	CARGO_TARGET_$(call UPPERCASE,$(RUSTC_TARGET_NAME))_RUSTFLAGS="--remap-path-prefix=$(HOST_DIR)=/usr -Clink-arg=-Wl,--allow-multiple-definition -C target-cpu=cortex-a7 -C target-feature=+neon -C target-feature=-crt-static" \
-	RUSTFLAGS="-C target-cpu=cortex-a7 -C target-feature=+neon -C target-feature=-crt-static"
+	CARGO_TARGET_$(call UPPERCASE,$(RUSTC_TARGET_NAME))_RUSTFLAGS="--remap-path-prefix=$(HOST_DIR)=/usr -Clink-arg=-Wl,--allow-multiple-definition $(VIRGILIO_RUST_CPU_FLAGS)" \
+	RUSTFLAGS="$(VIRGILIO_RUST_CPU_FLAGS)"
 
 CAMILLADSP_CARGO_BUILD_OPTS = --features 32bit,ubus
 
@@ -38,6 +39,7 @@ endef
 define CAMILLADSP_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/target/$(RUSTC_TARGET_NAME)/release/camilladsp \
 		$(TARGET_DIR)/usr/bin/camilladsp
+	cp -a $(CAMILLADSP_PKGDIR)/files/. $(TARGET_DIR)/
 endef
 
 $(eval $(cargo-package))

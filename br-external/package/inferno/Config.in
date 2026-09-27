@@ -4,6 +4,8 @@ config BR2_PACKAGE_INFERNO
 	select BR2_PACKAGE_ALSA_LIB
 	help
 	  Unofficial implementation of the Dante protocol (Audio over IP).
-	  Binaries: inferno2pipe; ALSA plugin: alsa_pcm_inferno.
+	  Binaries: inferno2pipe; ALSA plugin: alsa_pcm_inferno. Ships the
+	  uci defaults (/etc/config/inferno); boards override them via
+	  their rootfs overlay where needed.
 
 	  https://github.com/teodly/inferno

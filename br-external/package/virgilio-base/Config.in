@@ -8,22 +8,24 @@ config BR2_PACKAGE_VIRGILIO_BASE
 	select BR2_PACKAGE_UBOX
 	select BR2_PACKAGE_NETIFD
 	select BR2_PACKAGE_JSONFILTER
-	select BR2_PACKAGE_UCODE
 	help
-	  Common base system shared by every Virgilio device (the OpenWrt
-	  "base-files" role), independent of board and SoC:
+	  Generic base system shared by every Virgilio device (the OpenWrt
+	  "base-files" role), independent of board, SoC and application
+	  packages:
 
-	   - procd init scripts + rc.d layout (boot, network, system, ...
-	     and the service wiring for camilladsp/statime/ptp-monitor)
-	   - /etc/config defaults (system, camilladsp, inferno, statime,
-	     ptp-monitor)
+	   - procd init scripts + rc.d layout (boot, network, system, ...)
+	   - /etc/config/system default
 	   - system glue: lib/functions*.sh, rc.common, ifup/ifdown/ifstatus,
 	     service, hotplug-call, login.sh, inittab, preinit
-	   - ucode tools: camilladsp-genconf (uci -> camilladsp YAML/policy
-	     generator) and ptp-monitor (statime usrvclock -> ubus bridge)
-	   - hotplug policies and ALSA config for the inferno PCM
+	   - profile, motd, hotplug dispatch config
+
+	  Application service wiring (init scripts, uci defaults, tools)
+	  ships with the app packages: camilladsp-genconf + init/config in
+	  camilladsp, ptp-monitor + init/config in statime, uci defaults in
+	  inferno. Their uci defaults are overridable per device via the
+	  board rootfs overlay (applied after all packages).
 
 	  Selects the uci/procd stack it requires (procd pulls ubus and
 	  udebug, netifd pulls json-c/libnl/ucode). Device-specific files
-	  (network topology, board fixups, test-rig services) stay in the
-	  per-board rootfs overlay.
+	  (network topology, ALSA config, FIR coefficients, board fixups,
+	  test-rig services) stay in the per-board rootfs overlay.

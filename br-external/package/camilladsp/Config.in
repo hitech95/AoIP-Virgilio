@@ -2,10 +2,13 @@ config BR2_PACKAGE_CAMILLADSP
 	bool "camilladsp"
 	depends on BR2_USE_MMU # Rust
 	select BR2_PACKAGE_ALSA_LIB
+	select BR2_PACKAGE_UCODE
 	help
 	  CamillaDSP is a flexible audio processing engine for
 	  crossovers, room correction etc. (ALSA backend, websocket
-	  control, 32-bit float processing). Config is generated at
-	  runtime from uci, no default config is shipped.
+	  control, 32-bit float processing). Ships camilladsp-genconf
+	  (ucode: runtime config generated from uci), the procd init
+	  script and uci defaults; boards override the defaults via
+	  their rootfs overlay where needed.
 
 	  https://github.com/HEnquist/camilladsp

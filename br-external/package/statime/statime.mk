@@ -44,8 +44,8 @@ endef
 STATIME_PRE_BUILD_HOOKS += STATIME_UPDATE_USRVCLOCK
 
 STATIME_CARGO_ENV = \
-	CARGO_TARGET_$(call UPPERCASE,$(RUSTC_TARGET_NAME))_RUSTFLAGS="--remap-path-prefix=$(HOST_DIR)=/usr -Clink-arg=-Wl,--allow-multiple-definition -C target-cpu=cortex-a7 -C target-feature=+neon -C target-feature=-crt-static" \
-	RUSTFLAGS="-C target-cpu=cortex-a7 -C target-feature=+neon -C target-feature=-crt-static"
+	CARGO_TARGET_$(call UPPERCASE,$(RUSTC_TARGET_NAME))_RUSTFLAGS="--remap-path-prefix=$(HOST_DIR)=/usr -Clink-arg=-Wl,--allow-multiple-definition $(VIRGILIO_RUST_CPU_FLAGS)" \
+	RUSTFLAGS="$(VIRGILIO_RUST_CPU_FLAGS)"
 
 define STATIME_BUILD_CMDS
 	cd $(@D) && \
@@ -59,6 +59,7 @@ endef
 define STATIME_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/target/$(RUSTC_TARGET_NAME)/release/statime \
 		$(TARGET_DIR)/usr/bin/statime
+	cp -a $(STATIME_PKGDIR)/files/. $(TARGET_DIR)/
 endef
 
 $(eval $(cargo-package))
