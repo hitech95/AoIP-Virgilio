@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Build the firmware with Buildroot (see plan/plan.md, M1).
+# Each defconfig gets its own output dir (required when variants differ in
+# arch/toolchain): output/<variant>. Override with DEFCONFIG=<name>_defconfig.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILDROOT="${ROOT}/buildroot"
-OUT="${ROOT}/output"
 
-DEFCONFIG="rk3506qemu_defconfig"
+DEFCONFIG="${DEFCONFIG:-rk3506qemu_defconfig}"
+VARIANT="${DEFCONFIG%_defconfig}"
+OUT="${ROOT}/output/${VARIANT}"
+
 JOBS="${JOBS:-$(nproc)}"
 
 # Host shim: Buildroot 2025.02 is incompatible with uutils 'install'

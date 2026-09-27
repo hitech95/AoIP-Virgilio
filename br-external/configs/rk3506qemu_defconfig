@@ -60,7 +60,7 @@ BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/rk3506qemu/rootfs-overla
 # Flatten kernel modules OpenWrt-style for ubox kmodloader + regenerate modules.dep
 BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/common/post-build.sh"
 # Enable busybox ntpd (sysntpd service)
-BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/rk3506qemu/busybox.fragment"
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/common/busybox.fragment"
 
 # Kernel: mainline LTS; no arm32 virt_defconfig in mainline, multi_v7 has
 # SMP + NEON + VIRTIO_MMIO + EXT4 + DEVTMPFS; our fragment adds audio/PTP
