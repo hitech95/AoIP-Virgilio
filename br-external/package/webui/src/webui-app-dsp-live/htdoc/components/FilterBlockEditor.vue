@@ -161,7 +161,7 @@ export default {
 
 <i18n src="../locale.json"/>
 
-<style scoped>
+<style scoped lang="scss">
 .name-tag { cursor: pointer; }
 .structural-tag { cursor: default; }
 .label-tag { cursor: pointer; }

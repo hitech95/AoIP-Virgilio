@@ -178,7 +178,7 @@ export default {
 
 <i18n src="../locale.json"/>
 
-<style scoped>
+<style scoped lang="scss">
 .live-page {
   display: flex;
   flex-direction: column;
@@ -215,16 +215,16 @@ export default {
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
-}
 
-.live-tab:hover {
-  color: var(--el-color-primary);
-}
+  &:hover {
+    color: var(--el-color-primary);
+  }
 
-.live-tab.active {
-  background: var(--el-bg-color);
-  color: var(--el-color-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  &.active {
+    background: var(--el-bg-color);
+    color: var(--el-color-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  }
 }
 
 .live-toolbar {

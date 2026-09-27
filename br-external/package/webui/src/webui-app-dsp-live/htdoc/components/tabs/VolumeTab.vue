@@ -587,7 +587,7 @@ export default {
 
 <i18n src="../../locale.json"/>
 
-<style scoped>
+<style scoped lang="scss">
 .volume-page {
   padding: 12px 10px;
   display: flex;
@@ -611,26 +611,42 @@ export default {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+
+  :deep(.el-card__body) {
+    flex: 1;
+    min-height: 0;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  &.fader-off :deep(.el-card__header) {
+    color: var(--el-text-color-secondary);
+  }
+
+  .fader-label {
+    color: var(--el-text-color-secondary);
+  }
+
+  :deep(.el-slider__marks-text) {
+    font-size: var(--el-font-size-base);
+    color: var(--el-text-color-secondary);
+  }
+
+  :deep(.el-slider__runway) {
+    height: calc(100% - 28px) !important;
+    margin: 14px 10px !important;
+  }
 }
 
-.vol-fader :deep(.el-card__body) {
-  flex: 1;
-  min-height: 0;
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-}
-
-.vol-fader.fader-off :deep(.el-card__header) {
-  color: var(--el-text-color-secondary);
+.fader-value {
+  flex-shrink: 0;
+  min-width: 72px;
+  text-align: center;
 }
 
 .fader-value-ghost {
   visibility: hidden;
-}
-
-.vol-fader .fader-label {
-  color: var(--el-text-color-secondary);
 }
 
 .playback-card :deep(.el-card__body) {
@@ -647,36 +663,16 @@ export default {
   gap: 8px;
 }
 
-.fader-value {
-  flex-shrink: 0;
-  min-width: 72px;
-  text-align: center;
-}
-
 .fader-and-meter {
   flex: 1;
   min-height: 0;
   display: flex;
   align-items: stretch;
   gap: 12px;
-}
 
-/* Native EP mark labels ride on the runway, so they track the notch dots
- * exactly. The runway is inset vertically: the 0 dB handle stays inside
- * the card (no overlap with the value tag) and every fader in every card
- * gets the same runway length. */
-.vol-fader :deep(.el-slider__marks-text) {
-  font-size: var(--el-font-size-base);
-  color: var(--el-text-color-secondary);
-}
-
-.vol-fader :deep(.el-slider__runway) {
-  height: calc(100% - 28px) !important;
-  margin: 14px 10px !important;
-}
-
-.fader-and-meter .vu-vertical {
-  padding: 14px 0;
+  .vu-vertical {
+    padding: 14px 0;
+  }
 }
 
 .fader-slider {
@@ -716,43 +712,54 @@ export default {
   text-align: center;
   min-width: 52px;
   height: 34px;
+
+  &.matrix-head { font-weight: 600; }
+
+  &.matrix-corner { min-width: 0; width: 40px; }
+
+  &.matrix-rotate div {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    margin: 0 auto;
+  }
+
+  &.matrix-mute { padding: 2px; }
+
+  &.matrix-mute-head { min-width: 48px; }
+
+  &.matrix-idx {
+    width: 96px;
+    min-width: 96px;
+    max-width: 96px;
+  }
+
+  &.matrix-src { text-align: right; }
+
+  &.matrix-active { background: rgba(103, 194, 58, 0.15); }
+
+  &.matrix-cell-btn {
+    cursor: pointer;
+
+    /* live-page addition: hover cross-highlight */
+    &.matrix-hl {
+      background: var(--el-fill-color-light);
+
+      &.matrix-active {
+        background: rgba(103, 194, 58, 0.35);
+      }
+    }
+  }
 }
-
-.matrix-head { font-weight: 600; }
-
-.matrix-corner { min-width: 0; width: 40px; }
-
-.matrix-rotate div {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin: 0 auto;
-}
-
-.matrix-mute { padding: 2px; }
-
-.matrix-mute-head { min-width: 48px; }
-
-.matrix-idx {
-  width: 96px;
-  min-width: 96px;
-  max-width: 96px;
-}
-
-.matrix-src { text-align: right; }
-
-.matrix-active { background: rgba(103, 194, 58, 0.15); }
-
-.matrix-cell-btn { cursor: pointer; }
 
 .cell-gain {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
-.matrix-muted .cell-muted,
-.cell-muted {
+.cell-muted,
+.matrix-muted .cell-muted {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
@@ -763,7 +770,9 @@ export default {
   fill: currentColor;
 }
 
-.label-tag { cursor: pointer; }
+.label-tag {
+  cursor: pointer;
+}
 
 .cell-disabled {
   opacity: 0.45;
@@ -775,18 +784,12 @@ export default {
   margin-right: 4px;
 }
 
-/* live-page addition: hover cross-highlight */
-.matrix-hl,
-.matrix-hl-col {
-  background: var(--el-fill-color-light);
-}
-
 tr.matrix-hl-row td {
   background: var(--el-fill-color-light);
 }
 
-.matrix-active.matrix-hl {
-  background: rgba(103, 194, 58, 0.35);
+.matrix-hl-col {
+  background: var(--el-fill-color-light);
 }
 
 .out-edit {

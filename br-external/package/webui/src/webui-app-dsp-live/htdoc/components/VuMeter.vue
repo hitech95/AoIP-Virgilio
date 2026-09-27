@@ -78,16 +78,53 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .vu-vertical {
   display: inline-flex;
   flex-direction: column;
   gap: 4px;
-}
 
-.vu-vertical.is-fluid {
-  height: 100%;
-  align-self: stretch;
+  &.is-fluid {
+    height: 100%;
+    align-self: stretch;
+
+    .vu-body,
+    .vu-channels,
+    .vu-channel {
+      height: 100%;
+    }
+
+    .vu-body {
+      flex: 1;
+      min-height: 0;
+    }
+
+    .vu-track {
+      flex: 1;
+      min-height: 0;
+    }
+  }
+
+  /* shared dB scale: labels at their scale position */
+  .vu-scale {
+    position: relative;
+    width: 40px;
+    flex-shrink: 0;
+  }
+
+  .vu-scale-tick {
+    position: absolute;
+    transform: translateY(50%);
+    right: 4px;
+    font-size: var(--el-font-size-base);
+    line-height: 1;
+    color: var(--el-text-color-secondary);
+  }
+
+  .vu-track {
+    flex: 1;
+    min-height: 0;
+  }
 }
 
 .vu-title {
@@ -103,27 +140,6 @@ export default {
   align-items: stretch;
 }
 
-.vu-vertical.is-fluid .vu-body {
-  flex: 1;
-  min-height: 0;
-}
-
-/* shared dB scale: labels at their scale position */
-.vu-scale {
-  position: relative;
-  width: 40px;
-  flex-shrink: 0;
-}
-
-.vu-scale-tick {
-  position: absolute;
-  transform: translateY(50%);
-  right: 4px;
-  font-size: var(--el-font-size-base);
-  line-height: 1;
-  color: var(--el-text-color-secondary);
-}
-
 .vu-channels {
   display: flex;
   gap: 6px;
@@ -136,22 +152,12 @@ export default {
   gap: 3px;
 }
 
-.vu-vertical.is-fluid .vu-channels,
-.vu-vertical.is-fluid .vu-channel {
-  height: 100%;
-}
-
 .vu-track {
   position: relative;
   width: 16px;
   border-radius: 3px;
   background: var(--el-fill-color-darker, #2a2f36);
   overflow: hidden;
-}
-
-.vu-vertical.is-fluid .vu-track {
-  flex: 1;
-  min-height: 0;
 }
 
 /* gradient REVEALED by the fill height: the color at the bar top is
@@ -181,10 +187,10 @@ export default {
   margin-bottom: -1px;
   background: var(--el-text-color-primary);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
-}
 
-.vu-peak.clipped {
-  background: #d93a3a;
+  &.clipped {
+    background: #d93a3a;
+  }
 }
 
 /* 0 dBFS line through the bar */

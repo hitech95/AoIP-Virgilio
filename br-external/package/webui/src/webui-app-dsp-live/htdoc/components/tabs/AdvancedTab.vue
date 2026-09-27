@@ -451,7 +451,7 @@ export default {
 
 <i18n src="../../locale.json"/>
 
-<style scoped>
+<style scoped lang="scss">
 /* the flow canvas: viewport-relative minimum height (fits its
    content, at least half the screen) */
 .flow {

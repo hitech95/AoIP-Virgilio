@@ -163,7 +163,7 @@ export default {
 
 <i18n src="../locale.json"/>
 
-<style scoped>
+<style scoped lang="scss">
 .label-tag { cursor: pointer; }
 .ch-label { width: 100px; }
 .label-input { width: 160px; }
