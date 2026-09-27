@@ -23,6 +23,16 @@ BR2_ROOTFS_MERGED_USR=y
 # json-c, libnl via those).
 BR2_PACKAGE_VIRGILIO_BASE=y
 BR2_PACKAGE_WEBUI=y
+# webui feature apps (login ships with the shell; each app pulls the
+# service packages it needs: netifd, ubox/logread, camilladsp, inferno)
+BR2_PACKAGE_WEBUI_APP_HOME=y
+BR2_PACKAGE_WEBUI_APP_STATUS=y
+BR2_PACKAGE_WEBUI_APP_SYSTEM=y
+BR2_PACKAGE_WEBUI_APP_NETSTAT=y
+BR2_PACKAGE_WEBUI_APP_NETWORK=y
+BR2_PACKAGE_WEBUI_APP_LOGS=y
+BR2_PACKAGE_WEBUI_APP_DSP=y
+BR2_PACKAGE_WEBUI_APP_INFERNO=y
 
 # Tools
 BR2_PACKAGE_NANO=y

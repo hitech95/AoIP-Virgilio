@@ -12,4 +12,71 @@ config BR2_PACKAGE_WEBUI
 	  SCGI and implementing the OUI-style JSON RPC contract with
 	  /etc/shadow login (plan/webui.md).
 
+	  The login app is always installed (part of the auth shell). Pick
+	  the feature apps below per device; each one declares the service
+	  packages it needs.
+
 	  https://github.com/../../plan/webui.md
+
+config BR2_PACKAGE_WEBUI_APP_HOME
+	bool "home app (LAN dashboard)"
+	depends on BR2_PACKAGE_WEBUI
+	select BR2_PACKAGE_NETIFD
+	help
+	  Landing dashboard after login: LAN address, audio chain status.
+	  Reads interface state over ubus (netifd).
+
+config BR2_PACKAGE_WEBUI_APP_STATUS
+	bool "status app (system overview)"
+	depends on BR2_PACKAGE_WEBUI
+	help
+	  System info overview (kernel, uptime, load). Shows the DSP state
+	  when the camilladsp ubus object exists; degrades gracefully
+	  without camilladsp.
+
+config BR2_PACKAGE_WEBUI_APP_SYSTEM
+	bool "system app (settings, password, maintenance)"
+	depends on BR2_PACKAGE_WEBUI
+	help
+	  System settings, password change, maintenance/factory reset.
+
+config BR2_PACKAGE_WEBUI_APP_NETSTAT
+	bool "netstat app (interface statistics)"
+	depends on BR2_PACKAGE_WEBUI
+	select BR2_PACKAGE_NETIFD
+	help
+	  Per-interface packet/rate counters (/proc/net + ubus netifd).
+
+config BR2_PACKAGE_WEBUI_APP_NETWORK
+	bool "network app (interface configuration)"
+	depends on BR2_PACKAGE_WEBUI
+	select BR2_PACKAGE_NETIFD
+	help
+	  View/edit /etc/config/network through the uci RPC bridge.
+
+config BR2_PACKAGE_WEBUI_APP_LOGS
+	bool "logs app (system log viewer)"
+	depends on BR2_PACKAGE_WEBUI
+	select BR2_PACKAGE_UBOX
+	help
+	  Kernel/system log viewer; reads the ring buffer via logread
+	  (shipped by ubox).
+
+config BR2_PACKAGE_WEBUI_APP_DSP
+	bool "dsp apps (profile/filter editors)"
+	depends on BR2_PACKAGE_WEBUI
+	select BR2_PACKAGE_CAMILLADSP
+	help
+	  DSP profile and filter editor pages. Requires camilladsp:
+	  pipeline RPCs run camilladsp-genconf dry-runs and the live EQ
+	  view proxies to the camilladsp websocket (nginx location /_dsp,
+	  port 5000).
+
+config BR2_PACKAGE_WEBUI_APP_INFERNO
+	bool "inferno app (Dante/AoIP node status)"
+	depends on BR2_PACKAGE_WEBUI
+	select BR2_PACKAGE_INFERNO
+	select BR2_PACKAGE_CAMILLADSP
+	help
+	  Inferno (Dante over IP) node status: subscriptions, flows and
+	  clock state; shares the DSP pipeline RPCs for the audio path.

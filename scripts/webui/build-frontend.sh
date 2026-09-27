@@ -4,6 +4,8 @@
 #   $1/ui/         shell dist (index.html + assets, gzipped)
 #   $1/ui/views/   per-app UMD bundles (login, layout, home, status, ...)
 #   $1/menu.d/     merged menu.json files (read by webuid's ui.get_menus)
+# The apps to build are named after $2.. (webui-app-<name> dirs in src/;
+# the Kconfig app options own this list and their service dependencies).
 #
 # Node comes from the host (OUI's CONFIG_OUI_USE_HOST_NODE model): this is
 # a host build tool, nothing node-shaped ships in the image. Requires
@@ -14,7 +16,10 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUI="${ROOT}/deps/oui"
 SRC="${ROOT}/br-external/package/webui/src"
 PATCHES="${ROOT}/br-external/package/webui/patches"
-OUT="${1:?usage: build-frontend.sh <staging-dir>}"
+OUT="${1:?usage: build-frontend.sh <staging-dir> <app...>}"
+shift
+APPS=("$@")
+[ ${#APPS[@]} -gt 0 ] || { echo "build-frontend.sh: no apps selected" >&2; exit 1; }
 
 command -v node >/dev/null || { echo "node not found in PATH" >&2; exit 1; }
 NODE_MAJOR="$(node -v | sed 's/v\([0-9]*\).*/\1/')"
@@ -31,7 +36,13 @@ cp -a "${OUI}/oui-ui-core" "${WORK}/"
 for app in oui-app-layout; do
 	cp -a "${OUI}/applications/${app}" "${WORK}/applications/"
 done
-cp -a "${SRC}"/* "${WORK}/applications/"
+for app in "${APPS[@]}"; do
+	if [ ! -d "${SRC}/webui-app-${app}" ]; then
+		echo "build-frontend.sh: unknown app '${app}'" >&2
+		exit 1
+	fi
+	cp -a "${SRC}/webui-app-${app}" "${WORK}/applications/"
+done
 rm -rf "${WORK}"/applications/*/htdoc/node_modules
 
 # --- apply our patches against the pinned OUI rev -------------------------
