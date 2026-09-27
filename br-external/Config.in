@@ -1,3 +1,26 @@
+menu "Virgilio board Rust tuning"
+
+# Consumed by rustflags.mk -> VIRGILIO_RUST_CPU_FLAGS for the cargo
+# packages (camilladsp, statime, inferno). Each board defconfig declares
+# its CPU and any extra target features; no arch guessing here.
+
+config BR2_EXTERNAL_VIRGILIO_RUST_CPU
+	string "rust -C target-cpu for this board"
+	help
+	  LLVM CPU name passed as -C target-cpu (e.g. cortex-a7 for the
+	  rk3506-class armv7, cortex-a53 for the RPi Zero 2 W aarch64).
+	  Empty = rustc target defaults.
+
+config BR2_EXTERNAL_VIRGILIO_RUST_FEATURES
+	string "extra rust target-features for this board"
+	help
+	  Comma-separated -C target-feature list (e.g. "+neon" on armv7
+	  where the rust target does not enable NEON by default; aarch64
+	  has NEON as baseline and usually needs nothing). -crt-static is
+	  appended automatically (dynamic libc linking).
+
+endmenu
+
 menu "Virgilio packages"
 
 # libubox and ubus come from Buildroot upstream (package/libubox, package/ubus)

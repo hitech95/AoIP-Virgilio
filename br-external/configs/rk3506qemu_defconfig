@@ -4,6 +4,12 @@ BR2_arm=y
 BR2_cortex_a7=y
 BR2_ARM_FPU_NEON_VFPV4=y
 
+# Rust tuning for the cargo packages (camilladsp/statime/inferno): the
+# armv7 rust target does not enable NEON by default -> opt in here.
+# A new board sets its own CPU/features (empty = rustc defaults).
+BR2_EXTERNAL_VIRGILIO_RUST_CPU="cortex-a7"
+BR2_EXTERNAL_VIRGILIO_RUST_FEATURES="+neon"
+
 # Toolchain: musl libc, kernel headers matching the Linux version below
 BR2_TOOLCHAIN_BUILDROOT_MUSL=y
 BR2_TOOLCHAIN_BUILDROOT_CXX=y
