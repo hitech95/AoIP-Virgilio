@@ -1,0 +1,29 @@
+config BR2_PACKAGE_VIRGILIO_BASE
+	bool "virgilio-base"
+	depends on BR2_USE_MMU # procd/netifd fork()
+	select BR2_PACKAGE_LIBUBOX
+	select BR2_PACKAGE_UBUS
+	select BR2_PACKAGE_UCI
+	select BR2_PACKAGE_PROCD
+	select BR2_PACKAGE_UBOX
+	select BR2_PACKAGE_NETIFD
+	select BR2_PACKAGE_JSONFILTER
+	select BR2_PACKAGE_UCODE
+	help
+	  Common base system shared by every Virgilio device (the OpenWrt
+	  "base-files" role), independent of board and SoC:
+
+	   - procd init scripts + rc.d layout (boot, network, system, ...
+	     and the service wiring for camilladsp/statime/ptp-monitor)
+	   - /etc/config defaults (system, camilladsp, inferno, statime,
+	     ptp-monitor)
+	   - system glue: lib/functions*.sh, rc.common, ifup/ifdown/ifstatus,
+	     service, hotplug-call, login.sh, inittab, preinit
+	   - ucode tools: camilladsp-genconf (uci -> camilladsp YAML/policy
+	     generator) and ptp-monitor (statime usrvclock -> ubus bridge)
+	   - hotplug policies and ALSA config for the inferno PCM
+
+	  Selects the uci/procd stack it requires (procd pulls ubus and
+	  udebug, netifd pulls json-c/libnl/ucode). Device-specific files
+	  (network topology, board fixups, test-rig services) stay in the
+	  per-board rootfs overlay.
