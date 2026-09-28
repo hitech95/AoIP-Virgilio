@@ -41,8 +41,8 @@ define WEBUI_INSTALL_TARGET_CMDS
 	$(INSTALL) -m 0644 $(WEBUI_PKGDIR)/daemon/core/*.uc \
 		$(TARGET_DIR)/usr/share/webui/ucode/
 	for app in login $(WEBUI_APPS); do \
-		if [ -d "$(WEBUI_PKGDIR)/src/webui-app-$(app)/daemon" ]; then \
-			$(INSTALL) -m 0644 $(WEBUI_PKGDIR)/src/webui-app-$(app)/daemon/*.uc \
+		if [ -d "$(WEBUI_PKGDIR)/src/webui-app-$$app/daemon" ]; then \
+			$(INSTALL) -m 0644 $(WEBUI_PKGDIR)/src/webui-app-$$app/daemon/*.uc \
 				$(TARGET_DIR)/usr/share/webui/ucode/; \
 		fi; \
 	done
