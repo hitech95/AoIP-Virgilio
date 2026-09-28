@@ -53,6 +53,7 @@ BR2_PACKAGE_ALSA_UTILS_APLAY=y
 BR2_PACKAGE_ALSA_UTILS_ARECORD=y
 BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
 BR2_PACKAGE_HTOP=y
+BR2_PACKAGE_DROPBEAR=y
 
 # Board-specific rootfs overlay (network topology, rig services); the
 # common base files come from the virgilio-base package
