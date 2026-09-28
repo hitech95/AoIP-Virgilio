@@ -59,7 +59,7 @@ endef
 define STATIME_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/target/$(RUSTC_TARGET_NAME)/release/statime \
 		$(TARGET_DIR)/usr/bin/statime
-	cp -a $(STATIME_PKGDIR)/files/. $(TARGET_DIR)/
+	cp -a --remove-destination $(STATIME_PKGDIR)/files/. $(TARGET_DIR)/
 endef
 
 $(eval $(cargo-package))

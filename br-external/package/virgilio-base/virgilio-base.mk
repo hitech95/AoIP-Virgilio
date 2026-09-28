@@ -10,7 +10,9 @@ VIRGILIO_BASE_LICENSE = GPL-2.0-or-later, GPL-3.0-or-later
 
 define VIRGILIO_BASE_INSTALL_TARGET_CMDS
 	mkdir -p $(TARGET_DIR)
-	cp -a $(@D)/. $(TARGET_DIR)/
+	# --remove-destination: replace pre-existing symlinks (e.g. busybox
+	# applet links) instead of writing through them into other files
+	cp -a --remove-destination $(@D)/. $(TARGET_DIR)/
 endef
 
 $(eval $(generic-package))

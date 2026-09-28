@@ -7,3 +7,8 @@ CONFIG_FEATURE_AWK_LIBM=y
 CONFIG_NC=y
 # webuid login: verify /etc/shadow hashes (cryptpw PASSWORD SALT)
 CONFIG_CRYPTPW=y
+# ifup/ifdown/ifreload are virgilio-base's netifd wrappers (usr/sbin);
+# the busybox applets must not own those names (a fresh build installs
+# busybox first and its applet symlinks made virgilio-base's cp write
+# the wrapper THROUGH the link into the busybox binary)
+# CONFIG_IFUPDOWN is not set

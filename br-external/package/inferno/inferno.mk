@@ -30,7 +30,7 @@ define INFERNO_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/bin/inferno2pipe
 	$(INSTALL) -D -m 0755 $(@D)/target/$(RUSTC_TARGET_NAME)/release/libasound_module_pcm_inferno.so \
 		$(TARGET_DIR)/usr/lib/alsa-lib/libasound_module_pcm_inferno.so
-	cp -a $(INFERNO_PKGDIR)/files/. $(TARGET_DIR)/
+	cp -a --remove-destination $(INFERNO_PKGDIR)/files/. $(TARGET_DIR)/
 endef
 
 $(eval $(cargo-package))

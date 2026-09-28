@@ -39,7 +39,7 @@ endef
 define CAMILLADSP_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/target/$(RUSTC_TARGET_NAME)/release/camilladsp \
 		$(TARGET_DIR)/usr/bin/camilladsp
-	cp -a $(CAMILLADSP_PKGDIR)/files/. $(TARGET_DIR)/
+	cp -a --remove-destination $(CAMILLADSP_PKGDIR)/files/. $(TARGET_DIR)/
 endef
 
 $(eval $(cargo-package))
