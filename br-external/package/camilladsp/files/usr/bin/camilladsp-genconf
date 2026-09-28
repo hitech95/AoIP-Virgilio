@@ -113,6 +113,10 @@ function collect(cursor) {
 			samplerate: main.samplerate ?? "44100",
 			chunksize: main.chunksize ?? "1024",
 			format: main.format ?? "S16_LE",
+			/* true when uci carries an explicit format option (the .env
+			 * depth mapping distinguishes set vs unset; `format` itself
+			 * is defaulted to S16_LE for device rendering) */
+			format_set: (main.format != null && `${main.format}` != ""),
 			wav_header: main.wav_header ?? "1",
 			capture: main.capture ?? "RawFile:/dev/zero",
 			playback: main.playback ?? "File:/dev/null",
@@ -189,6 +193,18 @@ function collect(cursor) {
 
 /* ---- inferno env sidecar (written before validation, shell parity) -------- */
 
+/* uci format (the camilladsp <-> inferno-plugin ALSA boundary) -> inferno
+ * TX wire depth. Accepts both the camilladsp file-format spellings
+ * (S24_3_LE, S24_4_RJ_LE, ...) and the bare ALSA ones (S24_LE, S24_3LE);
+ * unknown values keep the inferno default (24). */
+function tx_wire_bits(format) {
+	switch (format) {
+	case "S16_LE": return 16;
+	case "S32_LE": return 32;
+	default: return 24;
+	}
+}
+
 function write_env_sidecar(m, cursor, out) {
 	let cap_inf = (m.main.capture == "Inferno");
 	let pb_inf = (m.main.playback == "Inferno");
@@ -207,9 +223,7 @@ function write_env_sidecar(m, cursor, out) {
 	let itx = `${inf.tx_channels ?? ""}`;
 	if (itx == "") itx = pb_inf ? `${m.main.pbch}` : "0";
 
-	/* NB: RUST_LOG configures the *inferno* instance hosted inside
-	 * camilladsp (tracing env filter), not camilladsp itself. */
-	writefile(stem(out) + ".env", join("\n", [
+	let env = [
 		"RUST_LOG=warn",
 		`INFERNO_NAME=${iname}`,
 		`INFERNO_BIND_IP=${inf.interface ?? "eth1"}`,
@@ -217,7 +231,20 @@ function write_env_sidecar(m, cursor, out) {
 		`INFERNO_RX_CHANNELS=${irx}`,
 		`INFERNO_TX_CHANNELS=${itx}`,
 		`INFERNO_SAMPLE_RATE=${m.main.samplerate}`
-	]) + "\n");
+	];
+	/* TX-only: the wire depth is what THIS box advertises and packs as a
+	 * transmitter, derived from the uci format (S16_LE -> 16,
+	 * S24_LE/S24_3LE -> 24, S32_LE -> 32, unknown -> 24). Emitted only
+	 * when format is explicitly set: unset keeps the inferno upstream
+	 * default. An RX-only inferno box never gets a depth line: its wire
+	 * behavior is dictated by the remote transmitter's advertisement
+	 * (source-driven RX). */
+	if (pb_inf && m.main.format_set)
+		push(env, `INFERNO_TX_BITS_PER_SAMPLE=${tx_wire_bits(m.main.format)}`);
+
+	/* NB: RUST_LOG configures the *inferno* instance hosted inside
+	 * camilladsp (tracing env filter), not camilladsp itself. */
+	writefile(stem(out) + ".env", join("\n", env) + "\n");
 }
 
 /* ---- validation (fails early: never render a broken plan) ------------------ */
@@ -228,8 +255,11 @@ function validate(m) {
 	if (!match(m.main.pbch, /^[0-9]+$/) || int(m.main.pbch) < 1)
 		fail(sprintf("bad output_channels '%s'", m.main.pbch));
 
-	/* pipeline order must exist and reference every step exactly once */
-	if (length(m.order) == 0)
+	/* pipeline order: OPTIONAL -- a config without any pipeline_step
+	 * renders a pass-through pipeline (capture maps straight to
+	 * playback). It must exist and reference every step exactly once
+	 * only when steps are defined. */
+	if (length(m.steps) > 0 && length(m.order) == 0)
 		fail("pipeline order missing (config pipeline / list step)");
 	let seen = {};
 	for (let n in m.order) {
@@ -271,9 +301,11 @@ function validate(m) {
 	}
 
 	/* the last pipeline entry must be locked: nothing follows the tail */
-	let last = m.order[length(m.order) - 1];
-	if (m.steps[last].policy != "locked")
-		fail(sprintf("last step '%s' must be locked", last));
+	if (length(m.order) > 0) {
+		let last = m.order[length(m.order) - 1];
+		if (m.steps[last].policy != "locked")
+			fail(sprintf("last step '%s' must be locked", last));
+	}
 
 	/* child/free slots: user filters defined + allowed + within max_steps */
 	for (let n, st in m.steps) {

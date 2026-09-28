@@ -19,7 +19,11 @@
 # 'Inferno' opens the inferno ALSA PCM (Dante over IP): the instance lives
 # inside camilladsp and reads its settings from /etc/config/inferno (name
 # defaults to the system hostname, channel counts follow channels /
-# output_channels, sample rate follows 'samplerate').
+# output_channels, sample rate follows 'samplerate'). With playback
+# 'Inferno', 'format' additionally sets the advertised Dante TX wire depth
+# (S16_LE -> 16, the 24-bit spellings -> 24, S32_LE -> 32; unset keeps
+# the inferno default 24) -- RX depth is always source-driven, never
+# local.
 # Default: Inferno capture -> File:/dev/null (records silence while no
 # Dante flows are subscribed).
 

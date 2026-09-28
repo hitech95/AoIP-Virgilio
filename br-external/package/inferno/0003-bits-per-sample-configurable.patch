@@ -1,0 +1,124 @@
+# Configurable TX-advertised sample depth (INFERNO_TX_BITS_PER_SAMPLE).
+#
+# Product reason: in this image the inferno instances are rendered from the
+# camillaDSP uci config (camilladsp-genconf -> /tmp/camilladsp.env), where
+# `option format` already expresses the processing depth. Mapping it onto
+# the wire advertisement (S16_LE -> 16, S24_LE/S24_3LE -> 24, S32_LE -> 32;
+# unset stays 24, the upstream default) makes the whole chain shift-only
+# with no new user-facing knob. The depth is TX-only by construction: a
+# receiver always resolves the remote transmitter's advertisement per flow,
+# so nothing on the RX side consults it.
+#
+# While here, harden the flow-control request handler: it validated
+# sample_rate but trusted the requested bits_per_sample from the network,
+# letting garbage depths reach the TX packing path's bytes_per_sample.
+#
+# Upstream-rev: 75d9198 + 0001 + 0002. Generated with git diff from the
+# stacked tree; `cargo test -p inferno_aoip` covers 16/24/32 + garbage.
+diff --git a/inferno_aoip/src/device_server/flows_control_server.rs b/inferno_aoip/src/device_server/flows_control_server.rs
+index 7a13587..4bc3c57 100644
+--- a/inferno_aoip/src/device_server/flows_control_server.rs
++++ b/inferno_aoip/src/device_server/flows_control_server.rs
+@@ -94,6 +94,16 @@ pub async fn run_server(
+             conn.respond_with_code(FlowControlError::SampleRateMismatch as u16, &[]).await;
+             continue;
+           }
++          // structural validation only: 16/24/32 are all packable by the TX
++          // write path (write_s16/s24/s32_samples); anything else would hit
++          // integer-division luck on bytes_per_sample. Permissive vs our own
++          // advertisement otherwise (Dante semantics: Rx asks, Tx honors if
++          // it can).
++          if !matches!(bits_per_sample, 16 | 24 | 32) {
++            error!("unsupported bits per sample {bits_per_sample}, returning error");
++            conn.respond_with_code(FlowControlError::UnsupportedBitsPerSample as u16, &[]).await;
++            continue;
++          }
+           if fpp > FPP_MAX {
+             error!("too large fpp, returning error");
+             conn.respond_with_code(0x0302u16 /* TODO */, &[]).await;
+diff --git a/inferno_aoip/src/device_server/settings.rs b/inferno_aoip/src/device_server/settings.rs
+index 8541bec..e34b086 100644
+--- a/inferno_aoip/src/device_server/settings.rs
++++ b/inferno_aoip/src/device_server/settings.rs
+@@ -112,6 +112,15 @@ fn create_self_info(
+     .map(|s| s.parse().expect("invalid RX_LATENCY_NS, must be integer"))
+     .unwrap_or(10_000_000);
+ 
++  let tx_bits_per_sample = settings
++    .get("TX_BITS_PER_SAMPLE")
++    .map(|s| s.parse::<u8>().expect("invalid TX_BITS_PER_SAMPLE, must be integer"))
++    .unwrap_or(24);
++  assert!(
++    matches!(tx_bits_per_sample, 16 | 24 | 32),
++    "invalid TX_BITS_PER_SAMPLE, must be one of: 16, 24, 32"
++  );
++
+   let mut result = DeviceInfo {
+     ip_address: my_ipv4,
+     netmask,
+@@ -130,7 +139,11 @@ fn create_self_info(
+     model_number: "_000000000000000b".to_owned(),
+     rx_channels: vec![],
+     tx_channels: vec![],
+-    bits_per_sample: 24, // TODO make it configurable
++    // TX-advertised sample depth (TX_BITS_PER_SAMPLE, default 24): what we
++    // offer and pack on the wire as a transmitter. The RX side is
++    // source-driven (resolves the remote advertisement per flow) and never
++    // consults this field.
++    bits_per_sample: tx_bits_per_sample,
+     pcm_type: 0xe,
+     latency_ns,
+     sample_rate,
+@@ -233,3 +246,38 @@ impl Settings {
+       .collect();
+   }
+ }
++
++#[cfg(test)]
++mod tests {
++  use super::*;
++
++  fn advertised_bits(settings: &[(&str, &str)]) -> u8 {
++    let map: BTreeMap<String, String> =
++      settings.iter().copied().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
++    create_self_info("test app", "test", None, &map).bits_per_sample
++  }
++
++  #[test]
++  fn tx_bits_per_sample_accepts_16_24_32() {
++    assert_eq!(advertised_bits(&[("TX_BITS_PER_SAMPLE", "16")]), 16);
++    assert_eq!(advertised_bits(&[("TX_BITS_PER_SAMPLE", "24")]), 24);
++    assert_eq!(advertised_bits(&[("TX_BITS_PER_SAMPLE", "32")]), 32);
++  }
++
++  #[test]
++  fn tx_bits_per_sample_defaults_to_24() {
++    assert_eq!(advertised_bits(&[]), 24);
++  }
++
++  #[test]
++  #[should_panic(expected = "invalid TX_BITS_PER_SAMPLE")]
++  fn tx_bits_per_sample_rejects_garbage() {
++    advertised_bits(&[("TX_BITS_PER_SAMPLE", "S24_LE")]);
++  }
++
++  #[test]
++  #[should_panic(expected = "invalid TX_BITS_PER_SAMPLE")]
++  fn tx_bits_per_sample_rejects_unsupported_depth() {
++    advertised_bits(&[("TX_BITS_PER_SAMPLE", "20")]);
++  }
++}
+diff --git a/inferno_aoip/src/protocol/flows_control.rs b/inferno_aoip/src/protocol/flows_control.rs
+index 30130df..9416bad 100644
+--- a/inferno_aoip/src/protocol/flows_control.rs
++++ b/inferno_aoip/src/protocol/flows_control.rs
+@@ -40,6 +40,9 @@ pub enum FlowControlError {
+   TooManyTXFlows = 0x0315,
+   #[error("sample rate mismatch")]
+   SampleRateMismatch = 0x0301,
++  // code is a guess, like the undocumented 0x0302 answers for invalid requests
++  #[error("unsupported bits per sample")]
++  UnsupportedBitsPerSample = 0x0303,
+ }
+ 
+ pub struct FlowsControlClient {

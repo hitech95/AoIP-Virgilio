@@ -23,3 +23,6 @@ config inferno 'main'
 	# (e.g. a RX-only setup never advertises TX channels)
 	option rx_channels ''
 	option tx_channels ''
+	# NOTE: the Dante TX wire depth is NOT set here -- with camilladsp
+	# playback 'Inferno', genconf derives it from camilladsp main.format
+	# (see docs/camilladsp.md) and exports INFERNO_TX_BITS_PER_SAMPLE.

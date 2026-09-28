@@ -177,6 +177,7 @@ All inferno settings are environment variables with the `INFERNO_` prefix
 | `INFERNO_CLOCK_PATH` | usrvclock socket or PTP device | unset |
 | `INFERNO_RX_CHANNELS` / `INFERNO_TX_CHANNELS` | channel counts | 2 / 2 |
 | `INFERNO_RX_LATENCY_NS` / `INFERNO_TX_LATENCY_NS` | flow latency | 1 ms / 1 ms |
+| `INFERNO_TX_BITS_PER_SAMPLE` | TX-advertised wire depth, one of 16/24/32; the RX side is always source-driven (per-flow reader follows the remote advertisement) and never consults it (local patch `0003-bits-per-sample-configurable`) | 24 |
 | `INFERNO_DEVICE_ID`, `INFERNO_PROCESS_ID`, `INFERNO_ALT_PORT` | identity/ports for multi-instance setups | derived |
 | `INFERNO_STATE_PATH` | base dir for persistent state (`<path>/inferno_aoip/<device-id>/rx_subscriptions.toml`) | XDG state dir / `~/.local/state` (local patch `0002-state-storage-env-path`) |
 

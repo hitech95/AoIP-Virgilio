@@ -38,7 +38,11 @@ config camilladsp 'main'
 	option channels '2'
 	option output_channels ''
 	option chunksize '1024'
-	option format 'S16_LE'
+	# boundary-only on this SINK box (playback is 'Alsa', not 'Inferno':
+	# no Dante TX here, so no wire depth is derived): S32_LE keeps the
+	# chain shift-only end-to-end -- the inferno plugin exposes S32 and
+	# the wire depth follows the SOURCE box's uci format.
+	option format 'S32_LE'
 	option wav_header '1'
 	option capture 'Inferno'
 	# rpi2b override: onboard analog jack via the named 'speaker' pcm

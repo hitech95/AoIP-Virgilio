@@ -11,16 +11,18 @@
 #   4. legacy: no-policy config renders, every route gain carries an
 #      explicit "scale": "linear", no policy emitted
 #   5. labels: step label -> description, filter description rendered
+#   6. inferno env sidecar: TX wire depth mapped from uci format
 #
-# Needs: qemu-arm, output/target (from scripts/build.sh), python3+yaml.
-# Run from anywhere: sh scripts/genconf-test/run.sh
+# Needs: qemu-arm, output/<variant>/target (from scripts/build.sh),
+# python3+yaml. Run from anywhere: sh scripts/genconf-test/run.sh
 
 set -e
 T=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 REPO=$(dirname "$(dirname "$T")")
 WORK=${WORK:-/tmp/genconf-test}
-GENCONF=$REPO/br-external/board/rk3506qemu/rootfs-overlay/usr/bin/camilladsp-genconf
-TARGET=$REPO/output/target
+GENCONF=$REPO/br-external/package/camilladsp/files/usr/bin/camilladsp-genconf
+VARIANT=${VARIANT:-rk3506qemu}
+TARGET=$REPO/output/$VARIANT/target
 UCODE=$TARGET/usr/bin/ucode
 UCODE_LIB=$TARGET/usr/lib/ucode
 
@@ -235,6 +237,54 @@ assert slot['names'] == ['user_slot_user_in0', 'uf1'], slot
 	ok "free subchain renders gaps by anchor name"
 else
 	bad "free subchain rendering (rc=$rc: $(head -1 "$WORK/stderr.txt"))"
+fi
+
+# ---- 6. inferno env sidecar: TX wire depth from uci format ------------------
+# one depth case per format value (+ garbage/unset/RX-only). want is the
+# expected depth number, or NONE when no depth line may be emitted.
+depth_case() {
+	name="$1"; fmt="$2"; want="$3"
+	rm -rf "$WORK/depth"; mkdir -p "$WORK/depth"
+	cp "$T/protected-2way.uci" "$WORK/depth/camilladsp"
+	if [ "$fmt" = "-" ]; then
+		sed -i "/option format/d" "$WORK/depth/camilladsp"
+	else
+		sed -i "s|option format '.*'|option format '$fmt'|" "$WORK/depth/camilladsp"
+	fi
+	rm -f "$WORK/depth.env"
+	rc=0; genconf "$WORK/depth" "$WORK/depth.yml" || rc=$?
+	depth=""
+	if [ -f "$WORK/depth.env" ] && grep -q "^INFERNO_TX_BITS_PER_SAMPLE=" "$WORK/depth.env"; then
+		depth=$(sed -n "s/^INFERNO_TX_BITS_PER_SAMPLE=//p" "$WORK/depth.env")
+	fi
+	if [ "$rc" -eq 0 ] && [ "$depth" = "$want" ]; then
+		ok "sidecar depth $name"
+	else
+		bad "sidecar depth $name (rc=$rc depth='$depth' want='$want': $(head -1 "$WORK/stderr.txt"))"
+	fi
+}
+
+depth_case "S16_LE -> 16"    "S16_LE"   "16"
+depth_case "S24_LE -> 24"    "S24_LE"   "24"
+depth_case "S24_3LE -> 24"   "S24_3LE"  "24"
+depth_case "S24_3_LE -> 24"  "S24_3_LE" "24"
+depth_case "S32_LE -> 32"    "S32_LE"   "32"
+depth_case "garbage -> 24"   "FLOAT64"  "24"
+depth_case "unset -> no line" "-"       ""
+
+# RX-only box (capture Inferno, playback File): sidecar exists but never
+# carries a depth line -- wire depth is remote-transmitter territory
+rm -rf "$WORK/rxonly"; mkdir -p "$WORK/rxonly"
+cp "$T/protected-2way.uci" "$WORK/rxonly/camilladsp"
+sed -i "s|option playback 'Inferno'|option playback 'File:/dev/null'|" "$WORK/rxonly/camilladsp"
+rm -f "$WORK/rxonly.env"
+rc=0; genconf "$WORK/rxonly" "$WORK/rxonly.yml" || rc=$?
+if [ "$rc" -eq 0 ] && [ -f "$WORK/rxonly.env" ] \
+	&& grep -q "^INFERNO_RX_CHANNELS=" "$WORK/rxonly.env" \
+	&& ! grep -q "INFERNO_TX_BITS_PER_SAMPLE" "$WORK/rxonly.env"; then
+	ok "RX-only sidecar has no depth line"
+else
+	bad "RX-only sidecar (rc=$rc: $(head -1 "$WORK/stderr.txt"))"
 fi
 
 echo "$pass passed, $fail failed"

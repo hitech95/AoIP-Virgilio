@@ -100,7 +100,7 @@ Use `service camilladsp restart` for a full stop/start (new PID).
 | `channels` | `2` | Capture channel count. |
 | `output_channels` | *(= channels)* | Playback channel count (set when the chain changes the count, e.g. a mixer). |
 | `chunksize` | `1024` | Processing block size in frames. |
-| `format` | `S16_LE` | Sample format for `RawFile`, `File`, `Stdin`, `Stdout`. One of: `S16_LE`, `S24_4_RJ_LE`, `S24_4_LJ_LE`, `S24_3_LE`, `S32_LE`, `F32_LE`, `F64_LE`. |
+| `format` | `S16_LE` | Sample format for `RawFile`, `File`, `Stdin`, `Stdout`. One of: `S16_LE`, `S24_4_RJ_LE`, `S24_4_LJ_LE`, `S24_3_LE`, `S32_LE`, `F32_LE`, `F64_LE`. With playback `Inferno` it also sets the Dante TX wire depth (below). |
 | `wav_header` | `1` | For `File` playback: write a WAV header (`1`) or raw (`0`). |
 | `capture` | `Inferno` | Capture device spec (below). |
 | `playback` | `File:/dev/null` | Playback device spec (below). |
@@ -427,6 +427,21 @@ camilladsp; camilladsp itself uses flexi_logger, configured by the
 `warn,camillalib::alsa_backend::device=error` to silence the inferno
 PCM's short-read warnings which would otherwise flood syslog at ~2000
 lines/s).
+
+When **playback** is `Inferno`, genconf additionally exports
+`INFERNO_TX_BITS_PER_SAMPLE` (inferno patch 0003), derived from
+camilladsp `format`: `S16_LE` → 16, the 24-bit spellings (`S24_3_LE`,
+`S24_4_RJ_LE`, `S24_4_LJ_LE`, also the bare ALSA names `S24_LE`/
+`S24_3LE`) → 24, `S32_LE` → 32, anything else — and an unset `format` —
+keeps the inferno default 24 (no line emitted). This is the depth the box
+**advertises and packs as a Dante transmitter**; it is a TX-path property
+only. The RX side is source-driven by construction: a receiver resolves
+the sender's advertisement and requests/unpacks whatever that sender
+offers, so an RX-only box (capture `Inferno`, playback something else)
+never gets a depth setting. Explicit `list env
+'INFERNO_TX_BITS_PER_SAMPLE=…'` entries override the generated value
+(init merge rule). The ALSA boundary to the plugin stays S32 regardless —
+see [docs/bridge-rig-hw-sink.md](bridge-rig-hw-sink.md) "32 vs 24".
 
 Rendered `/etc/config/inferno` (default):
 
