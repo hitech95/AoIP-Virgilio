@@ -41,7 +41,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-IMAGES="${ROOT}/output/images"
+# per-variant output dirs (scripts/build.sh); override for another target
+IMAGES="${VIRGILIO_IMAGES:-${ROOT}/output/rk3506qemu/images}"
 
 MEM="512"
 NET="user"
