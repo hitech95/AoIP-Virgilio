@@ -140,22 +140,6 @@ index 3faf903..f5a4694 100644
  
        if (sid) {
          const alive = results[2].alive
-@@ -122,11 +141,11 @@ class Oui {
-     return this.ubus('service', 'event', { type: 'config.change', data: { package: config }})
-   }
- 
--  /* dante/webui patch: plaintext password POST -- the server verifies
--   * against /etc/shadow, which is incompatible with the MD5 challenge
--   * dance (the server cannot know md5(user:pass)). Rides on TLS. */
-   async login(username, password) {
--    const { sid } = await this.rpc('login', { username, password })
-+    const { nonce } = await this.rpc('challenge', { username })
-+    const hash1 = md5(`${username}:${password}`)
-+    const hash2 = md5(`${hash1}:${nonce}`)
-+    const { sid } = await this.rpc('login', { username, password: hash2 })
- 
-     sessionStorage.setItem('__oui__sid__', sid)
- 
 @@ -232,7 +251,7 @@ class Oui {
      if (locale !== 'auto' && !i18n.global.availableLocales.includes(locale))
        return
