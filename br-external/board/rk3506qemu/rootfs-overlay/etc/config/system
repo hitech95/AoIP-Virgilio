@@ -1,5 +1,5 @@
 config system
-	option hostname 'virgilio'
+	option hostname 'rk3506qemu'
 	option timezone 'UTC'
 	option zonename 'UTC'
 	# KiB; default 64 rotated away in seconds under statime/camilladsp
