@@ -1,12 +1,18 @@
 #!/bin/sh
-# Minimal preinit: procd's initd execs this before spawning /sbin/procd.
-# OpenWrt's real preinit (failsafe, initramfs hooks) is not needed here.
+# preinit — run by procd's init (as a child, before it execs /sbin/procd):
+#  1. board identity, OpenWrt style (/tmp/sysinfo/{board_name,model})
+#  2. production root layout (plan/squashfs-overlay-userdata.md): ro
+#     squashfs root + rw overlay on a data partition, OpenWrt mount_root
+#     style. Enabled by virgilio-data=<dev> on the kernel cmdline; the
+#     pivot_root below re-roots EVERY process in the mount namespace
+#     (incl. PID1), so procd's re-exec of /sbin/procd resolves inside the
+#     overlay and all services see a writable /.
+# Without virgilio-data (e.g. the QEMU dev target) this stays a plain rw
+# root and the script is a no-op beyond the board identity.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
-# Board identity, OpenWrt style (/tmp/sysinfo/{board_name,model}).
-# functions.sh:board_name() consumes it; scripts get "generic" without it.
-# On the real RK3506 the vendor DTS provides rockchip,rk3506… here for free.
+# --- board identity --------------------------------------------------------
 if [ -d /proc/device-tree ]; then
 	mkdir -p /tmp/sysinfo
 	[ -e /tmp/sysinfo/board_name ] || \
@@ -16,7 +22,56 @@ if [ -d /proc/device-tree ]; then
 	fi
 fi
 
-# /run/lock (= /tmp/lock via /var -> tmp) is created by procd's early setup
-# before any rc script runs; nothing to do here anymore.
+# --- overlay pivot (prod layout) -------------------------------------------
+DATA_DEV=""
+OVL_ROOT=""
+for x in $(cat /proc/cmdline 2>/dev/null); do
+	case "$x" in
+		virgilio-data=*) DATA_DEV="${x#virgilio-data=}" ;;
+		virgilio-overlay=*) OVL_ROOT="${x#virgilio-overlay=}" ;;
+	esac
+done
+
+[ -n "$DATA_DEV" ] && [ -b "$DATA_DEV" ] || exit 0
+
+mkdir -p /data /rom /mnt
+if ! mount "$DATA_DEV" /data; then
+	echo "preinit: cannot mount $DATA_DEV, booting without overlay" >&2
+	exit 0
+fi
+
+mkdir -p /data/root_data/upper /data/root_data/work /data/user_data
+
+# ro view of the squashfs root = overlay lowerdir and, after the pivot,
+# the recovery escape hatch at /rom (OpenWrt UX)
+mount --bind / /rom
+
+if ! mount -t overlay prodroot \
+	-o lowerdir=/rom,upperdir=/data/root_data/upper,workdir=/data/root_data/work \
+	/mnt; then
+	echo "preinit: overlay mount failed, booting without overlay" >&2
+	umount /rom
+	umount /data
+	exit 0
+fi
+
+cd /mnt
+# /rom inside the overlay is the empty dir from the lower fs (mounts are
+# not visible through lowerdir); pivot_root puts the OLD root tree there
+if ! pivot_root . rom; then
+	echo "preinit: pivot_root failed" >&2
+	exit 1
+fi
+
+# carry the early mounts into the new root
+mount --move /rom/proc /proc 2>/dev/null
+mount --move /rom/dev  /dev  2>/dev/null
+mount --move /rom/sys  /sys  2>/dev/null
+mount --move /rom/tmp  /tmp  2>/dev/null
+mount --move /rom/data /data 2>/dev/null
+
+# user data: /opt/user_data (survives firstboot; inferno state, configs)
+mkdir -p /opt/user_data
+mount --bind /data/user_data /opt/user_data
 
 exit 0

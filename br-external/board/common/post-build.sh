@@ -9,9 +9,14 @@ set -e
 
 [ -d "${TARGET_DIR}/lib/modules" ] || exit 0
 
-# Drop Buildroot's busybox-style SysV scripts: procd's rc.d is the only init
-# mechanism in this firmware (OpenWrt init scripts replaced them).
-#rm -f "${TARGET_DIR}"/etc/init.d/S??*
+# Drop Buildroot's busybox-style SysV scripts: procd walks /etc/rc.d
+# itself (procd rcS.c) after /etc/init.d/rcS (ours: a stub, see
+# virgilio-base) exits. The skeleton scripts (S01syslogd, S02klogd,
+# S02sysctl, S11modules, S40network, S50crond, ...) fight procd, netifd
+# and kmodloader (S40network would race netifd's interface setup,
+# S01syslogd starts a second syslog alongside ubox logd).
+rm -f "${TARGET_DIR}"/etc/init.d/S??*
+rm -f "${TARGET_DIR}"/etc/init.d/rcK
 
 # Drop Buildroot's stock mpd SysV script: it duplicates our procd init
 # (/etc/init.d/mpd) and pollutes the `service` listing as /etc/init.d/S95mpd.
@@ -35,6 +40,12 @@ if [ -d "${TARGET_DIR}"/usr/share/camilladsp ]; then
 		! -name coeffs -exec rm -rf {} +
 fi
 rm -rf "${TARGET_DIR}"/usr/share/mpd
+
+# Prod root layout mountpoints: the rootfs is READ-ONLY (squashfs), so
+# /etc/preinit cannot mkdir them at boot — they must exist in the image.
+# (/data = rw data partition, /rom = ro lower view after the pivot,
+# /mnt = overlay assembly point; all hidden/overmounted after preinit.)
+mkdir -p "${TARGET_DIR}/data" "${TARGET_DIR}/rom" "${TARGET_DIR}/mnt"
 
 # OpenWrt-style volatile layout: /var and /run are symlinks into the tmpfs
 # (/tmp, mounted by procd early). Keeps logs, run sockets, lock files and

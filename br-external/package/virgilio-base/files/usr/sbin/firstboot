@@ -1,0 +1,17 @@
+#!/bin/sh
+# firstboot — factory reset for the prod root layout (ro squashfs root +
+# rw overlay): wipe the overlay so the next boot is the pristine image.
+# /data/user_data (inferno state, user configs) is deliberately kept;
+# wiping it is a separate, deliberate action.
+
+if [ ! -d /data/root_data/upper ]; then
+	echo "firstboot: no overlay layout (missing /data/root_data)" >&2
+	exit 1
+fi
+
+echo "firstboot: wiping overlay (upperdir+workdir), user_data kept" >&2
+rm -rf /data/root_data/upper /data/root_data/work 2>/dev/null
+mkdir -p /data/root_data/upper /data/root_data/work
+sync
+echo "firstboot: done, rebooting" >&2
+reboot

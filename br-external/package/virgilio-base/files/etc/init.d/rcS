@@ -1,0 +1,23 @@
+#!/bin/sh
+# rcS — called from inittab as "::sysinit:/etc/init.d/rcS S boot" and
+# "::shutdown:/etc/init.d/rcS K shutdown".
+#
+# S: nothing to do. procd itself walks /etc/rc.d/S* with the action taken
+# from THIS line's arguments AFTER this script exits (procd inittab.c ->
+# rcS(argv[1], argv[2])) — which is why the OpenWrt-style rc.d layout
+# works without a real rc runner here.
+#
+# K: procd does NOT walk rc.d at shutdown, so stop the K scripts here
+# (ascending STOP order, umount last).
+
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+case "$1" in
+	K)
+		for i in /etc/rc.d/K*; do
+			[ -x "$i" ] && "$i" stop
+		done
+		;;
+esac
+
+exit 0
