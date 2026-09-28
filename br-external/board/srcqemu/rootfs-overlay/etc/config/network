@@ -1,0 +1,16 @@
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config interface 'lan'
+	option device 'eth0'
+	option proto 'dhcp'
+
+# single-NIC dual role (like the rpi2b sink): the AoIP segment rides the
+# same interface. On the br-dante rig nothing serves DHCP -- apply the
+# static override from docs/bridge-rig.md there.
+config interface 'aoip'
+	option device 'eth0'
+	option proto 'none'

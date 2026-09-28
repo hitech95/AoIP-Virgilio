@@ -30,8 +30,13 @@ rm -f "${TARGET_DIR}"/etc/init.d/S50nginx
 # purge anything a previous build may have left behind (T2: mpd is off by
 # default, enabled manually on the source guest; T9: no shipped test
 # assets -- radio/FIR/wav are user data, not image content).
-rm -f "${TARGET_DIR}"/etc/rc.d/S96mpd "${TARGET_DIR}"/etc/rc.d/S96aoip-bridge \
-	"${TARGET_DIR}"/usr/bin/mpd-ctl
+# Exception: a source-appliance board ships etc/virgilio/flags/keep-mpd
+# to keep its S96mpd rc.d link (the flag dir itself is harmless in the
+# image and documents the intent).
+if [ ! -e "${TARGET_DIR}"/etc/virgilio/flags/keep-mpd ]; then
+	rm -f "${TARGET_DIR}"/etc/rc.d/S96mpd
+fi
+rm -f "${TARGET_DIR}"/etc/rc.d/S96aoip-bridge "${TARGET_DIR}"/usr/bin/mpd-ctl
 # purge the camilladsp package extras, but KEEP the vendor coeffs dir the
 # locked conv filters point at (rootfs-overlay/usr/share/camilladsp/coeffs;
 # this script runs AFTER the overlay, a plain rm -rf would reap it too)

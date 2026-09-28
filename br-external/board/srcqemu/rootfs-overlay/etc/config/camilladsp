@@ -1,0 +1,42 @@
+# camilladsp on the SOURCE appliance: web-radio/file playback from MPD
+# (via the snd-aloop pair: mpd.conf -> pcm.loopplay -> capture loopcap)
+# is passed through UNCHANGED and transmitted as Dante flows via the
+# inferno PCM (playback Inferno). The protected speaker pipeline lives
+# on the SINK only -- filtering here would stack a second pipeline on
+# top of it. genconf always requires a pipeline: a single gain-0
+# 'bypass' filter (same pass-through shape as docs/bridge-rig.md).
+config camilladsp 'main'
+	option enabled '1'
+	option port '5000'
+	# websocket bind address. The WS API has NO authentication: bind to
+	# loopback (127.0.0.1) so only local tools (web UI, preset daemon)
+	# can reach it. The dev rig overrides this to 0.0.0.0 to use the
+	# forwarded port.
+	option ws_address '127.0.0.1'
+	# flexi_logger spec (--custom_log_spec); default silences the inferno
+	# PCM short-read warnings (~2000 lines/s at warn)
+	option logspec 'warn,camillalib::alsa_backend::device=warn'
+	option samplerate '48000'
+	option channels '2'
+	option output_channels '2'
+	option chunksize '2048'
+	# With playback 'Inferno' this also sets the Dante TX wire depth
+	# (S24_3_LE -> 24-bit flows; the ALSA boundary itself is always S32
+	# in the inferno plugin -- see docs/bridge-rig-hw-sink.md "32 vs 24").
+	option format 'S24_3_LE'
+	option capture 'Alsa:loopcap'
+	option playback 'Inferno'
+	option gain '0'
+
+config filter 'bypass'
+	option type 'gain'
+	option gain '0'
+
+config pipeline_step 'bypass_step'
+	option type 'Filter'
+	list channels '0'
+	list channels '1'
+	list names 'bypass'
+
+config pipeline
+	list step 'bypass_step'

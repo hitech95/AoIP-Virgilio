@@ -1,0 +1,3 @@
+# on-board loopback pair feeds camilladsp capture from MPD (mpd.conf
+# loopplay); no local playback hw on the source appliance
+snd-aloop

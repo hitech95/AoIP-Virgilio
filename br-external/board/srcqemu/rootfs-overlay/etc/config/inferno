@@ -1,0 +1,25 @@
+# Shared inferno settings — consumed by /usr/bin/camilladsp-genconf when a
+# camilladsp capture/playback device type is 'Inferno' (see
+# docs/camilladsp-uci.md). The daemon itself is not started by anything:
+# each application that opens the inferno PCM hosts its own instance.
+
+config inferno 'main'
+	# advertised device name; empty = system hostname
+	option name ''
+	# interface or IP to bind (BIND_IP); mandatory interface on networks
+	# without a default route (eth1 = Dante/PTP segment in rig mode)
+	option interface 'eth0'
+	# usrvclock socket exported by statime (see /etc/init.d/statime)
+	option clock_path '/tmp/ptp-usrvclock'
+	# persistent state directory (XDG_STATE_HOME for the inferno
+	# instance: rx_subscriptions keyed by factory device id live in
+	# <state_dir>/inferno_aoip/<id>/). The end state is the RW user-data
+	# volume mounted here on real hardware; on QEMU it is a plain dir on
+	# the ext4 rootfs.
+	option state_dir '/opt/user_data'
+	# channel counts: empty = follow camilladsp when the respective device
+	# is 'Inferno' (rx = capture 'channels', tx = playback 'output_channels');
+	# if the respective device is NOT 'Inferno' and this is empty, 0 is used
+	# (e.g. a RX-only setup never advertises TX channels)
+	option rx_channels ''
+	option tx_channels ''
