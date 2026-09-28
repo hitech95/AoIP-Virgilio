@@ -108,10 +108,10 @@ index fb1aeea..740e1aa 100644
  pub mod utils;
 diff --git a/src/ubusserver.rs b/src/ubusserver.rs
 new file mode 100644
-index 0000000..13b5b04
+index 0000000..835fec0
 --- /dev/null
 +++ b/src/ubusserver.rs
-@@ -0,0 +1,629 @@
+@@ -0,0 +1,639 @@
 +// CamillaDSP - A flexible tool for processing audio
 +// Copyright (C) 2026 Henrik Enquist
 +//
@@ -500,6 +500,16 @@ index 0000000..13b5b04
 +                        info!("UBUS: object 'camilladsp' registered on {path}");
 +                        backoff = BACKOFF_MIN;
 +                        loop {
++                            // poll_one() is non-blocking by design: it
++                            // processes at most one queued frame and
++                            // returns Idle when the buffer is empty. Park
++                            // on the socket between attempts, or this loop
++                            // spins on a full core while idle. wait_recv()
++                            // returns as soon as the socket is readable
++                            // (frame arriving or EOF) or after POLL_WAIT_MS,
++                            // so dispatch latency and reconnect detection
++                            // stay in the sub-second range.
++                            conn.transport_mut().wait_recv();
 +                            match conn.poll_one() {
 +                                Ok(DispatchOutcome::HandlerErr(e)) => {
 +                                    warn!("UBUS: method handler error: {e}");
