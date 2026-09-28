@@ -1,0 +1,18 @@
+# Single-NIC topology: the onboard USB Ethernet (smsc95xx, eth0) carries
+# BOTH management (dhcp) and the Dante/PTP segment (aoip). Unlike the
+# QEMU rig there is no dedicated second NIC; statime/inferno bind eth0
+# (see the statime/inferno overrides in this overlay).
+
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config interface 'lan'
+	option device 'eth0'
+	option proto 'dhcp'
+
+config interface 'aoip'
+	option device 'eth0'
+	option proto 'none'

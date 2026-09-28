@@ -1,0 +1,104 @@
+# RPi 2 Model B (BCM2836, 4x Cortex-A7, 1GB) — virgilio speaker target
+# with the ONBOARD analog audio (3.5mm jack, snd_bcm2835) and the onboard
+# USB Ethernet (smsc95xx, single-NIC: lan + aoip both on eth0; PTP runs
+# with software timestamping — the PHY has no HW timestamping).
+# Architecture/toolchain: same profile as rk3506qemu (armv7, musl).
+BR2_arm=y
+BR2_cortex_a7=y
+BR2_ARM_FPU_NEON_VFPV4=y
+
+# Rust tuning: same silicon class as rk3506
+BR2_EXTERNAL_VIRGILIO_RUST_CPU="cortex-a7"
+BR2_EXTERNAL_VIRGILIO_RUST_FEATURES="+neon"
+
+# Toolchain: musl libc, kernel headers matching the rpi kernel below.
+# C++/libstdcpp is NOT for target packages: with a musl toolchain,
+# host-rustc needs a C++ cross compiler for the target libs (libunwind)
+# — without it BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS drops,
+# RUSTC_TARGET_NAME stays empty and every cargo build fails.
+BR2_TOOLCHAIN_BUILDROOT_MUSL=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+BR2_INSTALL_LIBSTDCPP=y
+BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_6_12=y
+
+# System
+BR2_TARGET_GENERIC_HOSTNAME="virgilio"
+BR2_TARGET_GENERIC_GETTY_PORT="ttyAMA0"
+BR2_ROOTFS_MERGED_USR=y
+
+# Base system (uci/procd stack + generic base files)
+BR2_PACKAGE_VIRGILIO_BASE=y
+BR2_PACKAGE_WEBUI=y
+BR2_PACKAGE_WEBUI_APP_HOME=y
+BR2_PACKAGE_WEBUI_APP_STATUS=y
+BR2_PACKAGE_WEBUI_APP_SYSTEM=y
+BR2_PACKAGE_WEBUI_APP_NETSTAT=y
+BR2_PACKAGE_WEBUI_APP_NETWORK=y
+BR2_PACKAGE_WEBUI_APP_LOGS=y
+BR2_PACKAGE_WEBUI_APP_DSP=y
+BR2_PACKAGE_WEBUI_APP_INFERNO=y
+
+# Applications
+BR2_PACKAGE_CAMILLADSP=y
+BR2_PACKAGE_STATIME=y
+BR2_PACKAGE_INFERNO=y
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_ALSA_UTILS_AMIXER=y
+BR2_PACKAGE_ALSA_UTILS_APLAY=y
+BR2_PACKAGE_ALSA_UTILS_ARECORD=y
+BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
+BR2_PACKAGE_HTOP=y
+# SSH for bring-up/debug (procd init from the board overlay; root
+# password login needs a password set first - see init.d/dropbear)
+BR2_PACKAGE_DROPBEAR=y
+
+# Board files (network topology, uci overrides for eth0, asound.conf,
+# coeffs, snd_bcm2835 module); generic post-build + busybox fragment
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/rpi2b/rootfs-overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/common/post-build.sh"
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/common/busybox.fragment"
+
+# Kernel: raspberrypi fork pinned by upstream 2025.02 (see
+# configs/raspberrypi2_defconfig). Custom trimmed config (bcm2709 base
+# minus wifi/fs/media/DVB/SCSI/HID bulk: 1802 -> ~330 modules): keep
+# mmc+ext4/squashfs/vfat, dwcotg+smsc95xx (builtin), snd-bcm2835+vchiq,
+# firmware framebuffer console, PTP. Regenerate from the full bcm2709
+# config if needed (see the trim notes in linux.config's git history).
+BR2_GLOBAL_PATCH_DIR="board/raspberrypi/patches"
+BR2_DOWNLOAD_FORCE_CHECK_HASHES=y
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_TARBALL=y
+BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION="$(call github,raspberrypi,linux,21b410140c47ffab5668399f6f143c7d7b935c8b)/linux-21b410140c47ffab5668399f6f143c7d7b935c8b.tar.gz"
+BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y
+BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/rpi2b/linux.config"
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="broadcom/bcm2709-rpi-2-b broadcom/bcm2710-rpi-2-b"
+BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
+
+# Firmware + boot files (own config.txt/cmdline.txt: UART console,
+# dtparam=audio=on)
+BR2_PACKAGE_RPI_FIRMWARE=y
+BR2_PACKAGE_RPI_FIRMWARE_BOOTCODE_BIN=y
+BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI=y
+BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/rpi2b/config.txt"
+BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/rpi2b/cmdline.txt"
+# BR2_PACKAGE_RPI_FIRMWARE_INSTALL_DTB_OVERLAYS is not set
+
+# Rootfs: squashfs is the production root (ro, booted on p2; overlay +
+# user_data live on the p3 ext4 assembled by our post-image). ext2 kept
+# as a transition/dev fallback root.
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_SIZE="256M"
+BR2_TARGET_ROOTFS_SQUASHFS=y
+BR2_TARGET_ROOTFS_SQUASHFS_BS_4K=y
+BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD=y
+# BR2_TARGET_ROOTFS_TAR is not set
+
+# sdcard.img via our genimage layout (boot | squashfs | data)
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_VIRGILIO_PATH)/board/rpi2b/post-image.sh"
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+BR2_PACKAGE_HOST_GENIMAGE=y
+BR2_PACKAGE_HOST_E2FSPROGS=y
+BR2_PACKAGE_HOST_KMOD_XZ=y
+BR2_PACKAGE_HOST_MTOOLS=y

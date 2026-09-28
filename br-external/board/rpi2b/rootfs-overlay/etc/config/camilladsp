@@ -1,0 +1,178 @@
+# camilladsp: pipeline is generated at runtime into /tmp/camilladsp.yml by
+# /usr/bin/camilladsp-genconf (docs: docs/camilladsp.md).
+#
+# The audio chain is defined by generic uci nodes (NAMED sections; the
+# section id is the object name):
+#   config filter '<name>'    one filter (type + params)
+#   config mixer '<name>'     one mixer (in, out, user_gains)
+#   config mixroute           one mixer source contribution
+#                             (mixer/dest/source/gain)
+#   config pipeline_step '<n>'  one pipeline step (policy locked|child|free,
+#                             type, filter/mixer refs, constraints, label)
+#   config pipeline           pipeline ORDER: one 'list step' per step
+# No nodes -> plain pass-through capture -> playback.
+#
+# Device specs "TYPE[:VALUE]":
+#   capture:  Inferno (Dante RX) | WavFile:<path> | RawFile:<path> |
+#             Alsa:<alsa-dev> | Stdin
+#   playback: Inferno (Dante TX) | File:<path> | Alsa:<alsa-dev> | Stdout
+# 'Inferno' opens the inferno ALSA PCM (Dante over IP): the instance lives
+# inside camilladsp and reads its settings from /etc/config/inferno (name
+# defaults to the system hostname, channel counts follow channels /
+# output_channels, sample rate follows 'samplerate').
+# Default: Inferno capture -> File:/dev/null (records silence while no
+# Dante flows are subscribed).
+
+config camilladsp 'main'
+	option enabled '1'
+	option port '5000'
+	# websocket bind address. The WS API has NO authentication: bind to
+	# loopback (127.0.0.1) so only local tools (web UI, preset
+	# daemon) can reach it. The dev rig overrides this to 0.0.0.0 to
+	# use the forwarded port.
+	option ws_address '0.0.0.0'
+	# flexi_logger spec (--custom_log_spec); default silences the inferno
+	# PCM short-read warnings (~2000 lines/s at warn)
+	option logspec 'warn,camillalib::alsa_backend::device=error'
+	option samplerate '48000'
+	option channels '2'
+	option output_channels ''
+	option chunksize '1024'
+	option format 'S16_LE'
+	option wav_header '1'
+	option capture 'Inferno'
+	# rpi2b override: onboard analog jack via the named 'speaker' pcm
+	# (asound.conf; the bare "Headphones" card name is not an openable
+	# PCM) instead of the package default File:/dev/null
+	option playback 'Alsa:speaker'
+	# Initial main fader gain in dB, applied by the service as camilladsp -g.
+	option gain '0'
+
+# --- protected 2-way speaker pipeline ---------------------------------------
+# Provisioned at build time (docs/camilladsp.md "Protected pipeline",
+# plan/protected-xover-pipeline.md): user EQ lives on the INPUT channels
+# (two editable slots before the mixer); the source-select mixer is
+# user-gain-exposed; mix + xover/FIR/limiter tails are locked (enforced
+# by genconf + the camilladsp manifest).
+
+config mixer 'srcmix'
+	option in '2'
+	option out '2'
+	option user_gains '1'
+	list allow 'gain'
+	list allow 'gain'
+
+config mixroute
+	option mixer 'srcmix'
+	option dest '0'
+	option source '0'
+	option gain '0.5'
+config mixroute
+	option mixer 'srcmix'
+	option dest '0'
+	option source '1'
+	option gain '0.5'
+config mixroute
+	option mixer 'srcmix'
+	option dest '1'
+	option source '0'
+	option gain '0.5'
+config mixroute
+	option mixer 'srcmix'
+	option dest '1'
+	option source '1'
+	option gain '0.5'
+
+config filter 'wf_lp'
+	option type 'lrlp'
+	option f '2300'
+	option order '4'
+config filter 'wf_fir'
+	option type 'conv'
+	# woofer correction FIR: vendor path, locked (identity placeholder in
+	# the prototype image -- see scripts/camilladsp_xo_coeffs.py)
+	option filename '/usr/share/camilladsp/coeffs/wf_fir.txt'
+config filter 'wf_limit'
+	option type 'limiter'
+	option clip_limit '0.9'
+config filter 'tw_hp'
+	option type 'lrhp'
+	option f '1900'
+	option order '4'
+config filter 'tw_notch10k'
+	option type 'notch'
+	option f '10000'
+	option q '2.0'
+config filter 'tw_peak17k'
+	option type 'peak'
+	option f '17000'
+	option gain '-3.0'
+	option q '2.0'
+config filter 'tw_limit'
+	option type 'limiter'
+	option clip_limit '0.8'
+
+# editable user EQ slots (child policy): user filters are added to
+# 'list names' by the web UI; the placeholder anchor user_slot_<step>
+# is always rendered first
+config pipeline_step 'user_in0'
+	option policy 'child'
+	list channels '0'
+	list allow 'gain'
+	list allow 'volume'
+	list allow 'peak'
+	list allow 'hs'
+	list allow 'ls'
+	list allow 'notch'
+	list allow 'ap'
+	list allow 'bp'
+	list allow 'hp'
+	list allow 'lp'
+	list allow 'conv'
+	option max_steps '8'
+
+config pipeline_step 'user_in1'
+	option policy 'child'
+	list channels '1'
+	list allow 'gain'
+	list allow 'volume'
+	list allow 'peak'
+	list allow 'hs'
+	list allow 'ls'
+	list allow 'notch'
+	list allow 'ap'
+	list allow 'bp'
+	list allow 'hp'
+	list allow 'lp'
+	list allow 'conv'
+	option max_steps '8'
+
+config pipeline_step 'src_sel'
+	option policy 'locked'
+	option type 'Mixer'
+	option mixer 'srcmix'
+
+config pipeline_step 'wf_tail'
+	option policy 'locked'
+	option type 'Filter'
+	list channels '0'
+	list names 'wf_lp'
+	list names 'wf_fir'
+	list names 'wf_limit'
+
+config pipeline_step 'tw_tail'
+	option policy 'locked'
+	option type 'Filter'
+	list channels '1'
+	list names 'tw_hp'
+	list names 'tw_notch10k'
+	list names 'tw_peak17k'
+	list names 'tw_limit'
+
+# pipeline order
+config pipeline
+	list step 'user_in0'
+	list step 'user_in1'
+	list step 'src_sel'
+	list step 'wf_tail'
+	list step 'tw_tail'

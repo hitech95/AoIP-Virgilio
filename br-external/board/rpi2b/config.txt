@@ -1,0 +1,18 @@
+# virgilio on RPi 2 Model B (BCM2836): headless speaker node
+# - console on the PL011 UART (ttyAMA0), no HDMI console
+# - analog audio: 3.5mm jack (PWM via VCHIQ, snd_bcm2835)
+start_file=start.elf
+fixup_file=fixup.dat
+kernel=zImage
+
+disable_overscan=1
+
+# VCHIQ (audio route to the firmware DSP) needs the GPU alive; 100 MB like
+# the upstream default is plenty, the board has 1 GB
+gpu_mem_1024=100
+
+# serial console (Pi 2B: PL011 dedicated, no BT share)
+enable_uart=1
+
+# onboard analog audio (3.5mm jack)
+dtparam=audio=on

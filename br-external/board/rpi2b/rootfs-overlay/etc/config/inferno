@@ -1,0 +1,10 @@
+# inferno on the rpi2b: board override of the package default — the
+# single onboard NIC is eth0 (package default expects the rig's eth1).
+
+config inferno 'main'
+	option name ''
+	option interface 'eth0'
+	option clock_path '/tmp/ptp-usrvclock'
+	option state_dir '/opt/user_data'
+	option rx_channels ''
+	option tx_channels ''
