@@ -1,0 +1,167 @@
+diff --git a/applications/oui-app-layout/htdoc/index.vue b/applications/oui-app-layout/htdoc/index.vue
+index 0a1479c..b8e7f6d 100644
+--- a/applications/oui-app-layout/htdoc/index.vue
++++ b/applications/oui-app-layout/htdoc/index.vue
+@@ -1,7 +1,7 @@
+ <template>
+   <el-container class="oui-container" style="height: calc(100vh - 16px);">
+-    <el-aside width="auto">
+-      <el-scrollbar>
++    <el-aside width="auto" class="layout-aside">
++      <el-scrollbar class="menu-scrollbar">
+         <div v-if="!isCollapse" style="text-align: center;">
+           <el-link type="primary" @click="$router.push('/')" :underline="false" style="font-size: large;">{{ $oui.state.hostname }}</el-link>
+         </div>
+@@ -24,6 +24,9 @@
+           </template>
+         </el-menu>
+       </el-scrollbar>
++      <div v-if="!isCollapse" class="sidebar-footer">
++        Copyright © 2022 Powered by <a href="https://github.com/zhaojh329/oui" target="_blank">oui</a>
++      </div>
+     </el-aside>
+     <el-container>
+       <el-header>
+@@ -59,11 +62,6 @@
+           <el-backtop target=".oui-container .el-container .el-scrollbar__wrap"/>
+         </el-scrollbar>
+       </el-main>
+-      <el-footer>
+-        <div class="copyright">
+-          <p>Copyright © 2022 Powered by <a href="https://github.com/zhaojh329/oui" target="_blank">oui</a></p>
+-        </div>
+-      </el-footer>
+     </el-container>
+   </el-container>
+ </template>
+@@ -183,6 +181,29 @@ export default {
+   border-right: 1px var(--el-border-color) var(--el-border-style);
+ }
+ 
++.layout-aside {
++  display: flex;
++  flex-direction: column;
++}
++
++.menu-scrollbar {
++  flex: 1;
++  min-height: 0;
++}
++
++.sidebar-footer {
++  flex: 0 0 auto;
++  padding: 10px 12px;
++  border-top: 1px var(--el-border-color) var(--el-border-style);
++  color: var(--el-text-color-secondary);
++  font-size: var(--el-font-size-extra-small);
++  text-align: center;
++
++  a {
++    color: inherit;
++  }
++}
++
+ .oui-container .el-header {
+   height: 35px;
+ }
+@@ -206,12 +227,6 @@ export default {
+   cursor: pointer;
+ }
+ 
+-.copyright {
+-  text-align: right;
+-  font-size: 1.2em;
+-  color: #888;
+-}
+-
+ .el-dropdown-link {
+   color: var(--el-color-primary);
+   cursor: pointer;
+diff --git a/oui-ui-core/htdoc/src/oui/index.js b/oui-ui-core/htdoc/src/oui/index.js
+index 3faf903..f5a4694 100644
+--- a/oui-ui-core/htdoc/src/oui/index.js
++++ b/oui-ui-core/htdoc/src/oui/index.js
+@@ -10,7 +10,25 @@ import axios from 'axios'
+ import md5 from 'js-md5'
+ import i18n from '../i18n'
+ 
+-const isDark = useDark()
++const THEME_STORAGE_KEY = 'oui.theme'
++const LOCALE_STORAGE_KEY = 'oui.locale'
++const isDark = useDark({ storageKey: THEME_STORAGE_KEY })
++
++function readPreference(key) {
++  try {
++    return localStorage.getItem(key)
++  } catch {
++    return null
++  }
++}
++
++function writePreference(key, value) {
++  try {
++    localStorage.setItem(key, value)
++  } catch {
++    // Browser privacy settings can deny storage; keep the session behavior.
++  }
++}
+ 
+ function mergeLocaleMessage(key, locales) {
+   for (const locale in locales) {
+@@ -43,9 +61,7 @@ class Oui {
+       },
+       set: dark => {
+         isDark.value = dark
+-        const theme = dark ? 'dark' : 'light'
+-        if (this.inited)
+-          this.call('uci', 'set', { config: 'oui', section: 'global', values: { theme }})
++        writePreference(THEME_STORAGE_KEY, dark ? 'dark' : 'light')
+       }
+     })
+ 
+@@ -59,7 +75,9 @@ class Oui {
+       p.push(this.rpc('alive', { sid }))
+ 
+     Promise.all(p).then(results => {
+-      let locale = results[0].locale
++      // Browser choices are personal to this client; device UCI preferences
++      // remain the fallback for a browser with no saved choice.
++      let locale = readPreference(LOCALE_STORAGE_KEY) || results[0].locale
+       if (!locale)
+         locale = 'auto'
+ 
+@@ -70,7 +88,8 @@ class Oui {
+       else
+         i18n.global.locale = locale
+ 
+-      this.state.isDark = results[1].theme === 'dark'
++      const theme = readPreference(THEME_STORAGE_KEY) || results[1].theme
++      this.state.isDark = theme === 'dark'
+ 
+       if (sid) {
+         const alive = results[2].alive
+@@ -122,11 +141,11 @@ class Oui {
+     return this.ubus('service', 'event', { type: 'config.change', data: { package: config }})
+   }
+ 
+-  /* dante/webui patch: plaintext password POST -- the server verifies
+-   * against /etc/shadow, which is incompatible with the MD5 challenge
+-   * dance (the server cannot know md5(user:pass)). Rides on TLS. */
+   async login(username, password) {
+-    const { sid } = await this.rpc('login', { username, password })
++    const { nonce } = await this.rpc('challenge', { username })
++    const hash1 = md5(`${username}:${password}`)
++    const hash2 = md5(`${hash1}:${nonce}`)
++    const { sid } = await this.rpc('login', { username, password: hash2 })
+ 
+     sessionStorage.setItem('__oui__sid__', sid)
+ 
+@@ -232,7 +251,7 @@ class Oui {
+     if (locale !== 'auto' && !i18n.global.availableLocales.includes(locale))
+       return
+ 
+-    await this.call('uci', 'set', { config: 'oui', section: 'global', values: { locale }})
++    writePreference(LOCALE_STORAGE_KEY, locale)
+ 
+     this.state.locale = locale
+ 
