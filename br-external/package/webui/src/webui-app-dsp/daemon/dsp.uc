@@ -23,8 +23,11 @@ const CDSP_CONFIG = "/etc/config/camilladsp";
 const CDSP_CHECK = "/run/webui/camilladsp.yml.check";
 
 /* slot model: { <step name>: { policy, channels, allow, max_steps,
- *   step: section id, names: [current user filters] } } -- the editable
- * (child/free) pipeline_step sections (named-section uci schema) */
+ *   step: section id, names: [referenced filters] } } -- the editable
+ * (free) pipeline_step sections (named-section uci schema). Every step
+ * is real and renders 1:1: its names carry the base filter(s) shipped
+ * with the board config + whatever the web UI added -- plain uci filter
+ * sections all, no base/added taxonomy on this side. */
 
 /* pipeline order: the 'list step' entries of `config pipeline`
  * (anonymous section), in order */
@@ -47,7 +50,7 @@ function pipeline_steps() {
 function filters_slots() {
 	let slots = {};
 	for (let st in uci_sections("camilladsp", "pipeline_step")) {
-		if (st.policy != "child" && st.policy != "free")
+		if (st.policy != "free")
 			continue;
 		slots[st[".name"]] = {
 			policy: st.policy,
@@ -197,6 +200,10 @@ function filters_set(params) {
 		let list = steps[sc];
 		if (type(list) != "array")
 			return { error: { code: ERR_INVALID_ARGUMENT, message: `${sc}: array of filters required` } };
+		if (length(list) == 0)
+			return { error: { code: ERR_INVALID_ARGUMENT,
+				message: `${sc}: at least one filter required (steps render 1:1)` } };
+		/* list = the FULL filter set of the step (base gains included) */
 		if (length(list) > (slot.max_steps ?? 255))
 			return { error: { code: ERR_INVALID_ARGUMENT,
 				message: `${sc}: ${length(list)} steps exceed max_steps=${slot.max_steps}` } };
@@ -215,18 +222,45 @@ function filters_set(params) {
 		let c = uci.cursor();
 		c.load("camilladsp");   /* stage on a loaded cursor or add() is lost */
 
-		/* drop previous user filters of every touched slot (named
-		 * sections: the filter section id IS its name) */
+		/* Every referenced filter is a plain named uci section (the base
+		 * gains shipped with the board config included). Delta-manage the
+		 * sections per touched slot: keep the ids of filters the new list
+		 * retains (stable ids for profiles/faders), drop removed ones,
+		 * create fresh ids for additions. Echoing `name` back from
+		 * filters_schema() keeps a filter's id across edits. */
 		for (let sc in steps) {
-			for (let old in slots[sc].names)
-				c.delete("camilladsp", old);
+			let old = {};
+			for (let n in slots[sc].names)
+				old[n] = true;
+			let keep = {};
+			for (let f in steps[sc])
+				if (f?.name && old[f.name])
+					keep[f.name] = true;
 
-			/* create the new filter sections + the slot's name list */
+			/* drop filters removed from the list */
+			for (let n in old)
+				if (!keep[n])
+					c.delete("camilladsp", n);
+
+			/* write the list in order; kept ids are recreated in place
+			 * (delete + 3-arg set: full parameter overwrite, same id) */
 			let names = [];
 			let i = 0;
 			for (let f in steps[sc]) {
 				i++;
-				let fname = `u_${sc}_${i}`;
+				let fname = f?.name;
+				if (!fname || !keep[fname]) {
+					/* fresh unique id (ucode has no do-while) */
+					fname = `u_${sc}_${i}`;
+					i++;
+					while (c.get("camilladsp", fname, ".type") != null &&
+					       !keep[fname]) {
+						fname = `u_${sc}_${i}`;
+						i++;
+					}
+				} else {
+					c.delete("camilladsp", fname);
+				}
 				/* NB: this ucode has no named cursor.add() -- create the
 				 * named section via the 3-arg set() form */
 				c.set("camilladsp", fname, "filter");
