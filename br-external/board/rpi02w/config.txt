@@ -1,0 +1,21 @@
+# virgilio source on RPi Zero 2 W (BCM2710A1): headless Dante/AES67
+# SOURCE appliance; network via USB-Ethernet dongle (RTL8152/8153 class).
+# - console on the PL011 UART (ttyAMA0): BT shares the PL011 on this
+#   board and we ship no WiFi/BT, so disable-bt frees it for the console
+# - no on-board audio codec: audio is MPD -> snd-aloop -> camilladsp ->
+#   inferno (see rootfs-overlay/etc/asound.conf); HDMI stays a console
+start_file=start.elf
+fixup_file=fixup.dat
+kernel=zImage
+
+disable_overscan=1
+
+# headless: no VCHIQ/audio route, minimal GPU (firmware fb console only)
+gpu_mem=64
+
+# serial console on the 40-pin header (GPIO14/15)
+enable_uart=1
+dtoverlay=disable-bt
+
+# explicit: this image carries only the Zero 2 W dtb
+device_tree=bcm2710-rpi-zero-2-w.dtb

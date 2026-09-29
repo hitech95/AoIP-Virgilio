@@ -1,0 +1,4 @@
+# source appliance: the loopback pair feeds camilladsp capture from
+# MPD (mpd.conf loopplay); no local playback hw. The inferno pcms ship
+# in /etc/alsa/conf.d/60-inferno.conf (inferno package).
+snd-aloop

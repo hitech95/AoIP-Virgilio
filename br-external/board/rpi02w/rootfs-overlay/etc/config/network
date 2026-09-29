@@ -1,0 +1,16 @@
+# virgilio source (RPi Zero 2 W + USB-Ethernet dongle): single port, the
+# combined topology — lan (user-managed global, dhcp or static) and aoip
+# (always link-local via zcip) share the dongle (r8152 enumerates eth0).
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config interface 'lan'
+	option device 'eth0'
+	option proto 'dhcp'
+
+config interface 'aoip'
+	option device 'eth0'
+	option proto 'zcip'
