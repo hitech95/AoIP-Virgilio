@@ -22,9 +22,13 @@
               </el-select>
             </el-form-item>
             <el-form-item :label="$t('Format')">
+              <!-- this camilladsp build's 24-bit spelling is S24_3_LE
+                   (the old S24_3LE is rejected); the float and 4-byte
+                   variants are intentionally not offered: no decided
+                   inferno TX mapping for them yet -->
               <el-select v-model="settings.format">
                 <el-option :label="$t('16-bit')" value="S16_LE"/>
-                <el-option :label="$t('24-bit')" value="S24_3LE"/>
+                <el-option :label="$t('24-bit')" value="S24_3_LE"/>
                 <el-option :label="$t('32-bit')" value="S32_LE"/>
               </el-select>
             </el-form-item>
