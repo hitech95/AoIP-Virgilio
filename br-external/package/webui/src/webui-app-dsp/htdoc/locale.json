@@ -70,7 +70,8 @@
     "Clipping risk": "Clipping risk",
     "Delete profile \"{name}\"? This cannot be undone.": "Delete profile \"{name}\"? This cannot be undone.",
     "Delete": "Delete",
-    "Update failed": "Update failed"
+    "Update failed": "Update failed",
+    "any": "any"
   },
   "it": {
     "Filters": "Filtri",
@@ -143,6 +144,7 @@
     "Clipping risk": "Rischio di clipping",
     "Delete profile \"{name}\"? This cannot be undone.": "Eliminare il profilo \"{name}\"? L'operazione non è annullabile.",
     "Delete": "Elimina",
-    "Update failed": "Aggiornamento non riuscito"
+    "Update failed": "Aggiornamento non riuscito",
+    "any": "qualsiasi"
   }
 }

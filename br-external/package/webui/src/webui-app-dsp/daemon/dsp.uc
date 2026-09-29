@@ -91,6 +91,7 @@ function filter_params(names, flt) {
 function filters_schema() {
 	let slots = filters_slots();
 	let flt = filters_by_name();
+	let steps = pipeline_steps();
 	let editable = {}, locked = {};
 	for (let sc in slots) {
 		let slot = slots[sc];
@@ -106,6 +107,27 @@ function filters_schema() {
 	for (let st in uci_sections("camilladsp", "pipeline_step"))
 		if (st.policy == "locked")
 			locked[st[".name"]] = (type(st.names) == "array") ? st.names : ((st.names != null) ? [st.names] : []);
+	/* unprotected config (no step carries a policy): every Filter step
+	 * is a free slot -- the page must not claim a pass-through pipeline
+	 * while the runtime chain has editable filter blocks */
+	let protected_cfg = false;
+	for (let n, st in steps)
+		if ((st.policy ?? "") != "")
+			protected_cfg = true;
+	if (!protected_cfg)
+		for (let n in pipeline_order()) {
+			let st = steps[n];
+			if (!st || lc(`${st.type ?? ""}`) != "filter")
+				continue;
+			let names = (type(st.names) == "array") ? st.names : ((st.names != null) ? [st.names] : []);
+			editable[n] = {
+				policy: "free",
+				channels: (type(st.channels) == "array") ? join(" ", st.channels) : (st.channels ?? ""),
+				allow: [],
+				max_steps: null,
+				filters: filter_params(names, flt)
+			};
+		}
 	let user_gains = [];
 	for (let m in uci_sections("camilladsp", "mixer"))
 		if (m.user_gains == "1")

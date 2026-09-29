@@ -61,7 +61,7 @@
         <template #header>
           {{ name }}
           <el-tag type="info">{{ slot.policy }}</el-tag>
-          <span class="hint">{{ $t('max') }} {{ slot.max_steps }} · {{ $t('ch') }} {{ slot.channels }} · {{ slot.allow.join(' ') }}</span>
+          <span class="hint">{{ $t('max') }} {{ slot.max_steps ?? '∞' }} · {{ $t('ch') }} {{ slot.channels || '—' }} · {{ slot.allow.length ? slot.allow.join(' ') : $t('any') }}</span>
         </template>
 
         <el-table v-if="slot.filters.length" :data="slot.filters">
