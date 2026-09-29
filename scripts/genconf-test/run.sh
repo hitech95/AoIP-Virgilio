@@ -97,14 +97,14 @@ neg() {
 
 # policy removed from one step while others carry one
 neg "step without policy" "has no policy" \
-	sed -i "s|option policy 'child'|option policy ''|" camilladsp
+	sed -i "0,/option policy 'free'/s||option policy ''|" camilladsp
 
 neg "locked conv outside vendor path" "coeffs" \
 	sed -i "s|/usr/share/camilladsp/coeffs/wf_fir.txt|/opt/user_data/x.txt|" camilladsp
 
-# allow list stripped from the first child step (user_in0)
-neg "child missing allow" "needs allow" \
-	sed -i "1,/option max_steps '8'/{/list allow/d}" camilladsp
+# allow list stripped from the first free step (user_in0)
+neg "free missing allow" "needs allow" \
+	sed -i "/config pipeline_step 'user_in0'/,/option max_steps/{/list allow/d}" camilladsp
 
 # order list references an undefined step
 neg "order references unknown step" "references unknown step" \
@@ -124,32 +124,32 @@ neg "order missing" "pipeline order missing" \
 
 # last order entry is editable (nothing may follow the protection tail)
 neg "last step not locked" "must be locked" \
-	sh -c "printf \"\tlist step 'user_end'\n\" >> camilladsp && printf \"\nconfig pipeline_step 'user_end'\n\toption policy 'child'\n\tlist channels '0'\n\tlist allow 'gain'\n\" >> camilladsp"
+	sh -c "printf \"\tlist step 'user_end'\n\" >> camilladsp && printf \"\nconfig pipeline_step 'user_end'\n\toption policy 'free'\n\toption type 'Filter'\n\tlist channels '0'\n\tlist allow 'gain'\n\" >> camilladsp"
 
-# editable step carrying a type
-neg "editable step with type" "must not carry a type" \
-	sed -i "s|option policy 'child'|option policy 'child'\n\toption type 'Filter'|" camilladsp
+# free step without a type (every step is real now)
+neg "free step missing type" "missing type" \
+	sed -i "/config pipeline_step .user_in0./,/list channels/{/option type .Filter./d}" camilladsp
 
 # free step anchored on a non-locked step (inserted mid-order so the
 # last-step-locked check does not shadow the anchor error)
 neg "free with non-locked anchor" "not locked" \
-	sh -c "sed -i \"/list step 'wf_tail'/a list step 'user_x'\" camilladsp && printf \"\nconfig pipeline_step 'user_x'\n\toption policy 'free'\n\tlist channels '0'\n\tlist allow 'gain'\n\tlist allowed_after 'user_in0'\n\" >> camilladsp"
+	sh -c "sed -i \"/list step 'wf_tail'/a list step 'user_x'\" camilladsp && printf \"\nconfig pipeline_step 'user_x'\n\toption policy 'free'\n\toption type 'Filter'\n\tlist channels '0'\n\tlist allow 'gain'\n\tlist allowed_after 'user_in0'\n\" >> camilladsp"
 
 # ---- 2b. user steps in editable slots (webui filters page) ------------------
 rm -rf "$WORK/user"; mkdir -p "$WORK/user"; cp "$T/protected-2way.uci" "$WORK/user/camilladsp"
 (
 	cd "$WORK/user"
 	printf "\nconfig filter 'u_eq100'\n\toption type 'peak'\n\toption f '100'\n\toption gain '3.0'\n\toption q '1.0'\nconfig filter 'u_pad'\n\toption type 'gain'\n\toption gain '-2.0'\n" >> camilladsp
-	sed -i "s|option policy 'child'|option policy 'child'\n\tlist names 'u_eq100'\n\tlist names 'u_pad'|" camilladsp
+	sed -i "0,/list names 'user_in0_gain'/s||list names 'user_in0_gain'\n\tlist names 'u_eq100'\n\tlist names 'u_pad'|" camilladsp
 )
 rc=0; genconf "$WORK/user" "$WORK/user.yml" || rc=$?
 if [ "$rc" -eq 0 ] && python3 -c "
 import json, sys
 c = json.load(open('$WORK/user.yml'))
-names = [s['names'] for s in c['pipeline'] if s['type'] == 'Filter' and 'user_slot_user_in0' in s.get('names', [])][0]
-sys.exit(0 if names == ['user_slot_user_in0', 'u_eq100', 'u_pad'] else 1)
+names = [s['names'] for s in c['pipeline'] if s.get('names') and s['names'][0] == 'user_in0_gain'][0]
+sys.exit(0 if names == ['user_in0_gain', 'u_eq100', 'u_pad'] else 1)
 "; then
-	ok "user steps render after placeholder"
+	ok "user steps render after base gain"
 else
 	bad "user steps render (rc=$rc: $(head -1 "$WORK/stderr.txt"))"
 fi
@@ -164,13 +164,13 @@ else
 fi
 
 neg "user filter type not allowed" "not in allow list" \
-	sh -c "printf \"\nconfig filter 'u_lp'\n\toption type 'lrlp'\n\toption f '100'\n\" >> camilladsp && sed -i \"s|option policy 'child'|option policy 'child'\n\tlist names 'u_lp'|\" camilladsp"
+	sh -c "printf \"\nconfig filter 'u_lp'\n\toption type 'lrlp'\n\toption f '100'\n\" >> camilladsp && sed -i \"0,/list names 'user_in0_gain'/s||list names 'user_in0_gain'\n\tlist names 'u_lp'|\" camilladsp"
 
 neg "user steps exceed max_steps" "exceed max_steps" \
-	sh -c "for i in 1 2 3 4 5 6 7 8 9; do printf \"\nconfig filter 'u_g\$i'\n\toption type 'gain'\n\toption gain '0'\n\" >> camilladsp; done; sed -i \"s|option policy 'child'|option policy 'child'\n\tlist names 'u_g1'\n\tlist names 'u_g2'\n\tlist names 'u_g3'\n\tlist names 'u_g4'\n\tlist names 'u_g5'\n\tlist names 'u_g6'\n\tlist names 'u_g7'\n\tlist names 'u_g8'\n\tlist names 'u_g9'|\" camilladsp"
+	sh -c "for i in 1 2 3 4 5 6 7 8 9; do printf \"\nconfig filter 'u_g\$i'\n\toption type 'gain'\n\toption gain '0'\n\" >> camilladsp; done; sed -i \"0,/list names 'user_in0_gain'/s||list names 'user_in0_gain'\n\tlist names 'u_g1'\n\tlist names 'u_g2'\n\tlist names 'u_g3'\n\tlist names 'u_g4'\n\tlist names 'u_g5'\n\tlist names 'u_g6'\n\tlist names 'u_g7'\n\tlist names 'u_g8'\n\tlist names 'u_g9'|\" camilladsp"
 
 neg "user filter undefined" "is not defined" \
-	sed -i "s|option policy 'child'|option policy 'child'\n\tlist names 'u_ghost'|" camilladsp
+	sed -i "0,/list names 'user_in0_gain'/s||list names 'user_in0_gain'\n\tlist names 'u_ghost'|" camilladsp
 
 # mixer step referencing an unknown mixer
 neg "unknown mixer reference" "references unknown mixer" \
@@ -226,14 +226,14 @@ fi
 rm -rf "$WORK/labels"; mkdir -p "$WORK/labels"; cp "$T/protected-2way.uci" "$WORK/labels/camilladsp"
 (
 	cd "$WORK/labels"
-	sed -i "s|option policy 'child'|option policy 'child'\n\toption label 'Front EQ'|" camilladsp
+	sed -i "0,/option policy 'free'/s||option policy 'free'\n\toption label 'Front EQ'|" camilladsp
 	sed -i "s|option type 'notch'|option type 'notch'\n\toption description '10k notch'|" camilladsp
 )
 rc=0; genconf "$WORK/labels" "$WORK/labels.yml" || rc=$?
 if [ "$rc" -eq 0 ] && python3 -c "
 import json, sys
 c = json.load(open('$WORK/labels.yml'))
-slot = [s for s in c['pipeline'] if 'user_slot_user_in0' in s.get('names', [])][0]
+slot = [s for s in c['pipeline'] if s.get('names') and s['names'][0] == 'user_in0_gain'][0]
 assert slot.get('description') == 'Front EQ', slot
 assert c['filters']['tw_notch10k'].get('description') == '10k notch', c['filters']['tw_notch10k']
 "; then
@@ -247,7 +247,7 @@ rm -rf "$WORK/free"; mkdir -p "$WORK/free"; cp "$T/protected-2way.uci" "$WORK/fr
 (
 	cd "$WORK/free"
 	printf "\nconfig filter 'uf1'\n\toption type 'gain'\n\toption gain '1'\n" >> camilladsp
-	sed -i "s|option policy 'child'|option policy 'free'\n\tlist allowed_after 'src_sel'\n\tlist names 'uf1'|" camilladsp
+	sed -i "0,/list names 'user_in0_gain'/s||list names 'user_in0_gain'\n\tlist names 'uf1'\n\tlist allowed_after 'src_sel'|" camilladsp
 )
 rc=0; genconf "$WORK/free" "$WORK/free.yml" || rc=$?
 if [ "$rc" -eq 0 ] && python3 -c "
@@ -256,9 +256,9 @@ c = json.load(open('$WORK/free.yml'))
 p = json.load(open('$WORK/free.policy'))
 free = [s for s in p['subchains'] if s['policy'] == 'free'][0]
 assert free['gaps'] == ['src_sel'], free
-assert free['max_steps'] == 8, free
-slot = [s for s in c['pipeline'] if 'user_slot_user_in0' in s.get('names', [])][0]
-assert slot['names'] == ['user_slot_user_in0', 'uf1'], slot
+assert free['max_steps'] == 9, free
+slot = [s for s in c['pipeline'] if s.get('names') and s['names'][0] == 'user_in0_gain'][0]
+assert slot['names'] == ['user_in0_gain', 'uf1'], slot
 "; then
 	ok "free subchain renders gaps by anchor name"
 else

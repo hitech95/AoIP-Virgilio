@@ -23,8 +23,8 @@
 #     `scale: linear`.
 #
 # Sub chains (see manifest for policies/hashes):
-#   user_in0 (child,  slot 0)     input ch0 user EQ — placeholder first
-#   user_in1 (child,  slot 0)     input ch1 user EQ — placeholder first
+#   user_in0 (free)               input ch0 base gain + user EQ
+#   user_in1 (free)               input ch1 base gain + user EQ
 #   src_sel  (locked, anchor 1)   mixer step
 #   wf_tail  (locked, anchor 2)   ch0 woofer xover + FIR + limiter
 #   tw_tail  (locked, anchor 3)   ch1 tweeter xover + EQ + limiter
@@ -62,14 +62,12 @@ mixers:
             gain: 0.5
             scale: linear
 filters:
-  # --- editable-slot placeholders (input-channel user EQ) ----------------
-  # user_slot_<subchain>: Gain 0 dB = transparent anchor; user steps
-  # splice in AFTER this step (same step or extra steps in the slot).
-  user_slot_user_in0:
+  # --- editable input-channel steps (free policy): base gains 1:1 -------
+  user_in0_gain:
     type: Gain
     parameters:
       gain: 0
-  user_slot_user_in1:
+  user_in1_gain:
     type: Gain
     parameters:
       gain: 0
@@ -115,14 +113,16 @@ filters:
     parameters:
       clip_limit: 0.8
 pipeline:
-  # subchain user_in0 (child, slot 0): input ch0 user EQ — placeholder FIRST
+  # subchain user_in0 (free): input ch0 base gain + user EQ
   - type: Filter
+    description: user_in0
     channels: [0]
-    names: [user_slot_user_in0]
-  # subchain user_in1 (child, slot 0): input ch1 user EQ — placeholder FIRST
+    names: [user_in0_gain]
+  # subchain user_in1 (free): input ch1 base gain + user EQ
   - type: Filter
+    description: user_in1
     channels: [1]
-    names: [user_slot_user_in1]
+    names: [user_in1_gain]
   # subchain src_sel (locked anchor 1): source select, mode ch1_ch2_avg
   - type: Mixer
     name: srcmix

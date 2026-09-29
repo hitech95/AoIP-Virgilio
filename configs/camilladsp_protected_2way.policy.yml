@@ -3,24 +3,26 @@
 # repo as the reference example). Consumed by:
 #   camilladsp camilladsp_protected_2way.yaml --make-manifest <this file>
 # Locked entries carry their step range in the rendered pipeline:
-#   [0] user_slot_user_in0   -> user_in0 (child, slot 0)
-#   [1] user_slot_user_in1   -> user_in1 (child, slot 0)
+#   [0] user_in0 (free)      -> input ch0 base gain + user EQ
+#   [1] user_in1 (free)      -> input ch1 base gain + user EQ
 #   [2] Mixer srcmix         -> src_sel (anchor 1)
 #   [3] wf_lp, wf_fir, wf_limit -> wf_tail (anchor 2)
 #   [4] tw_hp..tw_limit      -> tw_tail (anchor 3)
 # allow lists use uci filter type names (translated by camilladsp):
 #   gain peak hs ls notch ap conv delay ...
 subchains:
-  - policy: child
+  - policy: free
     name: user_in0
+    gaps: [0]
     channels: [0]
     allow: [gain, volume, peak, hs, ls, notch, ap, bp, hp, lp, conv]
-    max_steps: 8
-  - policy: child
+    max_steps: 9
+  - policy: free
     name: user_in1
+    gaps: [0]
     channels: [1]
     allow: [gain, volume, peak, hs, ls, notch, ap, bp, hp, lp, conv]
-    max_steps: 8
+    max_steps: 9
   - policy: locked
     name: src_sel
     first_step: 2

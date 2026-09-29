@@ -7,7 +7,7 @@
 #   config mixer '<name>'     one mixer (in, out, user_gains)
 #   config mixroute           one mixer source contribution
 #                             (mixer/dest/source/gain)
-#   config pipeline_step '<n>'  one pipeline step (policy locked|child|free,
+#   config pipeline_step '<n>'  one pipeline step (policy locked|free,
 #                             type, filter/mixer refs, constraints, label)
 #   config pipeline           pipeline ORDER: one 'list step' per step
 # No nodes -> plain pass-through capture -> playback.
@@ -113,12 +113,23 @@ config filter 'tw_limit'
 	option type 'limiter'
 	option clip_limit '0.8'
 
-# editable user EQ slots (child policy): user filters are added to
-# 'list names' by the web UI; the placeholder anchor user_slot_<step>
-# is always rendered first
+# editable input-channel steps (free policy): each renders 1:1 from uci
+# - its base gain filter plus whatever the web UI appends (real filter
+# sections appended to 'list names', within allow/max_steps)
+# the input-channel gains: real uci filters, rendered 1:1 in their steps
+config filter 'user_in0_gain'
+	option type 'gain'
+	option gain '0'
+
+config filter 'user_in1_gain'
+	option type 'gain'
+	option gain '0'
+
 config pipeline_step 'user_in0'
-	option policy 'child'
+	option type 'Filter'
+	option policy 'free'
 	list channels '0'
+	list names 'user_in0_gain'
 	list allow 'gain'
 	list allow 'volume'
 	list allow 'peak'
@@ -130,11 +141,13 @@ config pipeline_step 'user_in0'
 	list allow 'hp'
 	list allow 'lp'
 	list allow 'conv'
-	option max_steps '8'
+	option max_steps '9'
 
 config pipeline_step 'user_in1'
-	option policy 'child'
+	option type 'Filter'
+	option policy 'free'
 	list channels '1'
+	list names 'user_in1_gain'
 	list allow 'gain'
 	list allow 'volume'
 	list allow 'peak'
@@ -146,7 +159,7 @@ config pipeline_step 'user_in1'
 	list allow 'hp'
 	list allow 'lp'
 	list allow 'conv'
-	option max_steps '8'
+	option max_steps '9'
 
 config pipeline_step 'src_sel'
 	option policy 'locked'

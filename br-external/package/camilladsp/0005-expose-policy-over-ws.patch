@@ -1,0 +1,175 @@
+camilladsp: policy surface for the placeholder-free slot model
+
+- GetPolicy websocket command: the active manifest IS the enforced
+  policy; serve it (subchains + mixers) so web UIs render the editable
+  surface from WS data alone. Unprotected: {"protected": false}.
+- Manifest validation: editable sub chains are attributed by the step
+  description (genconf renders the uci section id there) instead of the
+  user_slot_* placeholder anchors - every pipeline step is a real step
+  defined 1:1 in uci, its names carry base filter(s) + web UI additions.
+- Policy-level free gaps become slot indexes (locked anchors preceding
+  the step, computed by genconf) instead of anchor names.
+
+Signed-off-by: virgilio firmware
+---
+--- a/src/socketserver.rs
++++ b/src/socketserver.rs
+@@ -108,6 +108,7 @@
+     ValidateConfig(String),
+     ValidateConfigJson(String),
+     GetConfigJson,
++    GetPolicy,
+     GetConfigFilePath,
+     GetStateFilePath,
+     GetStateFileUpdated,
+@@ -238,6 +239,10 @@
+         result: WsResult,
+         value: String,
+     },
++    GetPolicy {
++        result: WsResult,
++        value: serde_json::Value,
++    },
+     GetConfigValue {
+         result: WsResult,
+         value: serde_json::Value,
+@@ -1365,6 +1370,23 @@
+             result: WsResult::Ok,
+             value: serde_json::to_string(&*shared_data_inst.active_config.lock()).unwrap(),
+         }),
++        WsCommand::GetPolicy => {
++            // The active manifest IS the enforced policy: serve its schema
++            // (subchains: locked/free + channels/allow/max_steps/gaps) so
++            // web UIs render the editable surface without reading uci.
++            // Unprotected configs have no manifest: {protected: false}.
++            match crate::config::manifest::active() {
++                Some(m) => Some(WsReply::GetPolicy {
++                    result: WsResult::Ok,
++                    value: serde_json::to_value(m)
++                        .unwrap_or(serde_json::json!({ "protected": true })),
++                }),
++                None => Some(WsReply::GetPolicy {
++                    result: WsResult::Ok,
++                    value: serde_json::json!({ "protected": false }),
++                }),
++            }
++        }
+         WsCommand::GetConfigFilePath => Some(WsReply::GetConfigFilePath {
+             result: WsResult::Ok,
+             value: shared_data_inst
+--- a/src/config/manifest.rs
++++ b/src/config/manifest.rs
+@@ -427,34 +427,29 @@
+                 SubChain::Locked { .. } => false,
+             })
+             .collect();
+-        let mut current: Option<&SubChain> = None;
+-        let mut step_count: usize = 0;
++        // attribution: genconf renders every editable step with its uci
++        // section id as the description — no placeholder anchors. Each
++        // editable subchain is one real step whose names carry its base
++        // filter(s) plus the web UI's additions (all validated).
+         for idx in start..end {
+             let step = &step_values[idx];
+-            if let Some(group) = placeholder_group(step, &expected_here) {
+-                if !seen.insert(group.name().to_string()) {
+-                    return Err(format!(
+-                        "subchain '{}' appears more than once",
+-                        group.name()
+-                    ));
+-                }
+-                current = Some(group);
+-                step_count = 0;
+-                check_step_channels(step, group, bus_channels, "placeholder")?;
+-                // extra filter names carried by the placeholder step are
+-                // editable content of the group
+-                if let Some(names) = step.get("names").and_then(Value::as_array) {
+-                    check_filter_names(names.iter().skip(1), group, conf)?;
+-                }
+-                continue;
+-            }
+-            let Some(group) = current else {
++            let group = step
++                .get("description")
++                .and_then(Value::as_str)
++                .and_then(|d| expected_here.iter().find(|sc| sc.name() == d).copied());
++            let Some(group) = group else {
+                 return Err(format!(
+-                    "step {idx} in slot {slot} is not preceded by a subchain placeholder"
++                    "step {idx} in slot {slot} does not match an editable subchain"
+                 ));
+             };
+-            step_count += 1;
+-            check_editable_step(step, group, conf, step_count, bus_channels)?;
++            if !seen.insert(group.name().to_string()) {
++                return Err(format!("subchain '{}' appears more than once", group.name()));
++            }
++            check_step_channels(step, group, bus_channels, "editable step")?;
++            if let Some(names) = step.get("names").and_then(Value::as_array) {
++                check_filter_names(names.iter(), group, conf)?;
++            }
++            check_editable_step(step, group, conf, 1, bus_channels)?;
+         }
+     }
+ 
+@@ -548,16 +543,6 @@
+ /// If the step leads with a placeholder name ("user_slot_<name>") of one
+ /// of the expected groups, return that group. The step may carry extra
+ /// filter names after the placeholder; those are editable content.
+-fn placeholder_group<'a>(step: &Value, expected: &'a [&'a SubChain]) -> Option<&'a SubChain> {
+-    if step.get("type").and_then(Value::as_str) != Some("Filter") {
+-        return None;
+-    }
+-    let names = step.get("names").and_then(Value::as_array)?;
+-    let name = names.first()?.as_str()?;
+-    let suffix = name.strip_prefix("user_slot_")?;
+-    expected.iter().find(|sc| sc.name() == suffix).copied()
+-}
+-
+ /// Channels of a step, with an omitted list meaning all bus channels.
+ fn effective_channels(step: &Value, bus_channels: usize) -> Result<Vec<usize>, String> {
+     match step.get("channels") {
+@@ -698,7 +683,9 @@
+     #[serde(rename = "free")]
+     Free {
+         name: String,
+-        gaps: Vec<String>,
++        /// Slot indexes (count of locked anchors preceding the step)
++        /// where this editable step sits — computed by genconf.
++        gaps: Vec<usize>,
+         channels: Vec<usize>,
+         allow: Vec<String>,
+         max_steps: usize,
+@@ -820,15 +807,6 @@
+     let step_values: Vec<Value> = steps.iter().map(|s| canonical(s)).collect();
+ 
+     // Map anchor names to their slot index (1-based, in order).
+-    let mut anchor_slots: BTreeMap<String, usize> = BTreeMap::new();
+-    let mut counter = 0usize;
+-    for entry in &spec.subchains {
+-        if let PolicyEntry::Locked { name, .. } = entry {
+-            counter += 1;
+-            anchor_slots.insert(name.clone(), counter);
+-        }
+-    }
+-
+     let mut subchains: Vec<SubChain> = Vec::new();
+     let mut anchor_count = 0usize;
+     let mut previous_locked_end = 0usize;
+@@ -885,15 +863,7 @@
+                 allow,
+                 max_steps,
+             } => {
+-                let mut slot_gaps = Vec::new();
+-                for g in gaps {
+-                    let Some(slot) = anchor_slots.get(g) else {
+-                        return Err(format!(
+-                            "free subchain '{name}' references unknown anchor '{g}'"
+-                        ));
+-                    };
+-                    slot_gaps.push(*slot);
+-                }
++                let slot_gaps = gaps.clone();
+                 let allow = translate_allow_list(allow)?;
+                 subchains.push(SubChain::Free {
+                     name: name.clone(),

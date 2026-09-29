@@ -15,29 +15,33 @@
  *   config pipeline              pipeline ORDER: one 'list step' entry
  *                                per pipeline_step, in order
  *   config pipeline_step '<n>'   one pipeline step; the section id is
- *                                the step (and sub chain) name:
- *                                  option policy  locked | child | free
- *                                  option type    Filter | Mixer   (locked)
+ *                                the step (and sub chain) name. EVERY step
+ *                                is real: it renders 1:1 from uci (no
+ *                                placeholder anchors):
+ *                                  option policy  locked | free
+ *                                  option type    Filter | Mixer
  *                                  option mixer   <mixer-name>     (Mixer)
  *                                  list channels  bus channels
- *                                  list names     filter refs (locked:
- *                                  fixed chain; child/free: user filters
- *                                  rendered after the user_slot_<n>
- *                                  placeholder anchor)
- *                                  list allow / max_steps / (free)
+ *                                  list names     filter refs (real uci
+ *                                  filter sections; a free step's names =
+ *                                  its base filter(s) + the web UI's
+ *                                  added filters, all proper sections)
+ *                                  list allow / max_steps / (free) — page
+ *                                  schema for the web UI's slot editing
  *                                  list allowed_after <locked step names>
  *                                  option label   human name ->
  *                                  rendered as the step description
  *
  * A config where NO step carries `option policy` is an unprotected
  * upstream-style config (fully editable, no policy file). When any step
- * carries a policy, every step must. Each locked step is its own
- * single-step anchor; a child/free step IS one editable slot (its
- * section id names it).
+ * carries a policy, every step must. locked: manifest-protected; free:
+ * web UI-editable within allow/max_steps (edits are real uci filter
+ * sections appended to names).
  *
- * Outputs: <out> (JSON), <out minus .yml>.policy (only for protected
- * configs), <out minus .yml>.env (inferno sidecar). Errors -> stderr
- * prefixed 'camilladsp-genconf: ', exit 1.
+ * Outputs: <out> (JSON), <out minus .yml>.policy (protected configs; a
+ * STALE file from a previous protected render is removed when the new
+ * render is unprotected), <out minus .yml>.env (inferno sidecar). Errors
+ * -> stderr prefixed 'camilladsp-genconf: ', exit 1.
  *
  * The sidecar resolves the logical inferno/statime interface names
  * (default 'aoip') against /etc/config/network (network.<name>.device,
@@ -48,7 +52,7 @@
  * path for .uc files).
  */
 
-import { stat, writefile } from "fs";
+import { stat, unlink, writefile } from "fs";
 import * as uci from "uci";
 
 const VENDOR_COEFF_PREFIX = "/usr/share/camilladsp/coeffs";
@@ -316,24 +320,22 @@ function validate(m) {
 	if (protected_cfg)
 		for (let n, st in m.steps)
 			if (st.policy == "")
-				fail(sprintf("step '%s' has no policy (locked|child|free)", n));
+				fail(sprintf("step '%s' has no policy (locked|free)", n));
 
 	m.protected = protected_cfg;
 	if (!protected_cfg) return;
 
 	for (let n, st in m.steps) {
-		if (st.policy != "locked" && st.policy != "child" && st.policy != "free")
-			fail(sprintf("step '%s': bad policy '%s' (locked|child|free)", n, st.policy));
-		if (st.policy != "locked") {
+		if (st.policy != "locked" && st.policy != "free")
+			fail(sprintf("step '%s': bad policy '%s' (locked|free)", n, st.policy));
+		if (st.type == "")
+			fail(sprintf("step '%s' (policy %s) missing type", n, st.policy));
+		if (st.policy == "free") {
 			if (length(st.channels) == 0)
-				fail(sprintf("step '%s' (policy %s) needs channels=", n, st.policy));
+				fail(sprintf("step '%s' (free) needs channels=", n));
 			if (length(st.allow) == 0)
-				fail(sprintf("step '%s' (policy %s) needs allow=", n, st.policy));
+				fail(sprintf("step '%s' (free) needs allow=", n));
 			if (st.max_steps == "") st.max_steps = "8";
-			if (st.type != "")
-				fail(sprintf("step '%s' (policy %s) must not carry a type", n, st.policy));
-		} else if (st.type == "") {
-			fail(sprintf("step '%s' (locked) missing type", n));
 		}
 	}
 
@@ -344,7 +346,8 @@ function validate(m) {
 			fail(sprintf("last step '%s' must be locked", last));
 	}
 
-	/* child/free slots: user filters defined + allowed + within max_steps */
+	/* free slots: every referenced filter defined + allowed + within
+	 * max_steps (names = base filter(s) + the web UI's added ones) */
 	for (let n, st in m.steps) {
 		if (st.policy == "locked") continue;
 		let cntu = 0;
@@ -575,19 +578,9 @@ function render(m) {
 		cfg.mixers = mixers;
 	}
 
-	/* filters: transparent slot anchors (Gain 0 dB) first, then defs */
-	let slots = [];
-	if (m.protected)
-		for (let n in m.order)
-			if (m.steps[n].policy != "locked")
-				push(slots, n);
-
-	if (length(m.filter_order) > 0 || length(slots) > 0) {
+	/* filters: 1:1 from uci (no placeholder anchors) */
+	if (length(m.filter_order) > 0) {
 		let filters = {};
-		for (let n in slots) {
-			let ph = `user_slot_${n}`;
-			filters[ph] = { type: "Gain", parameters: { gain: 0 } };
-		}
 		for (let n in m.filter_order)
 			filters[n] = render_filter(n, m.filters[n]);
 		cfg.filters = filters;
@@ -597,20 +590,6 @@ function render(m) {
 	let pipe = [];
 	for (let n in m.order) {
 		let st = m.steps[n];
-
-		/* editable slot: render the placeholder step */
-		if (m.protected && st.policy != "locked") {
-			let names = [`user_slot_${n}`];
-			for (let fname in st.names) push(names, fname);
-			let step = {
-				type: "Filter",
-				channels: map(st.channels, (c) => num(c, c)),
-				names: names
-			};
-			if (st.label != "") step.description = st.label;
-			push(pipe, step);
-			continue;
-		}
 
 		if (st.type == "Filter" || st.type == "filter") {
 			let names = [];
@@ -624,13 +603,19 @@ function render(m) {
 			if (length(st.channels) > 0)
 				step.channels = map(st.channels, (c) => num(c, c));
 			step.names = names;
-			if (st.label != "") step.description = st.label;
+			/* free steps carry their uci section id: the manifest validator
+			 * attributes editable steps to their sub chain by description */
+			step.description = (st.label != "") ? st.label
+				: ((m.protected && st.policy == "free") ? n : "");
+			if (step.description == "") delete step.description;
 			push(pipe, step);
 		} else if (st.type == "Mixer" || st.type == "mixer") {
 			if (!m.mixers[st.mixer])
 				fail(sprintf("step '%s' references unknown mixer '%s'", n, st.mixer));
 			let step = { type: "Mixer", name: st.mixer };
-			if (st.label != "") step.description = st.label;
+			step.description = (st.label != "") ? st.label
+				: ((m.protected && st.policy == "free") ? n : "");
+			if (step.description == "") delete step.description;
 			push(pipe, step);
 		} else {
 			fail(sprintf("step '%s' has bad type '%s' (Filter|Mixer)", n, st.type));
@@ -643,23 +628,19 @@ function render(m) {
 		return { config: cfg, policy: null };
 
 	let subs = [];
+	let locked_before = 0; /* slot index: editable steps between locked anchors */
 	for (let n in m.order) {
 		let st = m.steps[n];
 		let pos = index(m.order, n);
 		if (st.policy == "locked") {
 			/* each locked step is its own single-step anchor */
 			push(subs, { policy: "locked", name: n, first_step: pos, steps: 1 });
-		} else if (st.policy == "child") {
-			push(subs, {
-				policy: "child", name: n,
-				channels: map(st.channels, (c) => num(c, c)),
-				allow: st.allow,
-				max_steps: match(st.max_steps, /^[0-9]+$/) ? int(st.max_steps) : st.max_steps
-			});
+			locked_before++;
 		} else {
 			push(subs, {
 				policy: "free", name: n,
-				gaps: st.after,
+				/* the slot this step sits in (locked anchors before it) */
+				gaps: (length(st.after) > 0) ? st.after : [locked_before],
 				channels: map(st.channels, (c) => num(c, c)),
 				allow: st.allow,
 				max_steps: match(st.max_steps, /^[0-9]+$/) ? int(st.max_steps) : st.max_steps
@@ -707,6 +688,10 @@ function generate(out) {
 	writefile(out, sprintf("%J\n", r.config));
 	if (r.policy != null)
 		writefile(stem(out) + ".policy", sprintf("%J\n", r.policy));
+	else
+		/* unprotected render: a policy left over from a previous protected
+		 * one would make the init build a manifest against a plain config */
+		unlink(stem(out) + ".policy");
 }
 
 /* CLI entry: camilladsp-genconf [outfile] */
