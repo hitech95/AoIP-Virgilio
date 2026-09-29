@@ -196,6 +196,32 @@ else
 	bad "legacy render emitted a policy"
 fi
 
+# ---- 3b. no pipeline at all: pass-through ---------------------------------
+# only `config camilladsp 'main'`: capture maps straight to playback,
+# the rendered config carries no pipeline key
+rm -rf "$WORK/passthrough"; mkdir -p "$WORK/passthrough"
+printf "%s\n" \
+	"config camilladsp 'main'" \
+	"	option samplerate '48000'" \
+	"	option channels '2'" \
+	"	option output_channels '2'" \
+	"	option chunksize '1024'" \
+	"	option format 'S16_LE'" \
+	"	option capture 'RawFile:/dev/zero'" \
+	"	option playback 'File:/dev/null'" \
+	> "$WORK/passthrough/camilladsp"
+rc=0; genconf "$WORK/passthrough" "$WORK/passthrough.yml" || rc=$?
+if [ "$rc" -eq 0 ] && python3 -c "
+import json, sys
+c = json.load(open('$WORK/passthrough.yml'))
+assert 'pipeline' not in c, c.get('pipeline')
+assert 'devices' in c
+" && [ ! -e "$WORK/passthrough.policy" ]; then
+	ok "no pipeline renders pass-through (no pipeline key)"
+else
+	bad "pass-through render (rc=$rc: $(head -1 "$WORK/stderr.txt"))"
+fi
+
 # ---- 4. labels/descriptions render into the config ---------------------
 rm -rf "$WORK/labels"; mkdir -p "$WORK/labels"; cp "$T/protected-2way.uci" "$WORK/labels/camilladsp"
 (
