@@ -1,5 +1,0 @@
-# dropbear SSH server: the web UI System > Settings toggle writes
-# option enable (1 = server runs, 0 = stopped). Default: enabled.
-
-config dropbear 'ssh'
-	option enable '1'

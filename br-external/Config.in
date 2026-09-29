@@ -25,6 +25,8 @@ menu "Virgilio packages"
 
 # libubox and ubus come from Buildroot upstream (package/libubox, package/ubus)
 source "$BR2_EXTERNAL_VIRGILIO_PATH/package/virgilio-base/Config.in"
+source "$BR2_EXTERNAL_VIRGILIO_PATH/package/virgilio-dropbear/Config.in"
+source "$BR2_EXTERNAL_VIRGILIO_PATH/package/virgilio-mpd/Config.in"
 source "$BR2_EXTERNAL_VIRGILIO_PATH/package/camilladsp/Config.in"
 source "$BR2_EXTERNAL_VIRGILIO_PATH/package/statime/Config.in"
 source "$BR2_EXTERNAL_VIRGILIO_PATH/package/inferno/Config.in"

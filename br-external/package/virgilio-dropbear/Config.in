@@ -1,0 +1,10 @@
+config BR2_PACKAGE_VIRGILIO_DROPBEAR
+	bool "virgilio-dropbear (ssh access)"
+	select BR2_PACKAGE_DROPBEAR
+	help
+	  Procd init + uci config for the dropbear ssh server, shared by
+	  every board that ships ssh access (the per-board copies were
+	  byte-identical). uci /etc/config/dropbear option enable (1/0) is
+	  the web UI System > Settings toggle; missing config means enabled.
+	  Keys are persistent (real /etc/dropbear, not Buildroot's volatile
+	  /var/run symlink; the init removes the dangling link).
