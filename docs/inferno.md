@@ -173,7 +173,7 @@ All inferno settings are environment variables with the `INFERNO_` prefix
 | Env | Meaning | Default |
 |---|---|---|
 | `INFERNO_NAME` | advertised device name | `<app> <ip>` |
-| `INFERNO_BIND_IP` | IP or interface name to bind | auto (needs a route!) |
+| `INFERNO_BIND_IP` | IP or interface name to bind; with multiple IPv4 on the interface (zcip + DHCP/static) the **first global** wins over 169.254/16 (local patch 0004) | auto (needs a route!) |
 | `INFERNO_CLOCK_PATH` | usrvclock socket or PTP device | unset |
 | `INFERNO_RX_CHANNELS` / `INFERNO_TX_CHANNELS` | channel counts | 2 / 2 |
 | `INFERNO_RX_LATENCY_NS` / `INFERNO_TX_LATENCY_NS` | flow latency | 1 ms / 1 ms |
@@ -183,7 +183,11 @@ All inferno settings are environment variables with the `INFERNO_` prefix
 
 > **`INFERNO_BIND_IP` on isolated links**: the auto-detection resolves the
 > local IP via a routing query; on a network without a default route it
-> panics with `LocalIpAddressNotFound`. Always set it there (IP or `eth1`).
+> panics with `LocalIpAddressNotFound`. Always set it there (IP or the
+> netdev name — genconf exports the resolved `network.aoip.device`).
+> A named interface that is up but still addressless (zcip probing,
+> DHCP not yet granted) panics the same way; procd's respawn absorbs
+> the wait.
 
 ### `/etc/asound.conf`
 
@@ -283,7 +287,7 @@ itself — there is no inferno service.
 | Key | Default | Derived `INFERNO_*` | Description |
 |---|---|---|---|
 | `name` | *(empty)* | `INFERNO_NAME` | Advertised device name; empty = **system hostname** (`system.@system[0].hostname`). |
-| `interface` | `eth1` | `INFERNO_BIND_IP` | IP **or interface name** to bind. Mandatory on route-less networks (else the instance panics with `LocalIpAddressNotFound`). |
+| `interface` | `aoip` | `INFERNO_BIND_IP` | **Logical netifd interface name**, resolved by genconf against `/etc/config/network` (`network.<name>.device`); a raw netdev name or an IP literal also passes through. Mandatory on route-less networks (else the instance panics with `LocalIpAddressNotFound`). |
 | `clock_path` | `/tmp/ptp-usrvclock` | `INFERNO_CLOCK_PATH` | usrvclock socket exported by statime — must match statime's `usrvclock_path`. |
 | `rx_channels` | *(empty)* | `INFERNO_RX_CHANNELS` | Empty = camilladsp `channels` when capture is `Inferno`, else **0**. |
 | `tx_channels` | *(empty)* | `INFERNO_TX_CHANNELS` | Empty = camilladsp `output_channels` when playback is `Inferno`, else **0** (RX-only setups never advertise TX). |
@@ -291,12 +295,35 @@ itself — there is no inferno service.
 `INFERNO_SAMPLE_RATE` (= camilladsp `samplerate`) and `RUST_LOG=warn` are
 exported additionally and are not configurable here.
 
+### AoIP addressing: link-local fallback + address preference
+
+The AoIP interface (`network.aoip`) follows the same ladder as a real
+Dante device — it is never addressless:
+
+- **product default**: `proto 'zcip'` (netifd handler +
+  `/usr/lib/netifd/zcip.script`, busybox RFC 3927 applet) keeps an
+  ARP-defended 169.254/16 address on the segment at all times —
+  standalone on a bare switch included. Probing takes a few seconds;
+  netifd marks `aoip` available once the address is claimed.
+- **management / preferred address**: `network.lan` (DHCP or static)
+  may share the same device (combined single-port topology) or live on
+  another port (split: `network.aoip.device eth1`). inferno picks the
+  **first global IPv4** of the bound device and only falls back to
+  link-local when none exists (patch 0004) — reachable from managed
+  networks, standalone-capable otherwise.
+- **rig**: `proto 'static'` on `aoip` skips zcip entirely.
+
+inferno and statime both bind the logical `aoip` interface
+(`network.aoip.device`): moving the Dante segment to the other port is
+that single uci option. genconf refuses to render a split clock/media
+setup (inferno and statime resolving to different netdevs).
+
 Rendered file (default — name from hostname, channels follow camilladsp):
 
 ```
 config inferno 'main'
 	option name ''
-	option interface 'eth1'
+	option interface 'aoip'
 	option clock_path '/tmp/ptp-usrvclock'
 	option rx_channels ''
 	option tx_channels ''
@@ -307,7 +334,7 @@ Rendered file (explicit identity for a dedicated RX device):
 ```
 config inferno 'main'
 	option name 'livingroom-rx'
-	option interface 'eth1'
+	option interface 'aoip'
 	option clock_path '/tmp/ptp-usrvclock'
 	option rx_channels '8'
 	option tx_channels '0'

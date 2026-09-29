@@ -6,9 +6,11 @@
 config inferno 'main'
 	# advertised device name; empty = system hostname
 	option name ''
-	# interface or IP to bind (BIND_IP); mandatory interface on networks
-	# without a default route (eth1 = Dante/PTP segment in rig mode)
-	option interface 'eth1'
+	# interface or IP to bind (BIND_IP): logical netifd interface name
+	# (default 'aoip' -> network.aoip.device), resolved by genconf; a raw
+	# netdev name or an IP also passes through. Mandatory on networks
+	# without a default route.
+	option interface 'aoip'
 	# usrvclock socket exported by statime (see /etc/init.d/statime)
 	option clock_path '/tmp/ptp-usrvclock'
 	# persistent state directory (XDG_STATE_HOME for the inferno

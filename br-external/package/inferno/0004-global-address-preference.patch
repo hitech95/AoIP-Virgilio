@@ -1,0 +1,80 @@
+# Global-over-link-local IPv4 preference for BIND_IP interface resolution.
+#
+# Product reason: the AoIP addressing ladder (static/DHCP -> link-local
+# via the netifd 'zcip' proto, busybox RFC 3927) keeps the Dante segment
+# addressable even standalone on a bare switch — at the price of the
+# bound device carrying BOTH a global (DHCP/static) and a 169.254/16
+# address in the combined single-port topology. The old scan took the
+# first address found, which is arbitrary in that regime; Dante peers on
+# a managed network must reach the advertised address, so the first
+# GLOBAL IPv4 wins, with link-local as the standalone fallback.
+#
+# Upstream-rev: 75d9198 + 0001 + 0002 + 0003. Generated with git diff
+# from the stacked tree; `cargo test -p inferno_aoip` covers the
+# preference (global-first both orders, link-local-only fallback, empty).
+diff --git a/inferno_aoip/src/device_server/settings.rs b/inferno_aoip/src/device_server/settings.rs
+index e34b086..2752866 100644
+--- a/inferno_aoip/src/device_server/settings.rs
++++ b/inferno_aoip/src/device_server/settings.rs
+@@ -14,6 +14,16 @@ use crate::protocol::mcast::INFO_REQUEST_PORT;
+ use crate::protocol::proto_arc::PORT as ARC_PORT;
+ use crate::protocol::proto_cmc::PORT as CMC_PORT;
+ 
++// First global (non-link-local) IPv4 of an interface, falling back to
++// its first address: in the combined topology a DHCP/static global and
++// an RFC 3927 link-local (zcip) coexist on one device and the
++// first-found order is arbitrary — peers on a managed network must
++// reach us at the global address. Link-local-only regimes (standalone
++// segment, no infrastructure) are unaffected by the preference.
++fn preferred_ipv4(nets: &[netdev::ipnet::Ipv4Net]) -> Option<Ipv4Addr> {
++  nets.iter().find(|net| !net.addr().is_link_local()).or_else(|| nets.first()).map(|net| net.addr())
++}
++
+ fn create_self_info(
+   app_name: &str,
+   short_app_name: &str,
+@@ -27,14 +37,11 @@ fn create_self_info(
+     .or_else(|| {
+       settings.get("BIND_IP").map(|ipstr| {
+         ipstr.parse().unwrap_or_else(|_| {
+-          interfaces
++          let iface = interfaces
+             .iter()
+             .find(|iface| &iface.name == ipstr)
+-            .expect("invalid setting BIND_IP, must contain IP address or network interface name")
+-            .ipv4
+-            .get(0)
+-            .expect("interface specified in BIND_IP has no IPv4 addresses")
+-            .addr()
++            .expect("invalid setting BIND_IP, must contain IP address or network interface name");
++          preferred_ipv4(&iface.ipv4).expect("interface specified in BIND_IP has no IPv4 addresses")
+         })
+       })
+     })
+@@ -250,6 +257,26 @@ impl Settings {
+ #[cfg(test)]
+ mod tests {
+   use super::*;
++  use netdev::ipnet::Ipv4Net;
++
++  fn net(s: &str) -> Ipv4Net {
++    Ipv4Net::new_assert(s.parse().unwrap(), 16)
++  }
++
++  #[test]
++  fn preferred_ipv4_prefers_global_over_link_local() {
++    let ll = net("169.254.10.20");
++    let glob = net("192.168.1.30");
++    let want: Ipv4Addr = "192.168.1.30".parse().unwrap();
++    assert_eq!(preferred_ipv4(&[ll, glob]), Some(want));
++    assert_eq!(preferred_ipv4(&[glob, ll]), Some(want));
++  }
++
++  #[test]
++  fn preferred_ipv4_link_local_only_falls_back_to_first() {
++    assert_eq!(preferred_ipv4(&[net("169.254.10.20")]), Some("169.254.10.20".parse().unwrap()));
++    assert_eq!(preferred_ipv4(&[]), None);
++  }
+ 
+   fn advertised_bits(settings: &[(&str, &str)]) -> u8 {
+     let map: BTreeMap<String, String> =

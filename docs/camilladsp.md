@@ -413,7 +413,7 @@ the daemon by the init script:
 | Key | Default | Derived `INFERNO_*` | Description |
 |---|---|---|---|
 | `name` | *(empty)* | `INFERNO_NAME` | Advertised device name; empty = **system hostname**. |
-| `interface` | `eth1` | `INFERNO_BIND_IP` | IP **or interface name** to bind (mandatory on route-less networks). |
+| `interface` | `aoip` | `INFERNO_BIND_IP` | Logical netifd interface name, resolved against `/etc/config/network` (`network.<name>.device`); raw netdev names and IP literals pass through. Must resolve to the same netdev as statime's `interface` (PTP and media share the L2 — genconf refuses a split). See [docs/inferno.md](inferno.md) "AoIP addressing". |
 | `clock_path` | `/tmp/ptp-usrvclock` | `INFERNO_CLOCK_PATH` | usrvclock socket exported by statime. |
 | `rx_channels` | *(empty)* | `INFERNO_RX_CHANNELS` | Empty = camilladsp `channels` **when capture is `Inferno`**, else **0**. |
 | `tx_channels` | *(empty)* | `INFERNO_TX_CHANNELS` | Empty = camilladsp `output_channels` **when playback is `Inferno`**, else **0** (a RX-only setup never advertises TX). |

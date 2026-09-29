@@ -313,5 +313,72 @@ else
 	bad "RX-only sidecar (rc=$rc: $(head -1 "$WORK/stderr.txt"))"
 fi
 
+# ---- 7. inferno interface resolution (logical -> netdev) -------------------
+# fixture: network{aoip=eth1, lan=eth0}; the inferno/statime uci values
+# are logical netifd interface names resolved against it
+resolve_case() {
+	name="$1"; inf_if="$2"; st_if="$3"; want="$4"
+	rm -rf "$WORK/resolve"; mkdir -p "$WORK/resolve"
+	cp "$T/protected-2way.uci" "$WORK/resolve/camilladsp"
+	cat > "$WORK/resolve/network" <<EOF
+config interface 'lan'
+	option device 'eth0'
+	option proto 'dhcp'
+
+config interface 'aoip'
+	option device 'eth1'
+	option proto 'zcip'
+EOF
+	printf "config inferno 'main'\n" > "$WORK/resolve/inferno"
+	[ -n "$inf_if" ] && printf "\toption interface '%s'\n" "$inf_if" >> "$WORK/resolve/inferno"
+	printf "config statime 'main'\n" > "$WORK/resolve/statime"
+	[ -n "$st_if" ] && printf "\toption interface '%s'\n" "$st_if" >> "$WORK/resolve/statime"
+	rm -f "$WORK/resolve.env"
+	rc=0; genconf "$WORK/resolve" "$WORK/resolve.yml" || rc=$?
+	bindip=""
+	if [ -f "$WORK/resolve.env" ]; then
+		bindip=$(sed -n "s/^INFERNO_BIND_IP=//p" "$WORK/resolve.env")
+	fi
+	if [ "$rc" -eq 0 ] && [ "$bindip" = "$want" ]; then
+		ok "resolve $name"
+	else
+		bad "resolve $name (rc=$rc bindip='$bindip' want='$want': $(head -1 "$WORK/stderr.txt"))"
+	fi
+}
+
+# logical name -> network.<name>.device
+resolve_case "aoip -> eth1"            "aoip" ""    "eth1"
+# raw netdev passthrough (lo exists on any host)
+resolve_case "raw netdev passthrough"  "lo"   "lo"  "lo"
+# IP literal passthrough (BIND_IP accepts an address too)
+resolve_case "IP literal passthrough"  "192.168.1.5" "192.168.1.5" "192.168.1.5"
+# unknown name -> warned fallback to the aoip resolution
+resolve_case "unknown -> aoip fallback" "ghost42" ""  "eth1"
+# both interfaces on the logical 'lan' (eth0): same L2, allowed
+resolve_case "inferno lan, statime lan" "lan"  "lan" "eth0"
+
+# split clock/media: statime on eth0, inferno on eth1 -> refuse to render
+rm -rf "$WORK/split"; mkdir -p "$WORK/split"
+cp "$T/protected-2way.uci" "$WORK/split/camilladsp"
+cp "$WORK/resolve/network" "$WORK/split/network" 2>/dev/null || cat > "$WORK/split/network" <<EOF
+config interface 'lan'
+	option device 'eth0'
+	option proto 'dhcp'
+
+config interface 'aoip'
+	option device 'eth1'
+	option proto 'zcip'
+EOF
+printf "config inferno 'main'\n\toption interface 'aoip'\n" > "$WORK/split/inferno"
+printf "config statime 'main'\n\toption interface 'lan'\n" > "$WORK/split/statime"
+rm -f "$WORK/split.env"
+rc=0; genconf "$WORK/split" "$WORK/split.yml" || rc=$?
+out=$(cat "$WORK/stderr.txt")
+if [ "$rc" -ne 0 ] && echo "$out" | grep -q "share one netdev"; then
+	ok "split clock/media refused"
+else
+	bad "split clock/media refusal (rc=$rc: $(echo "$out" | head -1))"
+fi
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

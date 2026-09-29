@@ -18,6 +18,32 @@ statime_bool() {
 	esac
 }
 
+# Resolve a logical interface value to a netdev name — same semantics as
+# camilladsp-genconf (keep the two in sync):
+#   1. value names a netifd interface (network.<value> carries option
+#      device) -> that device ('aoip' -> eth0/eth1, whatever uci says);
+#   2. value is an existing raw netdev (/sys/class/net/<value>) -> as-is
+#      (back-compat with 'eth1'-style values);
+#   3. else fall back to the 'aoip' resolution with a warning.
+# Requires `config_load network` before the call.
+statime_resolve_if() {
+	local v="${1:-aoip}" dev
+
+	config_get dev "$v" device ""
+	if [ -n "$dev" ]; then
+		echo "$dev"
+		return
+	fi
+	if [ -e "/sys/class/net/$v" ]; then
+		echo "$v"
+		return
+	fi
+	echo "statime: '$v' is neither a network interface nor a netdev, falling back to 'aoip'" >&2
+	config_get dev aoip device ""
+	[ -n "$dev" ] && { echo "$dev"; return; }
+	echo eth0
+}
+
 start_service() {
 	local loglevel domain sdo_id priority1 slave_only
 	local interface network_mode hardware_clock protocol
@@ -30,13 +56,7 @@ start_service() {
 	config_get sdo_id main sdo_id 0
 	config_get priority1 main priority1 251
 	config_get slave_only main slave_only 0
-	config_get interface main interface eth1
-	# the PTP port NIC (eth1) only exists in rig mode (run-qemu.sh --net
-	# socket-*/tap): skip instead of flapping in procd respawn when absent
-	if ! ip link show "$interface" >/dev/null 2>&1; then
-		echo "statime: interface ${interface} not present, not starting" >&2
-		return 0
-	fi
+	config_get interface main interface aoip
 	config_get network_mode main network_mode ipv4
 	config_get hardware_clock main hardware_clock auto
 	config_get protocol main protocol PTPv2
@@ -48,6 +68,17 @@ start_service() {
 	# (incl. per-port port_state) per client connect; consumed by
 	# /usr/bin/ptp-monitor for `ubus call ptp status`
 	config_get observation_path main observation_path /tmp/statime-observe.sock
+
+	# resolve the logical interface LAST: config_load network switches
+	# the uci context away from statime
+	config_load network
+	interface="$(statime_resolve_if "$interface")"
+	# a missing netdev is normal in QEMU simple mode (no --net segment):
+	# skip instead of flapping in procd respawn
+	if ! ip link show "$interface" >/dev/null 2>&1; then
+		echo "statime: interface ${interface} not present, not starting" >&2
+		return 0
+	fi
 
 	cat > "$CONFFILE" <<EOF
 loglevel = "${loglevel}"

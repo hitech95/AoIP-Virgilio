@@ -39,11 +39,16 @@
  * configs), <out minus .yml>.env (inferno sidecar). Errors -> stderr
  * prefixed 'camilladsp-genconf: ', exit 1.
  *
+ * The sidecar resolves the logical inferno/statime interface names
+ * (default 'aoip') against /etc/config/network (network.<name>.device,
+ * raw netdev/IP passthrough, aoip fallback) and refuses to render a
+ * split clock/media setup (differing resolved netdevs).
+ *
  * Self-contained ucode program (the target ucode has no module search
  * path for .uc files).
  */
 
-import { writefile } from "fs";
+import { stat, writefile } from "fs";
 import * as uci from "uci";
 
 const VENDOR_COEFF_PREFIX = "/usr/share/camilladsp/coeffs";
@@ -193,6 +198,26 @@ function collect(cursor) {
 
 /* ---- inferno env sidecar (written before validation, shell parity) -------- */
 
+/* Logical interface value -> BIND_IP netdev. Resolution ladder (mirrors
+ * statime_resolve_if in the statime init script — keep in sync):
+ *   1. value names a netifd interface (network.<value> carries option
+ *      device) -> that device ('aoip' -> eth0/eth1, whatever uci says);
+ *   2. a literal IPv4 address or an existing raw netdev passes through;
+ *   3. anything else falls back to the 'aoip' resolution with a warning.
+ * Moving the Dante segment between ports is then a single uci change
+ * (network.aoip.device); inferno/statime keep saying 'aoip'. */
+function resolve_netdev(cursor, value) {
+	let v = (value == null || `${value}` == "") ? "aoip" : `${value}`;
+	let dev = section(cursor, "network", v).device;
+	if (dev != null && `${dev}` != "")
+		return `${dev}`;
+	if (match(v, /^([0-9]{1,3}\.){3}[0-9]{1,3}$/) || stat("/sys/class/net/" + v) != null)
+		return v;
+	warn(`camilladsp-genconf: interface '${v}' is neither a network interface nor a netdev, falling back to 'aoip'\n`);
+	let fallback = section(cursor, "network", "aoip").device;
+	return (fallback != null && `${fallback}` != "") ? `${fallback}` : "eth0";
+}
+
 /* uci format (the camilladsp <-> inferno-plugin ALSA boundary) -> inferno
  * TX wire depth. Accepts both the camilladsp file-format spellings
  * (S24_3_LE, S24_4_RJ_LE, ...) and the bare ALSA ones (S24_LE, S24_3LE);
@@ -223,10 +248,22 @@ function write_env_sidecar(m, cursor, out) {
 	let itx = `${inf.tx_channels ?? ""}`;
 	if (itx == "") itx = pb_inf ? `${m.main.pbch}` : "0";
 
+	let bind_ip = resolve_netdev(cursor, inf.interface);
+
+	/* invariant: PTP (statime) and the Dante media (inferno) must share
+	 * the L2 — both interface options must resolve to the same netdev.
+	 * A split clock/media setup is a config error, not something to
+	 * render anyway. */
+	let st_dev = resolve_netdev(cursor, section(cursor, "statime", "main").interface);
+	if (bind_ip != st_dev)
+		fail(sprintf(
+			"inferno interface resolves to '%s' but statime interface to '%s': PTP and the Dante media must share one netdev",
+			bind_ip, st_dev));
+
 	let env = [
 		"RUST_LOG=warn",
 		`INFERNO_NAME=${iname}`,
-		`INFERNO_BIND_IP=${inf.interface ?? "eth1"}`,
+		`INFERNO_BIND_IP=${bind_ip}`,
 		`INFERNO_CLOCK_PATH=${inf.clock_path ?? "/tmp/ptp-usrvclock"}`,
 		`INFERNO_RX_CHANNELS=${irx}`,
 		`INFERNO_TX_CHANNELS=${itx}`,

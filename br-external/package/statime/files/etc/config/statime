@@ -14,8 +14,11 @@ config statime 'main'
 	option sdo_id '0'
 	option priority1 '251'
 	option slave_only '0'
-	# port settings (single-port setup, the Dante/PTP segment NIC)
-	option interface 'eth1'
+	# port settings (single-port setup, the Dante/PTP segment NIC):
+	# logical netifd interface name, resolved against /etc/config/network
+	# by the init script ('aoip' -> network.aoip.device; a raw netdev name
+	# like eth1 also passes through)
+	option interface 'aoip'
 	option network_mode 'ipv4'
 	# auto | required | none | <PHC index>
 	option hardware_clock 'auto'
