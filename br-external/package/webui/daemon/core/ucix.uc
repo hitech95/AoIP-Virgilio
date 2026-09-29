@@ -12,7 +12,7 @@
 import * as uci from "uci";
 import { ERR_NOT_FOUND } from "util";
 
-const UCI_WRITABLE = { system: 1, network: 1, camilladsp: 1, inferno: 1, webui: 1 };
+const UCI_WRITABLE = { system: 1, network: 1, camilladsp: 1, inferno: 1, webui: 1, dropbear: 1 };
 
 function uci_write_ok(config) {
 	return UCI_WRITABLE[config] == 1;

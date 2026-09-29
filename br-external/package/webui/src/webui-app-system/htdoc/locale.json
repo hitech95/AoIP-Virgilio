@@ -24,7 +24,9 @@
     "Resetting, the device reboots now": "Resetting, the device reboots now",
     "Firmware upgrade": "Firmware upgrade",
     "Not available on this build: requires the production UBI image layout (see plan/squashfs-overlay-userdata.md).": "Not available on this build: requires the production UBI image layout (see plan/squashfs-overlay-userdata.md).",
-    "Cancel": "Cancel"
+    "Cancel": "Cancel",
+    "SSH access": "SSH access",
+    "Enables or disables the dropbear SSH server.": "Enables or disables the dropbear SSH server."
   },
   "it": {
     "Hostname": "Nome host",
@@ -51,6 +53,8 @@
     "Resetting, the device reboots now": "Ripristino in corso, il dispositivo si riavvia ora",
     "Firmware upgrade": "Aggiornamento firmware",
     "Not available on this build: requires the production UBI image layout (see plan/squashfs-overlay-userdata.md).": "Non disponibile su questa build: richiede il layout immagine UBI di produzione (vedi plan/squashfs-overlay-userdata.md).",
-    "Cancel": "Annulla"
+    "Cancel": "Annulla",
+    "SSH access": "Accesso SSH",
+    "Enables or disables the dropbear SSH server.": "Abilita o disabilita il server SSH dropbear."
   }
 }

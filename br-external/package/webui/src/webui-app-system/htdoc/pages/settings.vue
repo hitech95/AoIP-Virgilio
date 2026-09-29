@@ -8,6 +8,10 @@
         <el-option v-for="item in zoneinfo" :key="item[0]" :label="item[0]" :value="item[0]"/>
       </el-select>
     </el-form-item>
+    <el-form-item :label="$t('SSH access')">
+      <el-switch v-model="sshEnabled" :loading="sshLoading" @change="applySsh"/>
+      <span class="hint">{{ $t('Enables or disables the dropbear SSH server.') }}</span>
+    </el-form-item>
   </el-form>
 
   <el-divider/>
@@ -21,6 +25,8 @@ export default {
   data() {
     return {
       loading: false,
+      sshEnabled: true,
+      sshLoading: false,
       zoneinfo: [['UTC', 'UTC']],   /* replaced by system.get_timezones */
       formValue: {
         hostname: this.$oui.state.hostname,
@@ -55,8 +61,35 @@ export default {
     }).then(zonename => {
       this.formValue.zonename = zonename || 'UTC'
     })
+
+    /* SSH (dropbear): uci dropbear.ssh.enable (named section shipped by
+     * the board overlay); absent/other-than-0 means the server runs */
+    this.$oui.call('uci', 'get', {
+      config: 'dropbear',
+      section: 'ssh',
+      option: 'enable'
+    }).then(enable => {
+      this.sshEnabled = enable !== '0'
+    }).catch(() => {})
   },
   methods: {
+    /* immediate apply: uci enable flag + service reload */
+    async applySsh(enabled) {
+      this.sshLoading = true
+      try {
+        await this.$oui.call('uci', 'set', {
+          config: 'dropbear',
+          section: 'ssh',
+          values: { enable: enabled ? '1' : '0' }
+        })
+        await this.$oui.reloadConfig('dropbear')
+        this.$message.success(this.$t('Configuration has been applied'))
+      } catch {
+        this.sshEnabled = !enabled
+        this.$message.error(this.$t('Failed to apply'))
+      }
+      this.sshLoading = false
+    },
     async handleSubmit() {
       const valid = await this.$refs.form.validate().catch(() => false)
       if (!valid)
@@ -90,3 +123,11 @@ export default {
 </script>
 
 <i18n src="../locale.json"/>
+
+<style scoped>
+.hint {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-left: 12px;
+}
+</style>
