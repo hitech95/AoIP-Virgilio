@@ -50,7 +50,7 @@ BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
 BR2_PACKAGE_HTOP=y
 # SSH for bring-up/debug (procd init from the board overlay; root
 # password login needs a password set first - see init.d/dropbear)
-BR2_PACKAGE_DROPBEAR=y
+BR2_PACKAGE_VIRGILIO_DROPBEAR=y
 
 # Board files (network topology, uci overrides for eth0, asound.conf,
 # coeffs, snd_bcm2835 module); generic post-build + busybox fragment

@@ -53,7 +53,7 @@ BR2_PACKAGE_ALSA_UTILS_APLAY=y
 BR2_PACKAGE_ALSA_UTILS_ARECORD=y
 BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
 BR2_PACKAGE_HTOP=y
-BR2_PACKAGE_DROPBEAR=y
+BR2_PACKAGE_VIRGILIO_DROPBEAR=y
 
 # Board-specific rootfs overlay (network topology, rig services); the
 # common base files come from the virgilio-base package
@@ -76,27 +76,4 @@ BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y
 BR2_TARGET_ROOTFS_EXT2_SIZE="256M"
 # BR2_TARGET_ROOTFS_TAR is not set
-# MPD web-radio source for the Dante transmitter (dual-NIC guests)
-BR2_PACKAGE_MPD=y
-# real MPD CLI (music player client; NB BR2_PACKAGE_MPC is the math lib)
-BR2_PACKAGE_MPD_MPC=y
-BR2_PACKAGE_MPD_ALSA=y
-BR2_PACKAGE_MPD_CURL=y
-BR2_PACKAGE_MPD_MAD=y
-BR2_PACKAGE_MPD_FAAD2=y
-BR2_PACKAGE_MPD_VORBIS=y
-BR2_PACKAGE_MPD_OPUS=y
-BR2_PACKAGE_MPD_FLAC=y
-BR2_PACKAGE_MPD_ID3TAG=y
-# WAV files/streams: since MPD 0.24 wav parsing is ONLY in the libsndfile
-# plugin (the pcm decoder is MIME-only, no suffixes) — without this MPD
-# neither indexes local .wav files nor plays wav URLs ("0 songs" / stop)
-BR2_PACKAGE_MPD_LIBSNDFILE=y
-# https streams: TLS backend for libcurl + CA bundle (else every https://
-# URL fails: libcurl is built with TLS_NONE by default). OpenSSL, NOT
-# mbedtls: Buildroot's liburl.mk passes --with-ca-bundle only in the
-# openssl/wolfssl branches — mbedtls gets no trust store and every https
-# verify fails. Choice members *depend on* the TLS lib — set both.
-BR2_PACKAGE_OPENSSL=y
-BR2_PACKAGE_LIBCURL_OPENSSL=y
-BR2_PACKAGE_CA_CERTIFICATES=y
+BR2_PACKAGE_VIRGILIO_MPD=y
