@@ -7,6 +7,9 @@ CONFIG_FEATURE_AWK_LIBM=y
 CONFIG_NC=y
 # webuid login: verify /etc/shadow hashes (cryptpw PASSWORD SALT)
 CONFIG_CRYPTPW=y
+# zcip: RFC 3927 IPv4 link-local addressing for the AoIP interface (netifd
+# proto 'zcip', /usr/lib/netifd/proto/zcip.sh) — presence on a bare switch
+CONFIG_ZCIP=y
 # ifup/ifdown/ifreload are virgilio-base's netifd wrappers (usr/sbin);
 # the busybox applets must not own those names (a fresh build installs
 # busybox first and its applet symlinks made virgilio-base's cp write

@@ -21,6 +21,10 @@ define NETIFD_INSTALL_PROTO_HELPERS
 	$(INSTALL) -d -m 0755 $(TARGET_DIR)/usr/lib/netifd/proto
 	$(INSTALL) -m 0755 $(NETIFD_PKGDIR)/files/dhcp.sh \
 		$(TARGET_DIR)/usr/lib/netifd/proto/dhcp.sh
+	$(INSTALL) -m 0755 $(NETIFD_PKGDIR)/files/zcip.sh \
+		$(TARGET_DIR)/usr/lib/netifd/proto/zcip.sh
+	$(INSTALL) -m 0755 $(NETIFD_PKGDIR)/files/zcip.script \
+		$(TARGET_DIR)/usr/lib/netifd/zcip.script
 	$(INSTALL) -m 0755 $(NETIFD_PKGDIR)/files/dhcp.script \
 		$(TARGET_DIR)/usr/lib/netifd/dhcp.script
 	$(INSTALL) -D -m 0755 $(NETIFD_PKGDIR)/files/ipcalc.sh \

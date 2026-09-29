@@ -1,0 +1,28 @@
+#!/bin/sh
+# busybox zcip event hook (netifd). zcip runs supervised by netifd (see
+# proto/zcip.sh) and calls this script as "<event>" with $ip exported:
+#   init      probing started — flush stale state, mark unavailable
+#   config    address claimed — push it to netifd, mark available
+#   deconfig  conflict lost / shutting down — withdraw the address
+# Same netifd proto plumbing as /lib/netifd/dhcp.script.
+
+[ -n "$1" -a -n "$INTERFACE" ] || exit 1
+
+. /lib/functions.sh
+. /lib/netifd/netifd-proto.sh
+
+case "$1" in
+init)
+	proto_init_update "*" 0
+	proto_send_update "$INTERFACE"
+	;;
+config)
+	proto_init_update "*" 1
+	proto_add_ipv4_address "$ip" 255.255.0.0
+	proto_send_update "$INTERFACE"
+	;;
+deconfig)
+	proto_init_update "*" 0
+	proto_send_update "$INTERFACE"
+	;;
+esac
