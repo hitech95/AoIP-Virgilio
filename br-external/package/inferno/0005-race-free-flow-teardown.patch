@@ -1,0 +1,126 @@
+inferno: race-free flow teardown on link loss
+
+On link loss the RX flow times out (~2s no media) and teardown races
+with the channel (dis)connect and update paths: flows_info[i] and the
+UnicastFlow handle can already be cleared when they are unwrapped -
+the panic poisons the flows_info lock and cascades through every
+task touching it (info_mcast_server, channels_subscriber). The inferno
+runtime is left half-torn-down: the PCM reader keeps wrapping stale
+ring content (the sink loops the last buffer) and the subscriber is
+dead (no subscription resume after the link returns).
+
+Guard the race instead of unwrapping: connect/disconnect_channel skip
+when the flow entry is gone, the tx-channel update path skips flows
+without a handle, and the removal path still removes the socket when
+the handle is already cleared (it only skips the stop_flow request;
+keepalive loss kicks the tx side off anyway).
+
+Signed-off-by: virgilio firmware
+---
+--- a/inferno_aoip/src/device_server/flows_rx.rs
++++ b/inferno_aoip/src/device_server/flows_rx.rs
+@@ -616,8 +616,13 @@
+ 
+     {
+       let mut flows_info = self.flows_info.write().unwrap();
+-      flows_info[local_flow_index].as_mut().unwrap().channels_map[channel_in_flow]
+-        .set(local_channel_index, true);
++      // the flow may already be gone (link loss timeout vs teardown race):
++      // nothing to connect - the channel reattaches when a new flow exists
++      let Some(info) = flows_info[local_flow_index].as_mut() else {
++        debug!("connect_channel: flow {local_flow_index} already removed");
++        return;
++      };
++      info.channels_map[channel_in_flow].set(local_channel_index, true);
+     }
+ 
+     self
+@@ -638,8 +643,14 @@
+ 
+     {
+       let mut flows_info = self.flows_info.write().unwrap();
+-      flows_info[local_flow_index].as_mut().unwrap().channels_map[channel_in_flow]
+-        .set(local_channel_index, false);
++      // already removed (timeout vs teardown race): the sink detaches with
++      // the flow; unwrapping here poisoned the lock and took down every
++      // task touching flows_info (no resume after link recovery)
++      let Some(info) = flows_info[local_flow_index].as_mut() else {
++        debug!("disconnect_channel: flow {local_flow_index} already removed");
++        return;
++      };
++      info.channels_map[channel_in_flow].set(local_channel_index, false);
+     }
+ 
+     self
+--- a/inferno_aoip/src/device_server/channels_subscriber.rs
++++ b/inferno_aoip/src/device_server/channels_subscriber.rs
+@@ -741,13 +741,15 @@
+               return true;
+             });
+             let futures =
+-              tx_ch_updates_per_flow.into_iter().map(|(flow_index, (new_tx_channels, updates))| {
++              tx_ch_updates_per_flow.into_iter().filter_map(|(flow_index, (new_tx_channels, updates))| {
+                 let control_client = self.control_client.clone();
+-                let flow = flows_locked[flow_index].as_ref().unwrap();
+-                if let FlowSource::Unicast(uf) = &flow.source {
+-                  let dbcp1 = uf.dbcp1;
+-                  let handle = uf.handle.unwrap();
+-                  async move {
++                // teardown race: the flow (or its handle) may be gone
++                // between spotting the update and sending it - skip
++                let flow = flows_locked[flow_index].as_ref()?;
++                let FlowSource::Unicast(uf) = &flow.source else { return None; };
++                let dbcp1 = uf.dbcp1;
++                let handle = uf.handle?;
++                Some(async move {
+                     match control_client.update_flow(&server_addr, dbcp1, handle, &new_tx_channels).await
+                     {
+                       Ok(()) => {
+@@ -762,9 +764,7 @@
+                     }
+                   }
+                   .boxed()
+-                } else {
+-                  panic!("unexpected non-unicast flow");
+-                }
++                )
+               });
+             futures_per_server.insert(server_addr, futures.collect_vec());
+           }
+@@ -1160,17 +1160,26 @@
+                     let flows_recv = self.flows_recv.clone();
+                     let rem_addr = uf.control_remote_addr;
+                     let dbcp1 = uf.dbcp1;
+-                    let handle = uf.handle.unwrap();
+-                    let flow_id = flow.local_id;
+-                    destroy_futures_per_remote.entry(uf.control_remote_addr).or_default().push(
+-                      async move {
+-                        info!("removing no longer needed flow index={flow_index}, remote={rem_addr:?}");
+-                        control_client.stop_flow(&rem_addr, dbcp1, handle).await.log_and_forget();
+-                        // we can safely ignore errors - we remove the socket so keepalive messages won't arrive to the tx so it'll kick us off anyway
++                    // teardown race: the handle may already be cleared -
++                    // skip the stop_flow request but still remove the
++                    // socket (keepalive loss kicks the tx off anyway)
++                    if let Some(handle) = uf.handle {
++                      let flow_id = flow.local_id;
++                      destroy_futures_per_remote.entry(uf.control_remote_addr).or_default().push(
++                        async move {
++                          info!("removing no longer needed flow index={flow_index}, remote={rem_addr:?}");
++                          control_client.stop_flow(&rem_addr, dbcp1, handle).await.log_and_forget();
++                          // we can safely ignore errors - we remove the socket so keepalive messages won't arrive to the tx so it'll kick us off anyway
++                          flows_recv.remove_socket(flow_index).await;
++                        }
++                        .boxed(),
++                      );
++                    } else {
++                      let flows_recv = self.flows_recv.clone();
++                      tokio::spawn(async move {
+                         flows_recv.remove_socket(flow_index).await;
+-                      }
+-                      .boxed(),
+-                    );
++                      });
++                    }
+                   }
+                   FlowSource::Multicast(mf) => {
+                     let flows_recv = self.flows_recv.clone();
