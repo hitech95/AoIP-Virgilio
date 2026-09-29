@@ -166,7 +166,9 @@
     "High precision": "High precision",
     "Enables the FFT spectrum analysis (computation heavy)": "Enables the FFT spectrum analysis (computation heavy)",
     "Enables spectrum curve smoothing": "Enables spectrum curve smoothing",
-    "Enables the spectrum heatmap display": "Enables the spectrum heatmap display"
+    "Enables the spectrum heatmap display": "Enables the spectrum heatmap display",
+    "Name": "Name",
+    "editable": "editable"
   },
   "it": {
     "Filter Block": "Blocco filtri",
@@ -335,6 +337,8 @@
     "High precision": "Alta precisione",
     "Enables the FFT spectrum analysis (computation heavy)": "Abilita l'analisi FFT dello spettro (pesante per la CPU)",
     "Enables spectrum curve smoothing": "Attiva la smussatura delle curve dello spettro",
-    "Enables the spectrum heatmap display": "Abilita la visualizzazione della mappa di calore"
+    "Enables the spectrum heatmap display": "Abilita la visualizzazione della mappa di calore",
+    "Name": "Nome",
+    "editable": "modificabile"
   }
 }

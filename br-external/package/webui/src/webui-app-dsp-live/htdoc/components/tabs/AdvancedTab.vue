@@ -14,23 +14,66 @@
     </VueFlow>
     <el-empty v-else :description="$t('CamillaDSP is not running or has no pipeline')" />
 
-    <!-- Orphaned filter definitions: present in filters{} but referenced
-         by no pipeline block. Re-adding follows the policy (editable or
-         free Filter blocks only; allow lists and max_steps respected --
-         the daemon manifest re-checks every live change anyway). -->
+    <!-- Orphaned filter definitions: present in the session store but
+          referenced by no pipeline block (camilladsp refuses unreferenced
+          defs in the live config). Re-adding follows the policy (editable
+          or free Filter blocks only; allow lists and max_steps respected --
+          the daemon manifest re-checks every live change anyway). -->
     <el-card v-if="orphans.length" shadow="never" class="orphan-card">
       <template #header>{{ $t('Orphaned filters') }}</template>
-      <div v-for="o in orphans" :key="o.name" class="orphan-row">
-        <span class="orphan-name">{{ o.name }}</span>
-        <el-tag size="small" type="info">{{ o.type }}</el-tag>
-        <el-select v-model="orphanTarget[o.name]" size="small" :placeholder="$t('Add to block')"
-          class="orphan-select">
-          <el-option v-for="b in eligibleBlocks(o)" :key="b.index" :value="b.index"
-            :label="`${b.label} (${b.count}/${b.max ?? '∞'})`" :disabled="b.max != null && b.count >= b.max"/>
-        </el-select>
-        <el-button size="small" type="primary" :disabled="orphanTarget[o.name] == null"
-          @click="addOrphan(o)">{{ $t('Add') }}</el-button>
-      </div>
+      <el-table :data="orphans" size="default">
+        <el-table-column :label="$t('Name')" min-width="150">
+          <template #default="{ row }">
+            <span class="orphan-name">{{ row.name }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('Type')" width="110">
+          <template #default="{ row }">
+            <el-tag type="info" effect="plain">{{ row.type }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('Add to block')" min-width="320">
+          <template #default="{ row }">
+            <el-select v-model="orphanTarget[row.name]" class="orphan-select"
+              popper-class="dsp-block-dd" :placeholder="$t('Add to block')">
+              <template #label="{ label }">
+                <span class="sel-name">{{ label }}</span>
+                <span class="sel-tags">
+                  <el-tag v-if="blockOf(row)?.policy" size="small" type="info" effect="plain" class="sel-chip">
+                    {{ policyLabel(blockOf(row).policy) }}
+                  </el-tag>
+                  <el-tag size="small" type="primary" effect="light" class="sel-chip">
+                    {{ blockOf(row)?.count ?? '—' }}{{ blockOf(row)?.max != null ? `/${blockOf(row).max}` : '' }} {{ $t('filters') }}
+                  </el-tag>
+                  <el-tag v-for="c in (blockOf(row)?.channels ?? [])" :key="c" size="small"
+                    type="success" effect="light" class="sel-chip">{{ channelLabel(c) }}</el-tag>
+                </span>
+              </template>
+              <el-option v-for="b in eligibleBlocks(row)" :key="b.index" :value="b.index"
+                :label="b.label" :disabled="b.max != null && b.count >= b.max">
+                <div class="opt-row">
+                  <span class="opt-name">{{ b.label }}</span>
+                  <span class="opt-tags">
+                    <el-tag size="small" type="info" effect="plain">{{ policyLabel(b.policy) }}</el-tag>
+                    <el-tag size="small" type="primary" effect="light">
+                      {{ b.count }}{{ b.max != null ? `/${b.max}` : '' }} {{ $t('filters') }}
+                    </el-tag>
+                    <el-tag v-for="c in b.channels" :key="c" size="small" type="success" effect="light">
+                      {{ channelLabel(c) }}
+                    </el-tag>
+                  </span>
+                </div>
+              </el-option>
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column width="90" align="right">
+          <template #default="{ row }">
+            <el-button type="primary" :disabled="orphanTarget[row.name] == null"
+              @click="addOrphan(row)">{{ $t('Add') }}</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <div class="selected-editor" v-if="selected">
@@ -62,6 +105,7 @@ import PipelineNode from '../PipelineNode.vue'
 import FilterBlockEditor from '../FilterBlockEditor.vue'
 import MixerBlockEditor from '../MixerBlockEditor.vue'
 import '../../styles/pipeline.scss'
+import '../../styles/eq.scss'
 import { sessionForget, reconcileSession, loadSession, sessionTypeOf, getStepKey } from '../../lib/filterSession'
 import { disableFilterInStep, enableFilterInStep } from '../../lib/filterEnablement'
 import * as dsp from '../../dsp'
@@ -278,12 +322,36 @@ export default {
           const allow = slot?.allow ?? []
           const max = slot?.max_steps ? Number(slot.max_steps) : null
           if (allow.length && (!uciType || !allow.includes(uciType))) continue
-          out.push({ index: stage.index, label: stage.label, count: (step.names ?? []).length, max })
+          out.push({
+            index: stage.index, label: stage.label, count: (step.names ?? []).length, max,
+            policy: 'editable',
+            channels: this.channelsOf(slot?.channels)
+          })
         } else {
-          out.push({ index: stage.index, label: step.description || `#${stage.index}`, count: (step.names ?? []).length, max: null })
+          out.push({
+            index: stage.index, label: stage.name ?? stage.label ?? `#${stage.index}`,
+            count: (step.names ?? []).length, max: null,
+            policy: 'free',
+            channels: this.channelsOf(step.channels)
+          })
         }
       }
       return out
+    },
+    /* channel spec (uci string "0 1" or runtime array) -> numbers */
+    channelsOf(spec) {
+      if (Array.isArray(spec)) return spec.map(c => Number(c)).filter(Number.isFinite)
+      return String(spec ?? '').split(/\s+/).filter(Boolean).map(Number).filter(Number.isFinite)
+    },
+    channelLabel(c) { return this.chLabels.in?.[c]?.trim() || `ch ${c}` },
+    policyLabel(policy) {
+      return policy === 'free' ? this.$t('free edit') : this.$t('editable')
+    },
+    /* the block selected in a row's dropdown (for the collapsed label) */
+    blockOf(orphan) {
+      const idx = this.orphanTarget[orphan.name]
+      if (idx == null) return null
+      return this.eligibleBlocks(orphan).find(b => b.index === idx) ?? null
     },
     /* live output renaming: uci out_label via save_mixer_meta */
     async renameMixerOut(dest, label) {
@@ -458,8 +526,41 @@ export default {
   min-height: 50vh;
 }
 
-.orphan-card { margin: 12px 0; }
-.orphan-row { display: flex; align-items: center; gap: 12px; margin: 6px 0; }
-.orphan-name { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
-.orphan-select { width: 260px; }
+.orphan-card {
+  margin: 12px 0;
+
+  .orphan-name {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+
+  /* collapsed selection: stretch the EP wrapper so the label-slot
+     content justifies exactly like an option row (name left, chips
+     right) -- same rules as the EQ tab selector */
+  .orphan-select {
+    width: 100%;
+
+    :deep(.el-select__selected-item.el-select__placeholder) {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      width: 100%;
+    }
+  }
+
+  .sel-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sel-tags {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+}
 </style>
