@@ -44,3 +44,34 @@
 .el-radio-group.is-vertical-buttons .el-radio-button__original:checked + .el-radio-button__inner {
   box-shadow: none;
 }
+
+/* ── Block-selector dropdown rows (EQ toolbar + Advanced orphans) ──────── */
+/* The popper teleports to <body>: the rules must be global. Option rows
+ * carry the block name left and badge chips (filter count, channels,
+ * policy) right. */
+.dsp-block-dd .opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.dsp-block-dd .opt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dsp-block-dd .opt-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* el-option content must fill the row for space-between alignment */
+.dsp-block-dd .el-select-dropdown__item {
+  display: flex;
+  align-items: center;
+}

@@ -22,8 +22,8 @@
     <!-- Both tabs stay mounted (state + teleports survive switches);
          visibility is toggled inside each tab through its active prop -->
     <div class="live-body">
-      <EqTab :active="tab === 'eq'" />
       <VolumeTab :active="tab === 'volume'" />
+      <EqTab :active="tab === 'eq'" />
       <AdvancedTab :active="tab === 'advanced'" />
     </div>
   </section>
@@ -34,7 +34,7 @@ import EqTab from '../components/tabs/EqTab.vue'
 import VolumeTab from '../components/tabs/VolumeTab.vue'
 import AdvancedTab from '../components/tabs/AdvancedTab.vue'
 import * as dsp from '../dsp'
-import { eq, flushLiveEdits } from '../stores/eqStore'
+import { eq, flushLiveEdits, initializeFromConfig } from '../stores/eqStore'
 import { liveDefToUci } from '../lib/liveToUci'
 
 /* Live page: EQ + Advanced (former pipeline) tabs over ONE camilladsp
@@ -46,15 +46,15 @@ export default {
   components: { EqTab, VolumeTab, AdvancedTab },
   data() {
     return {
-      tab: 'eq',
+      tab: 'volume',
       saving: false
     }
   },
   computed: {
     tabs() {
       return [
-        { id: 'eq', label: this.$t('EQ') },
         { id: 'volume', label: this.$t('Volume') },
+        { id: 'eq', label: this.$t('EQ') },
         { id: 'advanced', label: this.$t('Advanced') }
       ]
     },
@@ -158,7 +158,12 @@ export default {
 
         // refresh the shared config (the daemon reloaded camilladsp)
         const fresh = await dsp.downloadConfig().catch(() => null)
-        if (fresh) cfg = fresh
+        if (fresh) {
+          cfg = fresh
+          // the reloaded config re-rendered the slot anchors: resync the
+          // EQ store so the tabs do not keep a pre-save snapshot
+          initializeFromConfig(fresh)
+        }
         this.$message.success(this.$t('Saved live edits to UCI'))
       } catch (e) {
         this.$message.error(this.$t('Update failed') + (e?.message ? `: ${e.message}` : ''))

@@ -13,7 +13,7 @@
         </el-icon>
         <span class="title">{{ $t('Filter Block') }}</span>
         <el-select class="select" v-model="selectedStep" :disabled="!eq.steps.length"
-          popper-class="eq-block-dd"
+          popper-class="dsp-block-dd"
           :placeholder="eq.steps.length ? $t('Select a filter block') : $t('No editable blocks')">
           <!-- selected rendering: name left + chips right, justified like
                the option rows (the wrapper is stretched in the scoped CSS).
@@ -62,7 +62,7 @@
           </template>
         </el-dropdown>
 
-        <el-tag v-if="policyTag" :type="policyTag.type" class="policy-tag">
+        <el-tag v-if="policyTag" :type="policyTag.type" size="large" class="policy-tag">
           {{ policyTag.text }}
         </el-tag>
       </el-space>
@@ -189,35 +189,6 @@
 }
 </style>
 
-<style lang="scss">
-/* custom el-option rows: block name left, badge chips (filter count +
-   one chip per channel) right. GLOBAL on purpose: the dropdown popper
-   teleports to <body>, so scoped selectors (.eq-page ...) never match. */
-.eq-block-dd .opt-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-}
-.eq-block-dd .opt-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.eq-block-dd .opt-tags {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-/* el-option content must fill the row for space-between alignment */
-.eq-block-dd .el-select-dropdown__item {
-  display: flex;
-  align-items: center;
-}
-</style>
-
 <script lang="ts">
 import { defineComponent, computed, ref, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { useInDocument } from '../../lib/inDocument'
@@ -227,7 +198,7 @@ import VizOptionsBar from '../VizOptionsBar.vue'
 import PreampCard from '../faders/FaderPreampCard.vue'
 import BandCard from '../faders/FaderBandCard.vue'
 import '../../styles/eq.scss'
-import { eq, initializeFromConfig, selectStep, addBand, addOrphanFilter } from '../../stores/eqStore'
+import { eq, initializeFromConfig, selectStep, addBand, addOrphanFilter, flushLiveEdits } from '../../stores/eqStore'
 import { loadSession, sessionTypeOf } from '../../lib/filterSession'
 import { initializeVizOptions, setupVizOptionsPersistence } from '../../stores/vizOptions'
 import * as dsp from '../../dsp'
@@ -347,7 +318,8 @@ export default defineComponent({
         return false
       const stage = stageOf(eq.selectedStepIndex)
       if (!stage) return true
-      if (stage.kind !== 'editable') return false
+      if (stage.kind === 'locked' || stage.kind === 'mixer') return false
+      if (stage.kind !== 'editable') return true
       const max = stage.max_steps != null ? Number(stage.max_steps) : null
       return max == null || (selectedStepInfo.value?.names.length ?? 0) < max
     })
@@ -504,9 +476,22 @@ export default defineComponent({
     )
   },
   watch: {
-    active(v: boolean) {
+    async active(v: boolean) {
+      if (!v) return
       // display:none breaks height measurement: re-measure on activation
-      if (v) (this as any)._measureNow?.()
+      ;(this as any)._measureNow?.()
+      /* resync with the running config: edits made on the other tabs
+       * (Advanced block edits, Volume matrix changes) or the page-level
+       * Save changed it since this store was last initialized -- without
+       * this the block selector and bands show a stale snapshot */
+      if (dsp.connectionState.value !== 'connected') return
+      try {
+        await flushLiveEdits()
+        const cfg = await dsp.downloadConfig()
+        if (cfg) initializeFromConfig(cfg)
+      } catch {
+        /* offline mid-switch: keep the current snapshot */
+      }
     },
   },
   methods: {
