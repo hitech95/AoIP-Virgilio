@@ -127,9 +127,10 @@ export default {
           if (!step || step.type !== 'Filter') continue
           const filters = []
           for (const name of (step.names ?? [])) {
-            if (name.startsWith('user_slot_')) continue
+            /* every name is a real uci filter now (base gains included):
+             * echo the id so the BE keeps the section in place */
             const u = liveDefToUci(cfg.filters?.[name])
-            if (u) filters.push(u)
+            if (u) filters.push({ ...u, name })
           }
           steps[stage.label] = filters
         }

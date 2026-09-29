@@ -140,8 +140,8 @@ export default {
     mixerStageIndex() {
       return (this.config?.pipeline ?? []).findIndex(s => s.type === 'Mixer')
     },
-    /* filters defined but referenced by no pipeline block (placeholders
-       like user_slot_* anchors are not orphan candidates) */
+    /* orphaned filters: definitions live in the SESSION store
+       (camilladsp refuses unreferenced defs in the running config) */
     /* disabled/orphaned filters: definitions live in the SESSION store
        (camilladsp refuses unreferenced defs in the running config) */
     orphans() {
@@ -164,11 +164,12 @@ export default {
     filterEntries() {
       if (this.selected?.step.type !== 'Filter') return []
       const stepIndex = (this.config.pipeline ?? []).indexOf(this.selected.step)
-      /* the user_slot_* anchors are Gain filters genconf renders to host
-       * editable slots (the EQ page uses the leading one as block preamp):
-       * visible and gain-editable, but never disable/remove/rename-able */
+      /* filters shipped with the board config (the base input gains and
+       * the locked tails) are structural: visible and value-editable,
+       * but never disable/remove/rename/type-change-able. Everything the
+       * web UI created carries a u_ id and is fully editable. */
       const active = (this.selected.step.names ?? [])
-        .map(name => ({ name, disabled: false, structural: name.startsWith('user_slot_') }))
+        .map(name => ({ name, disabled: false, structural: !name.startsWith('u_') }))
       const stepKey = getStepKey(this.selected.step.channels ?? [], stepIndex)
       const disabled = Object.entries(loadSession())
         .filter(([, e]) => e.positions && e.positions[stepKey] !== undefined)
@@ -446,7 +447,8 @@ export default {
         // plain Gain/Volume filters (uci 'gain') carry the value in parameters.gain
         return f?.type === 'Gain' || f?.type === 'Volume' || (f?.type === 'Biquad' && f?.parameters?.gain != null)
       },
-    isStructural(name) { return name.startsWith('user_slot_') },
+    /* structural = shipped with the board config, not web UI-created */
+    isStructural(name) { return !name.startsWith('u_') },
     setFilterType(name, type) {
       if (this.isStructural(name)) return
       const filter = this.filter(name)

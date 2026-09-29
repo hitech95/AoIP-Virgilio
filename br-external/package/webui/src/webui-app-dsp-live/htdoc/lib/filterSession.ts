@@ -119,11 +119,11 @@ export function reconcileSession(config: any): string[] {
   let dirty = false
 
   for (const [name, info] of Object.entries(s)) {
-    /* user_slot_* anchors are structural: they are never legitimate
-     * session entries. Purge them (stale state from older builds)
-     * instead of stripping them from the config, which the manifest
-     * would reject ("placeholder missing"). Entries without a def are
-     * corrupt/unrecoverable (older builds clobbered them) -- purge. */
+    /* user_slot_* was the old placeholder-anchor convention: never a
+     * legitimate session entry. Purge stale state from older builds
+     * instead of stripping it from the config, which the manifest
+     * would reject. Entries without a def are corrupt/unrecoverable
+     * (older builds clobbered them) -- purge. */
     if (name.startsWith('user_slot_') || !info?.def) {
       delete s[name]
       dirty = true

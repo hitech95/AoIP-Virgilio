@@ -208,8 +208,9 @@ export default {
           const step = cfg.pipeline[stage.index]
           if (!step || step.type !== 'Filter')
             continue
-          /* keep the slot anchor (user_slot_*) and any non-user filter:
-           * only the u_* content is replaced (topology is locked) */
+          /* keep every non-webui filter (the board-shipped base gains and
+           * locked tails): only the u_* content is replaced (topology is
+           * locked) */
           const keep = (step.names ?? []).filter(n => !n.startsWith('u_'))
           for (const old of step.names ?? [])
             if (old.startsWith('u_'))
