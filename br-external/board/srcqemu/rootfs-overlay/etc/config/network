@@ -13,4 +13,5 @@ config interface 'lan'
 # static override from docs/bridge-rig.md there.
 config interface 'aoip'
 	option device 'eth0'
-	option proto 'none'
+	option proto 'zcip'
+

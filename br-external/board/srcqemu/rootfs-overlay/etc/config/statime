@@ -15,7 +15,7 @@ config statime 'main'
 	option priority1 '251'
 	option slave_only '0'
 	# port settings (single-port setup, the Dante/PTP segment NIC)
-	option interface 'eth0'
+	option interface 'aoip'
 	option network_mode 'ipv4'
 	# auto | required | none | <PHC index>
 	option hardware_clock 'auto'

@@ -8,7 +8,7 @@ config inferno 'main'
 	option name ''
 	# interface or IP to bind (BIND_IP); mandatory interface on networks
 	# without a default route (eth1 = Dante/PTP segment in rig mode)
-	option interface 'eth0'
+	option interface 'aoip'
 	# usrvclock socket exported by statime (see /etc/init.d/statime)
 	option clock_path '/tmp/ptp-usrvclock'
 	# persistent state directory (XDG_STATE_HOME for the inferno
