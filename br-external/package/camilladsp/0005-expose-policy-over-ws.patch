@@ -10,6 +10,10 @@ camilladsp: policy surface for the placeholder-free slot model
 - Policy-level free gaps become slot indexes (locked anchors preceding
   the step, computed by genconf) instead of anchor names.
 
+Regenerated against pristine upstream + the committed 0001..0004 (the
+previous regeneration used a contaminated baseline and failed fresh
+extracts with 4/7 rejected hunks).
+
 Signed-off-by: virgilio firmware
 ---
 --- a/src/socketserver.rs

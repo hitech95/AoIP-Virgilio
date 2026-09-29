@@ -628,6 +628,15 @@ function render(m) {
 		return { config: cfg, policy: null };
 
 	let subs = [];
+	/* locked step name -> 1-based slot (the gap after it). Pre-passed:
+	 * allowed_after may reference anchors that FOLLOW the free step in
+	 * the pipeline order. */
+	let anchor_slot = {};
+	{
+		let k = 0;
+		for (let n in m.order)
+			if (m.steps[n].policy == "locked") { k++; anchor_slot[n] = k; }
+	}
 	let locked_before = 0; /* slot index: editable steps between locked anchors */
 	for (let n in m.order) {
 		let st = m.steps[n];
@@ -639,8 +648,11 @@ function render(m) {
 		} else {
 			push(subs, {
 				policy: "free", name: n,
-				/* the slot this step sits in (locked anchors before it) */
-				gaps: (length(st.after) > 0) ? st.after : [locked_before],
+				/* allowed_after anchors translate to slot indexes (the gap
+				 * after anchor k = slot k); default = the slot the step
+				 * sits in (locked anchors before it). The policy carries
+				 * only slot indexes (camilladsp 0005 parser). */
+				gaps: (length(st.after) > 0) ? map(st.after, (a) => anchor_slot[a]) : [locked_before],
 				channels: map(st.channels, (c) => num(c, c)),
 				allow: st.allow,
 				max_steps: match(st.max_steps, /^[0-9]+$/) ? int(st.max_steps) : st.max_steps

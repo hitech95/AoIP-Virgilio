@@ -255,7 +255,7 @@ import json, sys
 c = json.load(open('$WORK/free.yml'))
 p = json.load(open('$WORK/free.policy'))
 free = [s for s in p['subchains'] if s['policy'] == 'free'][0]
-assert free['gaps'] == ['src_sel'], free
+assert free['gaps'] == [1], free  # allowed_after 'src_sel' = 1st locked anchor -> slot 1
 assert free['max_steps'] == 9, free
 slot = [s for s in c['pipeline'] if s.get('names') and s['names'][0] == 'user_in0_gain'][0]
 assert slot['names'] == ['user_in0_gain', 'uf1'], slot
