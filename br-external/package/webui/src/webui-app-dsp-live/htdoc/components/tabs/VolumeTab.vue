@@ -1,6 +1,7 @@
 <template>
   <section v-show="active" class="volume-page">
-    <el-alert v-if="error" type="error" :title="error" :closable="false" show-icon />
+    <!-- No offline/error alert here: the Live toolbar connection tag
+         already reports the camilladsp state page-wide. -->
 
     <!-- Top section: the capture card (input VUs + the MAIN fader -- the
          pre-chain volume, so it scales exactly the signals shown), then
@@ -10,13 +11,14 @@
       <el-card shadow="never" class="vol-fader capture-card">
         <template #header>{{ $t('Capture') }}</template>
         <div class="fader-col">
-          <el-tag class="fader-value" type="info" effect="dark">{{ faderDb(0).toFixed(1) }} dB</el-tag>
+          <el-tag class="fader-value" effect="dark"
+            :type="faderMuted[0] ? 'danger' : 'info'">{{ faderText(0) }}</el-tag>
           <div class="fader-and-meter">
             <VuMeter :levels="capRms" :peaks="capPeak" :labels="inLabels" height="100%" />
             <div class="fader-slider">
-              <el-slider :model-value="faderPos(0)" vertical :min="1" :max="1000" :step="1"
+              <el-slider :model-value="faderPos(0)" vertical :min="0" :max="1000" :step="1"
                 height="100%" :marks="marksMain" placement="right"
-                :format-tooltip="v => posToDb(v).toFixed(1) + ' dB'"
+                :format-tooltip="v => faderTextForPos(v)"
                 @update:model-value="v => setFaderPos(0, v)"
                 @change="applyFader(0)" />
             </div>
@@ -29,13 +31,14 @@
         :class="{ 'fader-off': !a.mapped }">
         <template #header>Aux{{ a.idx }}</template>
         <div class="fader-col">
-          <el-tag class="fader-value" type="info" :effect="a.mapped ? 'plain' : 'light'">
-            {{ faderDb(a.idx).toFixed(1) }} dB
+          <el-tag class="fader-value" :type="faderMuted[a.idx] ? 'danger' : 'info'"
+            :effect="a.mapped ? 'plain' : 'light'">
+            {{ faderText(a.idx) }}
           </el-tag>
           <div class="fader-slider">
-            <el-slider :model-value="faderPos(a.idx)" vertical :min="1" :max="1000" :step="1"
+            <el-slider :model-value="faderPos(a.idx)" vertical :min="0" :max="1000" :step="1"
               height="100%" :disabled="!a.mapped" :marks="marksAux" placement="right"
-              :format-tooltip="v => posToDb(v).toFixed(1) + ' dB'"
+              :format-tooltip="v => faderTextForPos(v)"
               @update:model-value="v => setFaderPos(a.idx, v)"
               @change="a.mapped && applyFader(a.idx)" />
           </div>
@@ -171,6 +174,8 @@ import { initializeFromConfig } from '../../stores/eqStore'
 
 const POLL_MS = 90
 const FADER_POLL_MS = 500
+/* slider span reserved for the -inf (mute) notch at the bottom */
+const MUTE_SPAN = 80
 
 /* Volume tab of the Live page: the capture card (input VUs + the MAIN
  * fader -- camilladsp applies it BEFORE the pipeline), the camilladsp
@@ -187,8 +192,8 @@ export default {
   },
   data() {
     return {
-      error: '',
       faders: [0, 0, 0, 0, 0],  /* dB per fader: 0=Main, 1..4=Aux1..4 */
+      faderMuted: [false, false, false, false, false],
       faderPositions: [1000, 1000, 1000, 1000, 1000],
       auxes: [{ idx: 1, mapped: false, using: '' }, { idx: 2, mapped: false, using: '' },
               { idx: 3, mapped: false, using: '' }, { idx: 4, mapped: false, using: '' }],
@@ -217,9 +222,7 @@ export default {
   watch: {
     async active(v) {
       if (v) {
-        try {
-          await this.reload()
-        } catch (e) { this.error = e?.value?.message ?? e?.message ?? String(e) }
+        await this.reload().catch(e => console.warn('volume reload failed:', e))
         this.startMeters()
       } else {
         this.stopMeters()
@@ -229,11 +232,10 @@ export default {
   async created() {
     /* Load only when already shown: the page mounts every tab at once and
      * the camilladsp websocket may not be up yet -- an eager failing load
-     * here would flash the error alert until the first activation. */
+     * here would flash an error until the first activation. The toolbar
+     * connection tag reports offline states; no local alert. */
     if (this.active) {
-      try {
-        await this.reload()
-      } catch (e) { this.error = e?.message ?? String(e) }
+      await this.reload().catch(e => console.warn('volume reload failed:', e))
     }
   },
   mounted() {
@@ -246,22 +248,42 @@ export default {
     for (const t of Object.values(this._ufTimers ?? {})) clearTimeout(t)
   },
   methods: {
-    /* ---- log taper: pos (1..2000) <-> dB (-60..+6) ---- */
+    /* ---- log taper with a -inf (mute) bottom notch -------------------
+     * slider value 0..1000: 0..MUTE_SPAN is the mute zone (camilladsp
+     * fader mute), 1..1000 log-maps -60..0 dB into the rest of the
+     * travel so -60 sits just above the notch. */
     posToDb(pos) {
       return Math.round(20 * Math.log10(Math.max(1, Number(pos)) / 1000) * 10) / 10
     },
     dbToPos(db) {
       return Math.max(1, Math.round(1000 * Math.pow(10, db / 20)))
     },
+    /* audio pos (1..1000) <-> slider value (MUTE_SPAN..1000) */
+    sliderFromPos(pos) {
+      return Math.min(1000, Math.round(MUTE_SPAN + Number(pos) * (1000 - MUTE_SPAN) / 1000))
+    },
+    posFromSlider(v) {
+      return v <= MUTE_SPAN ? 0 : Math.min(1000, Math.round((v - MUTE_SPAN) * 1000 / (1000 - MUTE_SPAN)))
+    },
     marksFor(dbList) {
       /* native EP mark labels: EP places dots and text inside the runway
-       * coordinate space, so labels stay glued to the notches */
-      const out = {}
-      for (const db of dbList) out[this.dbToPos(db)] = String(db)
+       * coordinate space, so labels stay glued to the notches. The final
+       * notch is the -inf mute detent. */
+      const out = { 0: '-∞' }
+      for (const db of dbList) out[this.sliderFromPos(this.dbToPos(db))] = String(db)
       return out
     },
     faderDb(idx) { return Number(this.faders[idx] ?? 0) },
-    faderPos(idx) { return this.faderPositions[idx] ?? 1000 },
+    faderText(idx) {
+      return this.faderMuted[idx] ? '-∞' : this.faderDb(idx).toFixed(1) + ' dB'
+    },
+    faderTextForPos(v) {
+      return v <= MUTE_SPAN ? '-∞' : this.posToDb(this.posFromSlider(v)).toFixed(1) + ' dB'
+    },
+    /* the slider position: 0 while muted (handle rests on the notch) */
+    faderPos(idx) {
+      return this.faderMuted[idx] ? 0 : this.sliderFromPos(this.faderPositions[idx] ?? 1000)
+    },
     /* while the user drags (and until the daemon echo lands) the fader
        poll must not overwrite the position, or the handle snaps back */
     markUserFader(idx) {
@@ -275,8 +297,17 @@ export default {
       clearTimeout(this._ufTimers?.[idx])
     },
     setFaderPos(idx, pos) {
-      this.faderPositions[idx] = pos
-      this.faders[idx] = this.posToDb(pos)
+      /* dragging into the bottom zone arms the -inf notch: the handle
+       * rests at 0 and the fader is muted on release (applyFader) */
+      if (pos <= MUTE_SPAN) {
+        this.faderMuted[idx] = true
+        this.faderPositions[idx] = 1
+        this.faders[idx] = -60
+      } else {
+        this.faderMuted[idx] = false
+        this.faderPositions[idx] = this.posFromSlider(pos)
+        this.faders[idx] = this.posToDb(this.faderPositions[idx])
+      }
       this.markUserFader(idx)
     },
     /* model from the daemon (mixers + labels), the running config and
@@ -323,7 +354,6 @@ export default {
         this.mixSel[m.name] = this.deriveSel(mx)
       }
       this.mixers = mixers
-      this.error = ''
     },
     async readFaders() {
       const body = await dsp.request('GetFaders').catch(() => null)
@@ -332,18 +362,27 @@ export default {
       for (let i = 0; i < 5 && i < list.length; i++) {
         if (this.userFader[i]) continue
         this.faders[i] = Number(list[i]?.volume ?? 0)
+        this.faderMuted[i] = !!list[i]?.mute
         this.faderPositions[i] = this.dbToPos(Math.max(-60, Math.min(6, this.faders[i])))
       }
     },
-    /* camilladsp fader set (Main=0, Aux1..4=1..4); live */
+    /* camilladsp fader set (Main=0, Aux1..4=1..4); live. The -inf notch
+     * maps to the fader MUTE (a -60 dB gain still passes signal); moving
+     * above it unmutes and sets the volume. */
     async applyFader(idx) {
-      const db = this.posToDb(this.faderPos(idx))
+      const mute = this.faderMuted[idx]
+      const db = this.posToDb(this.faderPositions[idx])
       try {
-        const body = await dsp.request('SetFaderVolume', [idx, db])
-        const value = body?.value
-        if (value && Number.isFinite(Number(value.volume))) {
-          this.faders[idx] = Number(value.volume)
-          this.faderPositions[idx] = this.dbToPos(Math.max(-60, Math.min(6, Number(value.volume))))
+        if (mute) {
+          await dsp.request('SetFaderMute', [idx, true])
+        } else {
+          await dsp.request('SetFaderMute', [idx, false]).catch(() => {})
+          const body = await dsp.request('SetFaderVolume', [idx, db])
+          const value = body?.value
+          if (value && Number.isFinite(Number(value.volume))) {
+            this.faders[idx] = Number(value.volume)
+            this.faderPositions[idx] = this.dbToPos(Math.max(-60, Math.min(6, Number(value.volume))))
+          }
         }
       } catch {
         this.$message.error(this.$t('Update failed'))
