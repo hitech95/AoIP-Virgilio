@@ -135,7 +135,9 @@ export function createSpectrumVizController(config: SpectrumVizControllerConfig)
         )
         const smoothedDb = smoothDbBins(spectrumData.binsDb, effectiveSmoothing)
 
-        analyzer.update(smoothedDb, nowMs)
+        /* STA/LTA run on the smoothed frame; the peak hold takes the RAW
+         * frame -- smoothing shaves transients and the hold would lag */
+        analyzer.update(smoothedDb, nowMs, spectrumData.binsDb)
 
         const state = analyzer.getState()
 

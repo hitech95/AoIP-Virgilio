@@ -264,8 +264,10 @@ const plotHeight = ref(400)
 // Heatmap dB range tuning
 const heatmapMinDb = -85
 const heatmapMaxDb = -10
-const peakHoldTime = 2.0
-const peakDecayRate = 12
+// Peak hold: brief hold + brisk fall so the line tracks the music
+// instead of lingering near the STA curve for seconds
+const peakHoldTime = 1.2
+const peakDecayRate = 24
 
 // Frequency ticks
 const plotFreqMax = computed(() => Math.min(30000, eq.sampleRate / 2))

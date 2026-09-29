@@ -25,19 +25,21 @@ export class SpectrumAnalyzerLayer implements CanvasVisualizationLayer {
   private config: AnalyzerLayerConfig
   private series: AnalyzerSeries
 
-  // Colors for pre/post modes
+  // Colors for pre/post modes. The peak hold uses the warning orange of
+  // its chip so the dashed line stays readable against the blue/green
+  // averages (it used to be a faint blue dash hugging the STA curve).
   private readonly colors = {
     pre: {
       live: { stroke: 'rgba(120, 160, 255, 0.35)', width: 1.0 },
       sta: { stroke: 'rgba(140, 180, 255, 0.85)', width: 2.0 },
       lta: { stroke: 'rgba(160, 200, 255, 0.65)', width: 1.5 },
-      peak: { stroke: 'rgba(180, 220, 255, 0.55)', width: 1.0, dash: [4, 4] },
+      peak: { stroke: 'rgba(255, 176, 32, 0.95)', width: 1.6, dash: [5, 4] },
     },
     post: {
       live: { stroke: 'rgba(120, 255, 190, 0.30)', width: 1.0 },
       sta: { stroke: 'rgba(150, 255, 210, 0.80)', width: 2.0 },
       lta: { stroke: 'rgba(170, 255, 220, 0.60)', width: 1.5 },
-      peak: { stroke: 'rgba(190, 255, 230, 0.50)', width: 1.0, dash: [4, 4] },
+      peak: { stroke: 'rgba(255, 176, 32, 0.95)', width: 1.6, dash: [5, 4] },
     },
   }
 

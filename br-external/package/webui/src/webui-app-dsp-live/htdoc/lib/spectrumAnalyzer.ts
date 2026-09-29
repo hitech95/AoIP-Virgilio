@@ -47,16 +47,23 @@ export class SpectrumAnalyzer {
   }
 
   /**
-   * Update analyzer with new spectrum frame
+   * Update analyzer with new spectrum frame.
+   *
+   * @param liveDbFrame smoothed frame driving STA/LTA (smoothing steadies
+   *        the averages)
+   * @param peakFrame optional UNsmoothed frame for the peak hold: peaks
+   *        are transient by nature and smoothing would shave them off,
+   *        making the hold look slow and flat. Defaults to liveDbFrame.
    */
-  update(liveDbFrame: number[], nowMs: number): void {
+  update(liveDbFrame: number[], nowMs: number, peakFrame?: number[]): void {
     const numBins = liveDbFrame.length
+    const peaks = peakFrame ?? liveDbFrame
 
     if (!this.state.initialized) {
       this.state.liveDb = [...liveDbFrame]
       this.state.staDb = [...liveDbFrame]
       this.state.ltaDb = [...liveDbFrame]
-      this.state.peakDb = [...liveDbFrame]
+      this.state.peakDb = [...peaks]
       this.state.peakLastHitMs = Array(numBins).fill(nowMs)
       this.state.lastUpdateMs = nowMs
       this.state.initialized = true
@@ -82,10 +89,11 @@ export class SpectrumAnalyzer {
       this.state.ltaDb![i] = alphaLong * this.state.ltaDb![i] + (1 - alphaLong) * liveDbFrame[i]
     }
 
-    // Update Peak Hold - per-bin max with hold and decay
+    // Update Peak Hold - per-bin max with hold and decay, fed by the raw
+    // (unsmoothed) frame so real transients register
     for (let i = 0; i < numBins; i++) {
       const currentPeak = this.state.peakDb![i]
-      const liveVal = liveDbFrame[i]
+      const liveVal = peaks[i]
 
       if (liveVal >= currentPeak) {
         this.state.peakDb![i] = liveVal
