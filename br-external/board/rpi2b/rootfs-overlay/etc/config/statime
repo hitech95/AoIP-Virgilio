@@ -1,5 +1,6 @@
-# statime on the rpi2b: board override of the package default — the
-# single onboard NIC is eth0 (package default expects the rig's eth1).
+# statime on the rpi2b: board override of the package default — binds the
+# logical 'aoip' netifd interface (network.aoip.device = the single
+# onboard NIC; the init script resolves it to the netdev name).
 # Everything else matches the package default.
 
 config statime 'main'
@@ -8,7 +9,7 @@ config statime 'main'
 	option sdo_id '0'
 	option priority1 '251'
 	option slave_only '0'
-	option interface 'eth0'
+	option interface 'aoip'
 	option network_mode 'ipv4'
 	option hardware_clock 'auto'
 	option protocol 'PTPv2'

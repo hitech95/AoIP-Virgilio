@@ -1,17 +1,17 @@
 #!/bin/sh /etc/rc.common
 # single-nic-fixup: in bridge rig mode (run-qemu.sh --net tap:if --no-mgmt)
 # the guest has ONE NIC, which the kernel names eth0 — but the overlay
-# config expects the Dante/PTP NIC on eth1 (dual-NIC rig mode). Rewrite the
-# interface references once at boot when eth1 is absent, so both topologies
-# work from the same image.
+# config expects the Dante/PTP NIC on eth1 (dual-NIC rig mode). Retarget
+# the logical 'aoip' netifd interface to eth0 once at boot; statime and
+# inferno keep saying 'aoip' and follow (interface resolution:
+# network.aoip.device), so both topologies work from the same image.
 #   network.lan  (eth0, dhcp)  -> proto none (the mgmt NIC does not exist;
 #                                 a dhcp client would discover-spam the
 #                                 Dante segment and burn CPU)
 #   network.aoip (eth1, none)  -> device eth0
-#   statime.main.interface / inferno.main.interface -> eth0
 # EXCEPTION: --net user simple mode (run-qemu.sh marks the kernel cmdline
 # with virgilio-net=slirp): the single eth0 IS the management NIC — keep
-# network.lan on DHCP, only retarget the AoIP bindings.
+# network.lan on DHCP, only retarget the AoIP device.
 
 START=05
 USE_PROCD=0
@@ -24,24 +24,16 @@ boot() {
 	if grep -q 'virgilio-net=slirp' /proc/cmdline 2>/dev/null; then
 		uci -q batch <<EOF
 set network.aoip.device='eth0'
-set statime.main.interface='eth0'
-set inferno.main.interface='eth0'
 commit network
-commit statime
-commit inferno
 EOF
-		echo "single-nic-fixup: no eth1, slirp simple mode: lan kept on DHCP, aoip/statime/inferno retargeted to eth0" >&2
+		echo "single-nic-fixup: no eth1, slirp simple mode: lan kept on DHCP, aoip retargeted to eth0" >&2
 		return 0
 	fi
 
 	uci -q batch <<EOF
 set network.lan.proto='none'
 set network.aoip.device='eth0'
-set statime.main.interface='eth0'
-set inferno.main.interface='eth0'
 commit network
-commit statime
-commit inferno
 EOF
-	echo "single-nic-fixup: no eth1, retargeted lan/aoip/statime/inferno to eth0" >&2
+	echo "single-nic-fixup: no eth1, retargeted lan/aoip to eth0 (statime+inferno follow)" >&2
 }

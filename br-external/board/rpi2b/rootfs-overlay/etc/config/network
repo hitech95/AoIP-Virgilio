@@ -1,7 +1,14 @@
 # Single-NIC topology: the onboard USB Ethernet (smsc95xx, eth0) carries
 # BOTH management (dhcp) and the Dante/PTP segment (aoip). Unlike the
-# QEMU rig there is no dedicated second NIC; statime/inferno bind eth0
-# (see the statime/inferno overrides in this overlay).
+# QEMU rig there is no dedicated second NIC; statime/inferno follow the
+# logical 'aoip' interface (network.aoip.device — moving the Dante
+# segment to a second port later is this one option).
+#
+# aoip addressing ladder (like a real Dante device): zcip keeps an RFC
+# 3927 link-local address on the segment at all times (standalone on a
+# bare switch included); a DHCP/static global on the same device (lan)
+# is preferred for inferno whenever present (inferno patch 0004). PTP
+# multicast is address-agnostic.
 
 config interface 'loopback'
 	option device 'lo'
@@ -15,4 +22,4 @@ config interface 'lan'
 
 config interface 'aoip'
 	option device 'eth0'
-	option proto 'none'
+	option proto 'zcip'
