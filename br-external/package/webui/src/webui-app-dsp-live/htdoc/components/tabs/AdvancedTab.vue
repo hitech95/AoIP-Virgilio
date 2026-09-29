@@ -162,7 +162,7 @@ export default {
     graphGrid() { return document.documentElement.classList.contains('dark') ? '#314052' : '#b8c4d1' },
     isSimple() { return this.nodes.length <= 3 },
     filterEntries() {
-      if (this.selected?.step.type !== 'Filter') return []
+      if (!this.config || this.selected?.step.type !== 'Filter') return []
       const stepIndex = (this.config.pipeline ?? []).indexOf(this.selected.step)
       /* filters shipped with the board config (the base input gains and
        * the locked tails) are structural: visible and value-editable,
@@ -311,6 +311,10 @@ export default {
       return map[f.parameters?.type] ?? null
     },
     eligibleBlocks(orphan) {
+      /* the websocket may not be up yet (or the fetch failed): the
+       * orphan table renders from the session store alone and must not
+       * crash on the missing runtime config */
+      if (!this.config) return []
       const out = []
       const def = loadSession()[orphan.name]?.def ?? this.config.filters?.[orphan.name]
       const uciType = this.uciTypeName(def)
