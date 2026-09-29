@@ -208,11 +208,30 @@ export async function setSpectrumTap(tap: SpectrumTap): Promise<void> {
 }
 
 /**
- * Fetch the latest spectrum levels (dBFS array) for the selected tap.
+ * One analyzer tap as served by GetSpectrumLevels: the smoothed levels
+ * plus the LOG-SPACED bin center frequencies the daemon computed them
+ * for (needed to place the bins on the log axis of the plot) and the
+ * DSP sample rate.
  */
-export async function getSpectrumLevels(): Promise<number[] | null> {
+export interface SpectrumTapData {
+  levels: number[] | null
+  frequencies: number[]
+  samplerate: number
+}
+
+/**
+ * Fetch the latest spectrum frame (levels + bin frequencies) for the
+ * selected tap.
+ */
+export async function getSpectrumTap(): Promise<SpectrumTapData | null> {
   const body = await request<any>('GetSpectrumLevels')
-  return body?.value?.[spectrumTap]?.levels ?? null
+  const tap = body?.value?.[spectrumTap]
+  if (!tap) return null
+  return {
+    levels: Array.isArray(tap.levels) ? tap.levels : null,
+    frequencies: Array.isArray(tap.frequencies) ? tap.frequencies : [],
+    samplerate: Number(tap.samplerate) || 0,
+  }
 }
 
 /**
@@ -221,7 +240,7 @@ export async function getSpectrumLevels(): Promise<number[] | null> {
 export function getSpectrumSource(): SpectrumSource {
   return {
     isSpectrumSocketOpen: () => isOpen(),
-    getSpectrumData: () => getSpectrumLevels(),
+    getSpectrumData: () => getSpectrumTap(),
   }
 }
 

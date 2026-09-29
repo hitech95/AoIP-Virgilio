@@ -6,6 +6,8 @@
  */
 
 import type { CanvasVisualizationLayer, SpectrumVizMode } from './types'
+import type { SpectrumFreqAxis } from './freqAxis'
+import { binAtX, binAtXWithFreqs, binToX, binToXWithFreqs } from './freqAxis'
 
 export type HeatmapMaskMode = 'top' | 'bottom' | 'full'
 
@@ -73,17 +75,19 @@ export class SpectrumHeatmapLayer implements CanvasVisualizationLayer {
     height: number
     binsNormalized: number[]
     mode: SpectrumVizMode
+    freqAxis?: SpectrumFreqAxis
+    binFreqs?: number[]
   }): void {
     if (!this.config.enabled) return
 
-    const { ctx, width, height, binsNormalized } = args
+    const { ctx, width, height, binsNormalized, freqAxis, binFreqs } = args
 
     if (!binsNormalized || binsNormalized.length === 0) return
 
     if (this.config.maskMode !== 'full' && this.config.primarySeries) {
-      this.renderWithMask(ctx, width, height, binsNormalized)
+      this.renderWithMask(ctx, width, height, binsNormalized, freqAxis, binFreqs)
     } else {
-      this.renderFullHeatmap(ctx, width, height, binsNormalized)
+      this.renderFullHeatmap(ctx, width, height, binsNormalized, freqAxis, binFreqs)
     }
   }
 
@@ -94,13 +98,23 @@ export class SpectrumHeatmapLayer implements CanvasVisualizationLayer {
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
-    bins: number[]
+    bins: number[],
+    freqAxis?: SpectrumFreqAxis,
+    binFreqs?: number[]
   ): void {
     const numBins = bins.length
     const tuning = this.config.visualTuning
 
     for (let x = 0; x < width; x++) {
-      const f = (x / (width - 1)) * (numBins - 1)
+      /* resample under the pixel column; on the log axis the columns are
+       * NOT uniform in bin index (log-mapped), hence the axis-aware
+       * inverse mapping -- from the daemon-reported bin frequencies when
+       * they are available */
+      const f = binFreqs && freqAxis
+        ? binAtXWithFreqs(x, binFreqs, width, freqAxis)
+        : freqAxis
+          ? binAtX(x, numBins, width, freqAxis)
+          : (x / (width - 1)) * (numBins - 1)
       const i0 = Math.floor(f)
       const i1 = Math.min(numBins - 1, i0 + 1)
       const t = f - i0
@@ -142,7 +156,9 @@ export class SpectrumHeatmapLayer implements CanvasVisualizationLayer {
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
-    bins: number[]
+    bins: number[],
+    freqAxis?: SpectrumFreqAxis,
+    binFreqs?: number[]
   ): void {
     if (!this.config.primarySeries) return
 
@@ -157,7 +173,7 @@ export class SpectrumHeatmapLayer implements CanvasVisualizationLayer {
 
       for (let i = 0; i < primarySeries.length; i++) {
         const magnitude = Math.max(0, Math.min(1, primarySeries[i]))
-        const x = (i / (primarySeries.length - 1)) * width
+        const x = this.binScreenX(i, primarySeries.length, width, freqAxis, binFreqs)
         const y = height - magnitude * height
         ctx.lineTo(x, y)
       }
@@ -170,7 +186,7 @@ export class SpectrumHeatmapLayer implements CanvasVisualizationLayer {
 
       for (let i = 0; i < primarySeries.length; i++) {
         const magnitude = Math.max(0, Math.min(1, primarySeries[i]))
-        const x = (i / (primarySeries.length - 1)) * width
+        const x = this.binScreenX(i, primarySeries.length, width, freqAxis, binFreqs)
         const y = height - magnitude * height
         ctx.lineTo(x, y)
       }
@@ -181,8 +197,22 @@ export class SpectrumHeatmapLayer implements CanvasVisualizationLayer {
 
     ctx.clip()
 
-    this.renderFullHeatmap(ctx, width, height, bins)
+    this.renderFullHeatmap(ctx, width, height, bins, freqAxis, binFreqs)
 
     ctx.restore()
+  }
+
+  /** screen X of a bin under the plot's log axis (daemon frequencies
+   * when available, uniform-log fallback otherwise) */
+  private binScreenX(
+    i: number,
+    numBins: number,
+    width: number,
+    freqAxis?: SpectrumFreqAxis,
+    binFreqs?: number[]
+  ): number {
+    if (freqAxis && binFreqs) return binToXWithFreqs(i, binFreqs, width, freqAxis)
+    if (freqAxis) return binToX(i, numBins, width, freqAxis)
+    return (i / Math.max(1, numBins - 1)) * width
   }
 }

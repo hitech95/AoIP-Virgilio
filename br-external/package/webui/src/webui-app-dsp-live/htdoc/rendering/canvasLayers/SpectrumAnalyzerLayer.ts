@@ -5,6 +5,8 @@
  */
 
 import type { CanvasVisualizationLayer, SpectrumVizMode } from './types'
+import type { SpectrumFreqAxis } from './freqAxis'
+import { binToX, binToXWithFreqs } from './freqAxis'
 
 export interface AnalyzerSeries {
   liveNorm: number[] | null
@@ -73,21 +75,23 @@ export class SpectrumAnalyzerLayer implements CanvasVisualizationLayer {
     height: number
     binsNormalized: number[]
     mode: SpectrumVizMode
+    freqAxis?: SpectrumFreqAxis
+    binFreqs?: number[]
   }): void {
-    const { ctx, width, height, mode } = args
+    const { ctx, width, height, mode, freqAxis, binFreqs } = args
     const colors = this.colors[mode]
 
     // Draw in order: Live (faintest) -> LTA -> STA (brightest) -> Peak (dotted)
     if (this.config.showLive && this.series.liveNorm) {
-      this.drawLine(ctx, this.series.liveNorm, width, height, colors.live.stroke, colors.live.width)
+      this.drawLine(ctx, this.series.liveNorm, width, height, colors.live.stroke, colors.live.width, undefined, freqAxis, binFreqs)
     }
 
     if (this.config.showLTA && this.series.ltaNorm) {
-      this.drawLine(ctx, this.series.ltaNorm, width, height, colors.lta.stroke, colors.lta.width)
+      this.drawLine(ctx, this.series.ltaNorm, width, height, colors.lta.stroke, colors.lta.width, undefined, freqAxis, binFreqs)
     }
 
     if (this.config.showSTA && this.series.staNorm) {
-      this.drawLine(ctx, this.series.staNorm, width, height, colors.sta.stroke, colors.sta.width)
+      this.drawLine(ctx, this.series.staNorm, width, height, colors.sta.stroke, colors.sta.width, undefined, freqAxis, binFreqs)
     }
 
     if (this.config.showPeak && this.series.peakNorm) {
@@ -98,7 +102,9 @@ export class SpectrumAnalyzerLayer implements CanvasVisualizationLayer {
         height,
         colors.peak.stroke,
         colors.peak.width,
-        colors.peak.dash
+        colors.peak.dash,
+        freqAxis,
+        binFreqs
       )
     }
   }
@@ -110,7 +116,9 @@ export class SpectrumAnalyzerLayer implements CanvasVisualizationLayer {
     height: number,
     strokeColor: string,
     lineWidth: number,
-    dash?: number[]
+    dash?: number[],
+    freqAxis?: SpectrumFreqAxis,
+    binFreqs?: number[]
   ): void {
     if (!bins || bins.length === 0) return
 
@@ -125,13 +133,32 @@ export class SpectrumAnalyzerLayer implements CanvasVisualizationLayer {
 
     ctx.beginPath()
 
+    let started = false
     for (let i = 0; i < bins.length; i++) {
+      /* on the log axis, bins past the right edge (Nyquist above the
+       * axis max) and below its left edge (DC) have no column: skip
+       * them instead of clamping into a pile-up */
+      if (freqAxis) {
+        const f = binFreqs
+          ? binFreqs[i]
+          : (i / Math.max(1, bins.length - 1)) * freqAxis.nyquistHz
+        if (f == null || f > freqAxis.maxHz) break
+        if (f < freqAxis.minHz) continue
+      }
       const magnitude = Math.max(0, Math.min(1, bins[i]))
-      const x = (i / (bins.length - 1)) * width
+      /* the plot X axis is log-frequency: map the bin through it (from
+       * the daemon-reported center frequency when available) so the
+       * curves line up with the grid -- uniform-in-index drawing
+       * stretches the log-spaced bins and shifts mid-band content */
+      const x = freqAxis
+        ? (binFreqs ? binToXWithFreqs(i, binFreqs, width, freqAxis)
+                    : binToX(i, bins.length, width, freqAxis))
+        : (i / (bins.length - 1)) * width
       const y = height - magnitude * height
 
-      if (i === 0) {
+      if (!started) {
         ctx.moveTo(x, y)
+        started = true
       } else {
         ctx.lineTo(x, y)
       }

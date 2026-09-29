@@ -5,9 +5,14 @@
  */
 
 import type { CanvasVisualizationLayer, SpectrumVizMode } from './canvasLayers/types'
+import type { SpectrumFreqAxis } from './canvasLayers/freqAxis'
 
 export interface SpectrumRenderOptions {
   mode: SpectrumVizMode
+  /** log-frequency axis, forwarded to every layer (see freqAxis.ts) */
+  freqAxis?: SpectrumFreqAxis
+  /** daemon-reported bin center frequencies (log-spaced bins) */
+  binFreqs?: number[]
 }
 
 export class SpectrumCanvasRenderer {
@@ -75,6 +80,8 @@ export class SpectrumCanvasRenderer {
         height: this.heightCss,
         binsNormalized,
         mode,
+        freqAxis: options.freqAxis,
+        binFreqs: options.binFreqs,
       })
     }
   }

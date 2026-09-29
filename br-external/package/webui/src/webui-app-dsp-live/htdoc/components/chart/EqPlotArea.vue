@@ -295,6 +295,14 @@ onMounted(() => {
       canvas: canvasEl.value,
       getPlotSize: () => ({ width: plotWidth.value, height: plotHeight.value }),
       getDsp: () => (dsp.isConnected() ? dsp.getSpectrumSource() : null),
+      /* the spectrum bins are log-spaced with a narrower span than the
+       * plot axis: hand the layers the axis so they place every bin at
+       * its true frequency (from the daemon-reported center list) */
+      getFreqAxis: () => ({
+        minHz: 10,
+        maxHz: plotFreqMax.value,
+        nyquistHz: eq.sampleRate / 2,
+      }),
       peakHoldTimeSec: peakHoldTime,
       peakDecayRateDbPerSec: peakDecayRate,
       heatmapMinDb,

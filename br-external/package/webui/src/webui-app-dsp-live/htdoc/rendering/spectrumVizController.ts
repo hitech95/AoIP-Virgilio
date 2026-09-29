@@ -17,6 +17,7 @@ import {
 import { parseSpectrumData, dbArrayToNormalized } from '../lib/spectrumParser'
 import { SpectrumAnalyzer } from '../lib/spectrumAnalyzer'
 import { smoothDbBins } from '../lib/fractionalOctaveSmoothing'
+import type { SpectrumFreqAxis } from './canvasLayers/freqAxis'
 import {
   selectPrimarySeries,
   getEffectiveSmoothing,
@@ -28,15 +29,28 @@ export type SmoothingMode = 'off' | '1/12' | '1/6' | '1/3'
 export type SpectrumMode = 'pre' | 'post'
 
 /** Minimal DSP surface needed by the controller */
+export interface SpectrumTapPayload {
+  levels: number[] | null
+  /** daemon-reported center frequency per bin (log-spaced) */
+  frequencies: number[]
+  samplerate: number
+}
+
 export interface SpectrumSource {
   isSpectrumSocketOpen(): boolean
-  getSpectrumData(): Promise<number[] | null>
+  getSpectrumData(): Promise<SpectrumTapPayload | null>
 }
 
 export interface SpectrumVizControllerConfig {
   canvas: HTMLCanvasElement
   getPlotSize: () => { width: number; height: number }
   getDsp: () => SpectrumSource | null
+
+  /** log-frequency axis of the surrounding plot: the (log-spaced) bins
+   * must be placed on it through their reported center frequencies --
+   * uniform-in-index drawing stretches their narrower span onto the
+   * whole axis and shifts mid-band content */
+  getFreqAxis?: () => SpectrumFreqAxis | null
 
   peakHoldTimeSec?: number
   peakDecayRateDbPerSec?: number
@@ -122,12 +136,22 @@ export function createSpectrumVizController(config: SpectrumVizControllerConfig)
     }
 
     try {
-      const rawData = await dsp.getSpectrumData()
-      const spectrumData = parseSpectrumData(rawData)
+      const tap = await dsp.getSpectrumData()
+      const spectrumData = parseSpectrumData(tap?.levels ?? null)
 
       if (spectrumData) {
         const nowMs = Date.now()
         lastFrameTime = nowMs
+
+        /* the daemon reports the center frequency of every (log-spaced)
+         * bin: pass them through so the layers place each bin at its
+         * true position on the log axis instead of assuming a uniform
+         * grid spanning the full axis */
+        const binFreqs =
+          Array.isArray(tap?.frequencies) &&
+          tap!.frequencies.length === spectrumData.binsDb.length
+            ? tap!.frequencies
+            : undefined
 
         const effectiveSmoothing = getEffectiveSmoothing(
           currentSmoothingMode,
@@ -168,7 +192,11 @@ export function createSpectrumVizController(config: SpectrumVizControllerConfig)
          * each pass, so a fixed alpha here does not accumulate) */
         if (Date.now() - lastFrameTime > staleThreshold) renderer.fadeOut(0.3)
         else renderer.resetOpacity()
-        renderer.render(staHeatNorm || staNorm || [], { mode: currentSpectrumMode })
+        renderer.render(staHeatNorm || staNorm || [], {
+          mode: currentSpectrumMode,
+          freqAxis: config.getFreqAxis?.() ?? undefined,
+          binFreqs,
+        })
       }
     } catch (error) {
       console.error('Spectrum poll error:', error)
