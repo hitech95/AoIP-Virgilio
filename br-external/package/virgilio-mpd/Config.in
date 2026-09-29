@@ -1,0 +1,27 @@
+config BR2_PACKAGE_VIRGILIO_MPD
+	bool "virgilio-mpd (web-radio / media source)"
+	depends on BR2_USE_MMU
+	select BR2_PACKAGE_MPD
+	select BR2_PACKAGE_MPD_MPC
+	select BR2_PACKAGE_MPD_ALSA
+	select BR2_PACKAGE_MPD_CURL
+	select BR2_PACKAGE_MPD_MAD
+	select BR2_PACKAGE_MPD_FAAD2
+	select BR2_PACKAGE_MPD_VORBIS
+	select BR2_PACKAGE_MPD_OPUS
+	select BR2_PACKAGE_MPD_FLAC
+	select BR2_PACKAGE_MPD_ID3TAG
+	select BR2_PACKAGE_MPD_LIBSNDFILE
+	# https streams: TLS backend + CA bundle for libcurl (mbedtls gets no
+	# trust store in Buildroot's liburl.mk; OpenSSL does)
+	select BR2_PACKAGE_OPENSSL
+	select BR2_PACKAGE_LIBCURL_OPENSSL
+	select BR2_PACKAGE_CA_CERTIFICATES
+	help
+	  MPD as the web-radio/media source feeding the Dante transmitter
+	  (mpd.conf -> snd-aloop loopplay; playback is consumed downstream
+	  via loopcap). Ships the procd init + mpd.conf with data under
+	  /opt/user_data/mpd (user content, nothing preloaded). Autostart is
+	  a per-board rc.d choice: this package installs only the K30 stop
+	  link; a board that wants MPD at boot adds an S96mpd rc.d symlink
+	  plus the etc/virgilio/flags/keep-mpd marker (see the srcqemu board).
