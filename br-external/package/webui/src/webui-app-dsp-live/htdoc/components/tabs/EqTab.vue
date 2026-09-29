@@ -489,6 +489,10 @@ export default defineComponent({
         await flushLiveEdits()
         const cfg = await dsp.downloadConfig()
         if (cfg) initializeFromConfig(cfg)
+        /* the policy map (stage kinds + custom block labels) is UCI
+         * metadata: block renames done on the Advanced tab only reach
+         * the selector after a reload here */
+        await (this as any)._loadPolicies(this.$oui)
       } catch {
         /* offline mid-switch: keep the current snapshot */
       }
