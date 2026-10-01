@@ -186,8 +186,10 @@ All inferno settings are environment variables with the `INFERNO_` prefix
 > panics with `LocalIpAddressNotFound`. Always set it there (IP or the
 > netdev name — genconf exports the resolved `network.aoip.device`).
 > A named interface that is up but still addressless (zcip probing,
-> DHCP not yet granted) panics the same way; procd's respawn absorbs
-> the wait.
+> DHCP not yet granted) panics the same way; the hotplug lifecycle
+> guards around it (camilladsp is only started once the netdev carries
+> an IPv4 — see [docs/lifecycle.md](lifecycle.md)), and procd's respawn
+> absorbs the boot-time window.
 
 ### `/etc/asound.conf`
 
@@ -218,6 +220,21 @@ There is **no inferno init service**: every application that opens the
 tool (below). The uci file only carries the shared instance settings that
 camilladsp-derived instances receive as environment. The clock, however,
 must exist first — that is what the statime service provides.
+
+### Lifecycle (hotplug-driven)
+
+camilladsp and statime are managed **event-driven** after boot, with a
+single rendering/decision point: the camilladsp init script's
+`start_service` resolves and records the advertised-address baseline at
+every start, and its custom `check` command decides starts (PTP locked
++ ≥1 IPv4 + not running) and drift restarts. The hotplug handlers are
+thin event gates: netifd iface hotplug
+(`/etc/hotplug.d/iface/60-inferno-net`) reacts to link/address events
+on the resolved inferno netdev (stop on ifdown, statime lifecycle,
+delegate to `check`), the ptp hotplug
+(`/etc/hotplug.d/ptp/10-camilladsp`) maps `locked` → `check` and
+`lost` → stop. Full state table, guards and failure timelines:
+**[docs/lifecycle.md](lifecycle.md)**.
 
 ## UCI configuration — statime
 

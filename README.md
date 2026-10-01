@@ -94,6 +94,8 @@ each sync. The helper defaults can be overridden with `EQ_QEMU_CONSOLE_PORT`,
 
 | doc | content |
 |---|---|
+| `docs/architecture.md` | **system overview**: boot chain, service model, stack roles |
+| `docs/lifecycle.md` | **service lifecycle**: hotplug triggers, state table, failure timelines |
 | `docs/bridge-rig.md` | **the** rig: host GM + tap bridge, full walkthrough |
 | `docs/radio-over-dante.md` | mcast-tunnel rig variant, radio e2e recipe |
 | `docs/camilladsp.md` / `docs/inferno.md` / `docs/alsa.md` | component docs + uci schemas |

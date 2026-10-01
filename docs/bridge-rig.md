@@ -143,8 +143,11 @@ failure mode. The sink captures the **inferno PCM directly**
 patch is ever dropped, enable the `aoip-bridge` service (S96, disabled by
 default) and set `capture='RawFile:/tmp/aoip.fifo'` `format='S32_LE'` —
 a kernel FIFO bridge that sidesteps the userspace PCM entirely (~38
-ticks/8 s). camilladsp starts via the ptp hotplug within ~60 s of locking
-(or `service camilladsp start` after checking the lock):
+ticks/8 s). camilladsp starts via the hotplug lifecycle
+([docs/lifecycle.md](lifecycle.md)) as soon as the clock locks and the
+netdev has an address — immediate on the lock transition, ≤60 s in the
+missed-event self-heal case (or `service camilladsp start` after
+checking the lock):
 
 ```sh
 ubus call ptp status        # both guests: "locked": true, "mode": "slave"

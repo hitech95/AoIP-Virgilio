@@ -2,7 +2,9 @@
 
 How the Buildroot external tree (`br-external/`, external name
 **VIRGILIO**, variable `BR2_EXTERNAL_VIRGILIO_PATH`) is layered for
-multi-device builds.
+multi-device builds. System overview: `docs/architecture.md`; the
+runtime service lifecycle driven by these packages:
+`docs/lifecycle.md`.
 
 ## Layering rules
 
@@ -83,7 +85,7 @@ for app packages are selected by the defconfig, not by virgilio-base
 
 | Package ships | Needs |
 |---|---|
-| **camilladsp**: `usr/bin/camilladsp-genconf` (uci → camilladsp YAML/policy/env generator), `etc/init.d/camilladsp` + rc.d links, `etc/config/camilladsp`, `etc/hotplug.d/ptp/10-camilladsp` | ucode (+ `uci`/`fs` modules), **uci**, **procd** |
+| **camilladsp**: `usr/bin/camilladsp-genconf` (uci → camilladsp YAML/policy/env generator), `usr/lib/camilladsp/inferno-net.sh` (netdev/address resolution shared by init + hotplugs), `etc/init.d/camilladsp` + rc.d links (incl. the custom `check` lifecycle command), `etc/config/camilladsp`, `etc/hotplug.d/ptp/10-camilladsp` + `etc/hotplug.d/iface/{40-statime-net,60-camilladsp}` (event gates — see `docs/lifecycle.md`) | ucode (+ `uci`/`fs` modules), **uci**, **procd**, **jsonfilter** (the `check` command's PTP-lock query), **statime** runtime (started/stopped by the iface hotplug) |
 | **statime**: `usr/bin/ptp-monitor` (usrvclock → ubus/hotplug bridge), `etc/init.d/{statime,ptp-monitor}` + rc.d links, `etc/config/{statime,ptp-monitor}` | ucode (+ `struct`/`socket`/`uloop`/`ubus` modules), **ubus**, **procd** |
 | **inferno**: `etc/config/inferno` | **uci** |
 

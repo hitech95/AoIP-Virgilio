@@ -88,13 +88,22 @@ exported — that would need a statime patch.
 
 ## The camilladsp handler (`/etc/hotplug.d/ptp/10-camilladsp`)
 
-- `ACTION=locked`: starts camilladsp if `uci camilladsp.main.enabled`
-  is 1 and no process is running;
+- `ACTION=locked`: delegates to `/etc/init.d/camilladsp check` — the
+  service's own self-management command (starts iff enabled + locked +
+  the inferno netdev carries an IPv4 + not running; restarts on
+  advertised-address drift);
 - `ACTION=lost`: stops camilladsp if running.
 
-Stopping on loss is a policy choice: without it, inferno free-runs on
-the last overlay and audio keeps flowing on a drifting clock. Edit (or
-remove) the handler to change the behaviour — the monitor does not care.
+Address (re-)resolution is **not** handled here — the init script's
+`start_service` alone renders the address baseline and `check` alone
+decides; the netifd iface hotplug
+`/etc/hotplug.d/iface/60-inferno-net` gates link/address events and
+delegates to the same `check`. The two dispatchers interleave freely;
+every action is idempotent. Stopping on loss is a policy choice:
+without it, inferno free-runs on the last overlay and audio keeps
+flowing on a drifting clock. Edit (or remove) the handlers to change
+the behaviour — the monitor does not care. Full state table:
+[docs/lifecycle.md](lifecycle.md).
 
 ## Configuration (`/etc/config/ptp-monitor`)
 
