@@ -1,0 +1,41 @@
+# camilladsp netdev lifecycle handler, sourced by /sbin/hotplug-call
+# (netifd iface hotplug) with ACTION=ifup|ifdown|ifupdate,
+# INTERFACE=<logical netifd name> and — on ifup/ifupdate only —
+# DEVICE=<netdev> in the environment; /lib/functions.sh is preloaded.
+# This file owns ONLY the camilladsp side: gate the event on the
+# RESOLVED inferno netdev (uci inferno.main.interface ->
+# network.<x>.device) and delegate. All start/drift decisions live in
+# the service's own `check` command (/etc/init.d/camilladsp) — the
+# single rendering/decision point, see docs/lifecycle.md. The statime
+# side (BMCA, panic-avoidance) lives in 40-statime-net, which runs
+# first on ifup.
+#
+#   ifdown on the inferno netdev: stop camilladsp at once — before any
+#          inferno stall handling has to run.
+#   ifup:   delegate to `check` (starts iff PTP locked + netdev link up
+#          + addressed + not running; 40-statime-net has already made
+#          sure the clock daemon is up).
+#   ifupdate with IFUPDATE_ADDRESSES=1: delegate to `check` (address
+#          changed on an interface that stayed up, e.g. a DHCP lease
+#          moving). Renewals that keep the address carry no
+#          IFUPDATE_ADDRESSES (netifd sets it only on real address
+#          diffs) and stay silent.
+
+. /usr/lib/camilladsp/inferno-net.sh
+cdsp_iface_is_inferno || exit 0
+
+case "$ACTION" in
+ifdown)
+	if pidof camilladsp >/dev/null; then
+		logger -t hotplug-iface "$INTERFACE down: stopping camilladsp"
+		/etc/init.d/camilladsp stop
+	fi
+	;;
+ifup)
+	/etc/init.d/camilladsp check
+	;;
+ifupdate)
+	[ "${IFUPDATE_ADDRESSES:-0}" = "1" ] || exit 0
+	/etc/init.d/camilladsp check
+	;;
+esac

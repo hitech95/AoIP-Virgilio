@@ -1,0 +1,57 @@
+# statime netdev lifecycle handler, sourced by /sbin/hotplug-call (netifd
+# iface hotplug) with ACTION=ifup|ifdown|ifupdate, INTERFACE=<logical
+# netifd name> and — on ifup/ifupdate only — DEVICE=<netdev> in the
+# environment; /lib/functions.sh is preloaded.
+# This file owns ONLY the statime side of the lifecycle; camilladsp
+# decisions live in 60-camilladsp + the init script's `check` command
+# (docs/lifecycle.md). The watched object is the RESOLVED inferno netdev
+# (uci inferno.main.interface -> network.<x>.device) — genconf refuses
+# split clock/media setups, so statime binds that same netdev by
+# construction. File prefix 40: on ifup statime (re)starts before the
+# camilladsp handler delegates to `check`.
+#
+#   ifdown: stop statime only when the link itself is gone — its next
+#           send on a dead netdev panics on the missing timestamp
+#           (mainline bug) and procd would keep restarting it into the
+#           dead link. Skipped when the netdev is still up (an operator
+#           downing ONE of several logical interfaces sharing it) and on
+#           a grandmaster-configured box (slave_only=0 and priority1
+#           below Dante hardware's 249): the segment clock should ride
+#           out carrier blips, BMCA state included.
+#   ifup:   start statime if idle — its BMCA re-runs, ptp-monitor
+#           settles, and the resulting ptp `locked` event completes the
+#           chain (drives camilladsp via `check`).
+#   ifupdate: no-op — PTP multicast does not care about addresses.
+
+. /usr/lib/camilladsp/inferno-net.sh
+cdsp_iface_is_inferno || exit 0
+
+DEV=$(cdsp_inferno_dev)
+
+# grandmaster-configured? (would WIN BMCA against Dante hardware's 249)
+cdsp_is_gm() {
+	local slave_only prio1
+	config_load statime
+	config_get slave_only main slave_only 0
+	config_get prio1 main priority1 251
+	[ "$slave_only" != "1" ] && [ "$prio1" -lt 249 ]
+}
+
+case "$ACTION" in
+ifdown)
+	if pidof statime >/dev/null && ! cdsp_netdev_up "$DEV"; then
+		if cdsp_is_gm; then
+			logger -t hotplug-iface "link down on $DEV but grandmaster-configured, keeping statime"
+		else
+			logger -t hotplug-iface "$INTERFACE down on $DEV: stopping statime"
+			/etc/init.d/statime stop
+		fi
+	fi
+	;;
+ifup)
+	if ! pidof statime >/dev/null; then
+		logger -t hotplug-iface "$INTERFACE up on $DEV: starting statime"
+		/etc/init.d/statime start
+	fi
+	;;
+esac
