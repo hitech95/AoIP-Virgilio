@@ -2,38 +2,17 @@
 # with ACTION=locked|lost, PTP_CLOCK_PATH, PTP_SHIFT_NS, PTP_FREQ_PPM in
 # the environment and /lib/functions.sh already loaded.
 # ptp-monitor re-emits ACTION=locked every ~60 s while the clock is up,
-# so the start branch is idempotent and doubles as crash-loop self-heal.
+# so the re-emits double as crash-loop self-heal ticks.
 #
-# Re-resolution of inferno's one-shot advertised address (see
-# usr/lib/camilladsp/inferno-net.sh + patch 0004) rides the same event
-# stream: on every 'locked' the netdev's preferred IPv4 is compared with
-# what the RUNNING inferno resolved at its start (cached in
-# /tmp/camilladsp.resolved-addr, seeded when it is started here); a drift
-# restarts it once — a DHCP lease landing after the clock, an address
-# change, a moved segment. Renewals that keep the address, unrelated
-# netdevs and unlocked-idle (stopped by 'lost') stay silent. No iface
-# hotplugs: this build's netifd does not dispatch them reliably.
+# All start/drift decisions live in ONE place — the service's own
+# `check` command (/etc/init.d/camilladsp, see docs/lifecycle.md):
+#   locked -> check (starts iff PTP locked + >=1 IPv4 + not running;
+#                    restarts on advertised-address drift; else silent)
+#   lost   -> stop  (no clock = no valid media)
 
 case "$ACTION" in
 locked)
-	[ "$(uci -q get camilladsp.main.enabled || echo 1)" = "1" ] || exit 0
-	. /usr/lib/camilladsp/inferno-net.sh
-	DEV=$(cdsp_inferno_dev)
-	[ -n "$DEV" ] || exit 0
-	NOW=$(cdsp_preferred_addr "$DEV")
-	[ -n "$NOW" ] || NOW=$(cdsp_preferred_addr_any "$DEV")
-	[ -n "$NOW" ] || exit 0
-
-	if ! pidof camilladsp >/dev/null; then
-		logger -t hotplug-ptp "starting camilladsp (PTP clock locked)"
-		echo "$NOW" > /tmp/camilladsp.resolved-addr # seed: what it resolves now
-		/etc/init.d/camilladsp start
-	elif [ "$NOW" != "$(cat /tmp/camilladsp.resolved-addr 2>/dev/null)" ]; then
-		WAS=$(cat /tmp/camilladsp.resolved-addr 2>/dev/null)
-		logger -t hotplug-ptp "inferno address ${WAS:-none} -> $NOW on $DEV, re-resolving"
-		echo "$NOW" > /tmp/camilladsp.resolved-addr
-		/etc/init.d/camilladsp restart
-	fi
+	/etc/init.d/camilladsp check
 	;;
 lost)
 	if pidof camilladsp >/dev/null; then
