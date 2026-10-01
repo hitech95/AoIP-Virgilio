@@ -24,3 +24,19 @@ cdsp_preferred_addr() {
 cdsp_preferred_addr_any() {
 	ip -4 -o addr show dev "$1" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1
 }
+
+# iface-hotplug gate: true when $INTERFACE (the netifd logical name from
+# the hotplug environment) rides the resolved inferno netdev — the same
+# netdev statime binds (genconf refuses split clock/media setups).
+cdsp_iface_is_inferno() {
+	local evdev
+	config_load network
+	config_get evdev "$INTERFACE" device ""
+	[ -z "$evdev" ] && [ -e "/sys/class/net/$INTERFACE" ] && evdev="$INTERFACE"
+	[ "$evdev" = "$(cdsp_inferno_dev)" ]
+}
+
+# link actually up? (carrier lost / admin-down / device gone all fail this)
+cdsp_netdev_up() {
+	ip link show dev "$1" 2>/dev/null | grep -q "state UP"
+}
