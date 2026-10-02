@@ -2,12 +2,10 @@
   <VizSection
     group-id="tap"
     :title="$t('Spectrum Signal Tap')"
+    :disabled="!vizOptions.spectrumEnabled"
+    :disabled-tooltip="$t('Enable the FFT spectrum to configure the analyzer')"
     body-justify="center"
     body-align="center"
-    toggle
-    :toggle-value="vizOptions.spectrumEnabled"
-    :toggle-title="$t('Enables the FFT spectrum analysis (computation heavy)')"
-    @update:toggle-value="(v) => (vizOptions.spectrumEnabled = v)"
     :data-sel="vizOptions.spectrumMode"
   >
     <template #glyph>
@@ -21,6 +19,10 @@
     </template>
 
     <div class="sigTapGroup" :data-sel="vizOptions.spectrumMode">
+        <el-tooltip :content="$t('Analyze signal before EQ (input)')" placement="top"
+          virtual-triggering :virtual-ref="preTap" :visible="vizOptions.spectrumEnabled && preTooltip" />
+        <el-tooltip :content="$t('Analyze signal after EQ (output)')" placement="top"
+          virtual-triggering :virtual-ref="postTap" :visible="vizOptions.spectrumEnabled && postTooltip" />
         <svg class="sigTap" viewBox="0 0 190 50" width="190" height="50" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <filter id="eqTapGlow" x="-100%" y="-100%" width="300%" height="300%">
@@ -40,15 +42,19 @@
           <line class="sigSegActive post" x1="118" y1="30" x2="184" y2="30" />
 
           <g
+            ref="preTap"
             class="tap"
             data-pos="pre"
             role="button"
-            tabindex="0"
+            :tabindex="vizOptions.spectrumEnabled ? 0 : -1"
+            :aria-disabled="!vizOptions.spectrumEnabled"
+            @mouseenter="preTooltip = true" @mouseleave="preTooltip = false"
+            @focus="preTooltip = true" @blur="preTooltip = false"
             :aria-label="$t('Analyze signal before EQ (input)')"
-            @click="vizOptions.spectrumMode = 'pre'"
-            @keydown.enter="vizOptions.spectrumMode = 'pre'"
+            @click="vizOptions.spectrumEnabled && (vizOptions.spectrumMode = 'pre')"
+            @keydown.enter="vizOptions.spectrumEnabled && (vizOptions.spectrumMode = 'pre')"
+            @keydown.space.prevent="vizOptions.spectrumEnabled && (vizOptions.spectrumMode = 'pre')"
           >
-            <title>{{ $t('Analyze signal before EQ (input)') }}</title>
             <line class="tapStem" x1="42" y1="10" x2="42" y2="24.5" />
             <circle class="tapNode" cx="42" cy="30" r="5.5" />
             <circle class="tapHead" cx="42" cy="7" r="3.5" />
@@ -56,15 +62,19 @@
           </g>
 
           <g
+            ref="postTap"
             class="tap"
             data-pos="post"
             role="button"
-            tabindex="0"
+            :tabindex="vizOptions.spectrumEnabled ? 0 : -1"
+            :aria-disabled="!vizOptions.spectrumEnabled"
+            @mouseenter="postTooltip = true" @mouseleave="postTooltip = false"
+            @focus="postTooltip = true" @blur="postTooltip = false"
             :aria-label="$t('Analyze signal after EQ (output)')"
-            @click="vizOptions.spectrumMode = 'post'"
-            @keydown.enter="vizOptions.spectrumMode = 'post'"
+            @click="vizOptions.spectrumEnabled && (vizOptions.spectrumMode = 'post')"
+            @keydown.enter="vizOptions.spectrumEnabled && (vizOptions.spectrumMode = 'post')"
+            @keydown.space.prevent="vizOptions.spectrumEnabled && (vizOptions.spectrumMode = 'post')"
           >
-            <title>{{ $t('Analyze signal after EQ (output)') }}</title>
             <line class="tapStem" x1="148" y1="10" x2="148" y2="24.5" />
             <circle class="tapNode" cx="148" cy="30" r="5.5" />
             <circle class="tapHead" cx="148" cy="7" r="3.5" />
@@ -76,8 +86,13 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { vizOptions } from '../../stores/vizOptions'
 import VizSection from '../viz/VizSection.vue'
+const preTap = ref<SVGGElement>()
+const postTap = ref<SVGGElement>()
+const preTooltip = ref(false)
+const postTooltip = ref(false)
 </script>
 
 <style scoped lang="scss">

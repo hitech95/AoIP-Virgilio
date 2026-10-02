@@ -6,8 +6,8 @@ drag/wheel scrolling.
 -->
 <template>
     <AccordionStrip :groups="groups">
-      <VizTapGroup />
       <VizCurvesGroup />
+      <VizTapGroup />
       <VizSmoothGroup />
       <VizHeatmapGroup />
       <VizTokensGroup />
@@ -25,8 +25,8 @@ import VizTokensGroup from './viz/VizTokensGroup.vue'
 /* the expanded WIDTH lives in each section's :expanded-width prop and
  * is read back from the DOM by the strip; only order priority is here */
 const groups: AccordionStripGroup[] = [
-  { id: 'tap', priority: 4 },
   { id: 'curves', priority: 1 },
+  { id: 'tap', priority: 4 },
   { id: 'smooth', priority: 2 },
   { id: 'heatmap', priority: 3 },
   { id: 'tokens', priority: 5 },

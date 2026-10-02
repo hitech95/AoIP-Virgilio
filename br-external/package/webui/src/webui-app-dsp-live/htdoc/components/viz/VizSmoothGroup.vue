@@ -6,8 +6,8 @@
     :toggle-value="vizOptions.smoothingEnabled"
     :toggle-title="$t('Enables spectrum curve smoothing')"
     @update:toggle-value="(v) => (vizOptions.smoothingEnabled = v)"
-    :disabled="!vizOptions.spectrumEnabled"
-    :disabled-tooltip="$t('Enable the FFT spectrum to configure the analyzer')"
+    :disabled="!vizOptions.spectrumEnabled || vizOptions.spectrumSeries === 'rta'"
+    :disabled-tooltip="!vizOptions.spectrumEnabled ? $t('Enable the FFT spectrum to configure the analyzer') : $t('Curve smoothing applies to STA/LTA only')"
     :body-dimmed="!vizOptions.smoothingEnabled"
     :data-smooth="smoothLevel"
   >

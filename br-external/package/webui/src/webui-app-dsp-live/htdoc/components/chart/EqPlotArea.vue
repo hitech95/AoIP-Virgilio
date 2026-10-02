@@ -261,13 +261,9 @@ const shiftPressed = ref(false)
 const plotWidth = ref(1000)
 const plotHeight = ref(400)
 
-// Heatmap dB range tuning
-const heatmapMinDb = -85
-const heatmapMaxDb = -10
-// Peak hold: brief hold + brisk fall so the line tracks the music
-// instead of lingering near the STA curve for seconds
-const peakHoldTime = 1.2
-const peakDecayRate = 24
+// Spectrum precision: bucket count per mode (daemon range 8..256); the FFT
+// size is derived from the sample rate (15 Hz base target) in dsp.ts
+const spectrumBins = (highPrecision: boolean) => (highPrecision ? 128 : 32)
 
 // Frequency ticks
 const plotFreqMax = computed(() => Math.min(30000, eq.sampleRate / 2))
@@ -303,10 +299,6 @@ onMounted(() => {
         maxHz: plotFreqMax.value,
         nyquistHz: eq.sampleRate / 2,
       }),
-      peakHoldTimeSec: peakHoldTime,
-      peakDecayRateDbPerSec: peakDecayRate,
-      heatmapMinDb,
-      heatmapMaxDb,
       staleThresholdMs: 500,
     })
 
@@ -363,16 +355,16 @@ onBeforeUnmount(() => {
 
 // Apply current viz options to the controller (also used right after creation)
 function applyVizConfig() {
-  spectrumController?.setAnalyzerVisibility({
-    showSTA: vizOptions.showSTA,
-    showLTA: vizOptions.showLTA,
+  spectrumController?.setSeriesSelection({
+    series: vizOptions.spectrumSeries,
     showPeak: vizOptions.showPeak,
+    trimDb: vizOptions.spectrumTrimDb,
   })
   spectrumController?.setSpectrumMode(vizOptions.spectrumMode)
   spectrumController?.setSmoothingMode(effectiveSmoothingMode.value)
   spectrumController?.setHeatmapConfig({
     enabled: vizOptions.heatmapEnabled,
-    maskMode: vizOptions.heatmapMaskMode,
+    fillMode: vizOptions.heatmapFillMode,
     highPrecision: vizOptions.heatmapHighPrecision,
     alphaGamma: vizOptions.heatmapAlphaGamma,
     magnitudeGain: vizOptions.heatmapMagnitudeGain,
@@ -383,7 +375,7 @@ function applyVizConfig() {
 
 // Spectrum controller config updates
 watch(
-  () => [vizOptions.showSTA, vizOptions.showLTA, vizOptions.showPeak] as const,
+  () => [vizOptions.spectrumSeries, vizOptions.showPeak, vizOptions.spectrumTrimDb] as const,
   () => applyVizConfig()
 )
 
@@ -395,7 +387,7 @@ watch(
 watch(
   () => [
     vizOptions.heatmapEnabled,
-    vizOptions.heatmapMaskMode,
+    vizOptions.heatmapFillMode,
     vizOptions.heatmapHighPrecision,
     vizOptions.heatmapAlphaGamma,
     vizOptions.heatmapMagnitudeGain,
@@ -418,15 +410,30 @@ function syncSpectrumPipeline() {
   if (spectrumVizEnabled.value) {
     dsp.setSpectrumEnabled(true).catch(() => {})
     dsp.setSpectrumTap(tapForMode(vizOptions.spectrumMode)).catch(() => {})
+    // FFT size follows the sample rate (15 Hz base target); buckets follow
+    // the precision mode; rate/smoothing follow the displayed series
+    dsp.setSpectrumFftSize(dsp.fftForSampleRate(eq.sampleRate)).catch(() => {})
+    dsp.setSpectrumBins(spectrumBins(vizOptions.heatmapHighPrecision)).catch(() => {})
+    dsp.setSpectrumInterval(vizOptions.spectrumSeries === 'rta' ? 50 : 100).catch(() => {})
+    dsp.setSpectrumSmoothing(vizOptions.spectrumSeries === 'rta' ? 0.45 : 0.7).catch(() => {})
   } else {
     dsp.setSpectrumEnabled(false).catch(() => {})
   }
 }
 
-watch([spectrumVizEnabled, () => vizOptions.spectrumMode] as const, () => {
-  syncSpectrumPipeline()
-  spectrumController?.setEnabled(spectrumVizEnabled.value && dsp.isConnected())
-})
+watch(
+  [
+    spectrumVizEnabled,
+    () => vizOptions.spectrumMode,
+    () => vizOptions.spectrumSeries,
+    () => vizOptions.heatmapHighPrecision,
+    () => eq.sampleRate,
+  ] as const,
+  () => {
+    syncSpectrumPipeline()
+    spectrumController?.setEnabled(spectrumVizEnabled.value && dsp.isConnected())
+  }
+)
 
 watch(
   () => dsp.connectionState.value,

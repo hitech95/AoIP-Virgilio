@@ -10,15 +10,13 @@ import { loadVizOptions, saveVizOptions, type VizOptionsState } from '../lib/viz
 
 export const vizOptions = reactive<VizOptionsState>(loadVizOptions())
 
-// Derived: overlay enabled if at least one series is on
-export const overlayEnabled = computed(
-  () => vizOptions.showSTA || vizOptions.showLTA || vizOptions.showPeak
-)
+// Derived: a curve is the primary display unless the RTA bars own the plot
+export const curveModeActive = computed(() => vizOptions.spectrumSeries !== 'rta')
 
 // The mode applied by the spectrum pipeline: 'off' while the smoothing
 // toggle in the section header is disabled
 export const effectiveSmoothingMode = computed(
-  () => (vizOptions.smoothingEnabled ? vizOptions.smoothingMode : 'off') as SmoothingMode
+   () => (vizOptions.smoothingEnabled && vizOptions.spectrumSeries !== 'rta' ? vizOptions.smoothingMode : 'off') as SmoothingMode
 )
 
 // Master gate: the FFT spectrum runs only when enabled.
@@ -45,7 +43,7 @@ export function setupVizOptionsPersistence(): () => void {
   stopPersistence = watch(
     vizOptions,
     (state) => {
-      saveVizOptions({ ...state, version: 1 })
+      saveVizOptions({ ...state })
     },
     { deep: true }
   )
