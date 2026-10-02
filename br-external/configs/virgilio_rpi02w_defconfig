@@ -50,6 +50,10 @@ BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
 BR2_PACKAGE_HTOP=y
 BR2_PACKAGE_NANO=y
 BR2_PACKAGE_VIRGILIO_MPD=y
+# RTL8152/8153 USB-Ethernet dongle firmware (the r8153a/b revisions
+# request it; the master switch gates the sub-options)
+BR2_PACKAGE_LINUX_FIRMWARE=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_815X=y
 # SSH for bring-up/debug (procd init from the board overlay; root
 # password login needs a password set first - see init.d/dropbear)
 BR2_PACKAGE_VIRGILIO_DROPBEAR=y
