@@ -1,54 +1,42 @@
 /**
- * Spectrum Heatmap Layer
- * Renders spectrum as vertical orange lines with amplitude via opacity/brightness
- * Supports masking (top/bottom/full) relative to primary histogram curve
- * (ported from CamillaEQ src/ui/rendering/canvasLayers/SpectrumHeatmapLayer.ts)
+ * Spectrum Heatmap Layer (curve modes)
+ *
+ * Renders the spectrum fill as one column per pixel-x with UNIFORM
+ * color+alpha derived from the strength of the bucket under that column
+ * (original CamillaEQ renderFullHeatmap model: a single fillRect per
+ * column — vertical position carries no opacity information).
+ *
+ * Color comes from the tap family (pre = blues, post = greens); opacity
+ * follows the bucket strength through the original tuning chain
+ * (see palette.heatmapAlpha). Fill styles:
+ * - 'under': from the curve down to the baseline (default)
+ * - 'above': fill from the top down to the curve
+ * - 'background': full-height column
  */
 
 import type { CanvasVisualizationLayer, SpectrumVizMode } from './types'
 import type { SpectrumFreqAxis } from './freqAxis'
-import { binAtX, binAtXWithFreqs, binToX, binToXWithFreqs } from './freqAxis'
+import { binAtX, binAtXWithFreqs } from './freqAxis'
+import {
+  TAP_RAMPS,
+  sampleRamp,
+  rgba,
+  clamp01,
+  heatmapAlpha,
+  DEFAULT_HEATMAP_ALPHA_TUNING,
+  type HeatmapAlphaTuning,
+} from './palette'
 
-export type HeatmapMaskMode = 'top' | 'bottom' | 'full'
+export type HeatmapFillMode = 'under' | 'above' | 'background'
 
-export interface HeatmapVisualTuning {
-  // Opacity mapping
-  minAlpha: number
-  maxAlpha: number
-  alphaGamma: number
-
-  // Color brightness mapping
-  colorGamma: number
-
-  // Noise gate
-  gateThreshold: number
-  gateSoftness: number
-
-  // Overall gain
-  magnitudeGain: number
-
-  // Orange color palette (dark -> bright)
-  darkOrange: { r: number; g: number; b: number }
-  brightOrange: { r: number; g: number; b: number }
-}
-
-export const DEFAULT_HEATMAP_TUNING: HeatmapVisualTuning = {
-  minAlpha: 0.0,
-  maxAlpha: 0.95,
-  alphaGamma: 2.8,
-  colorGamma: 1.2,
-  gateThreshold: 0.05,
-  gateSoftness: 0.03,
-  magnitudeGain: 2.5,
-  darkOrange: { r: 180, g: 80, b: 20 },
-  brightOrange: { r: 255, g: 140, b: 40 },
-}
+/** @deprecated legacy name (persisted values are migrated to fill modes) */
+export type HeatmapMaskMode = HeatmapFillMode
 
 export interface HeatmapLayerConfig {
   enabled: boolean
-  maskMode: HeatmapMaskMode
-  primarySeries: number[] | null // Reference curve for masking
-  visualTuning: HeatmapVisualTuning
+  fillMode: HeatmapFillMode
+  tuning: HeatmapAlphaTuning
+  offsetDb: number
 }
 
 export class SpectrumHeatmapLayer implements CanvasVisualizationLayer {
@@ -58,9 +46,9 @@ export class SpectrumHeatmapLayer implements CanvasVisualizationLayer {
   constructor(config: Partial<HeatmapLayerConfig> = {}) {
     this.config = {
       enabled: false,
-      maskMode: 'full',
-      primarySeries: null,
-      visualTuning: DEFAULT_HEATMAP_TUNING,
+      fillMode: 'under',
+      tuning: DEFAULT_HEATMAP_ALPHA_TUNING,
+      offsetDb: 0,
       ...config,
     }
   }
@@ -80,139 +68,46 @@ export class SpectrumHeatmapLayer implements CanvasVisualizationLayer {
   }): void {
     if (!this.config.enabled) return
 
-    const { ctx, width, height, binsNormalized, freqAxis, binFreqs } = args
-
+    const { ctx, width, height, binsNormalized, mode, freqAxis, binFreqs } = args
     if (!binsNormalized || binsNormalized.length === 0) return
 
-    if (this.config.maskMode !== 'full' && this.config.primarySeries) {
-      this.renderWithMask(ctx, width, height, binsNormalized, freqAxis, binFreqs)
-    } else {
-      this.renderFullHeatmap(ctx, width, height, binsNormalized, freqAxis, binFreqs)
-    }
-  }
-
-  /**
-   * Render full heatmap (no masking) using pixel-column resampling
-   */
-  private renderFullHeatmap(
-    ctx: CanvasRenderingContext2D,
-    width: number,
-    height: number,
-    bins: number[],
-    freqAxis?: SpectrumFreqAxis,
-    binFreqs?: number[]
-  ): void {
-    const numBins = bins.length
-    const tuning = this.config.visualTuning
+    const ramp = TAP_RAMPS[mode]
+    const tuning = this.config.tuning
 
     for (let x = 0; x < width; x++) {
-      /* resample under the pixel column; on the log axis the columns are
-       * NOT uniform in bin index (log-mapped), hence the axis-aware
-       * inverse mapping -- from the daemon-reported bin frequencies when
-       * they are available */
-      const f = binFreqs && freqAxis
-        ? binAtXWithFreqs(x, binFreqs, width, freqAxis)
-        : freqAxis
-          ? binAtX(x, numBins, width, freqAxis)
-          : (x / (width - 1)) * (numBins - 1)
+      /* bin (float) under this pixel column, from the daemon-reported
+       * frequencies when available; the inverse mapping keeps the log-spaced
+       * bins glued to the plot's log axis. Fallbacks assume a uniform-log
+       * bin grid (legacy) so the layer still draws without them. */
+      const f =
+        freqAxis && binFreqs
+          ? binAtXWithFreqs(x, binFreqs, width, freqAxis)
+          : freqAxis
+            ? binAtX(x, binsNormalized.length, width, freqAxis)
+            : (x / Math.max(1, width - 1)) * (binsNormalized.length - 1)
+
       const i0 = Math.floor(f)
-      const i1 = Math.min(numBins - 1, i0 + 1)
+      const i1 = Math.min(binsNormalized.length - 1, i0 + 1)
       const t = f - i0
+      const rawStrength = binsNormalized[i0] * (1 - t) + binsNormalized[i1] * t
+      const strength = clamp01(rawStrength)
 
-      const rawMagnitude = bins[i0] * (1 - t) + bins[i1] * t
-      let magnitude = Math.max(0, Math.min(1, rawMagnitude))
+      const alpha = heatmapAlpha(rawStrength, tuning, this.config.offsetDb)
+      if (alpha <= 0) continue
 
-      magnitude = Math.min(1, magnitude * tuning.magnitudeGain)
+      const color = sampleRamp(ramp, Math.pow(strength, 1.2))
+      const curveY = height - strength * height
+      // Fill mode changes geometry only, never the column color/opacity.
+      ctx.fillStyle = rgba(color, alpha)
 
-      // Apply noise gate with soft knee
-      if (magnitude < tuning.gateThreshold) {
-        const gateEnd = tuning.gateThreshold + tuning.gateSoftness
-        if (magnitude < tuning.gateThreshold - tuning.gateSoftness) {
-          continue
-        } else if (magnitude < gateEnd) {
-          const kneePos =
-            (magnitude - (tuning.gateThreshold - tuning.gateSoftness)) / (2 * tuning.gateSoftness)
-          magnitude = magnitude * kneePos
-        }
+      if (this.config.fillMode === 'background') {
+        ctx.fillRect(x, 0, 1, height)
+      } else if (this.config.fillMode === 'under') {
+        ctx.fillRect(x, curveY, 1, height - curveY)
+      } else {
+        // 'above'
+        ctx.fillRect(x, 0, 1, curveY)
       }
-
-      const alphaMag = Math.pow(magnitude, tuning.alphaGamma)
-      const alpha = tuning.minAlpha + alphaMag * (tuning.maxAlpha - tuning.minAlpha)
-
-      const colorMag = Math.pow(magnitude, tuning.colorGamma)
-      const r = tuning.darkOrange.r + colorMag * (tuning.brightOrange.r - tuning.darkOrange.r)
-      const g = tuning.darkOrange.g + colorMag * (tuning.brightOrange.g - tuning.darkOrange.g)
-      const b = tuning.darkOrange.b + colorMag * (tuning.brightOrange.b - tuning.darkOrange.b)
-
-      ctx.fillStyle = `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${alpha})`
-      ctx.fillRect(x, 0, 1, height)
     }
-  }
-
-  /**
-   * Render heatmap with top/bottom masking
-   */
-  private renderWithMask(
-    ctx: CanvasRenderingContext2D,
-    width: number,
-    height: number,
-    bins: number[],
-    freqAxis?: SpectrumFreqAxis,
-    binFreqs?: number[]
-  ): void {
-    if (!this.config.primarySeries) return
-
-    const primarySeries = this.config.primarySeries
-
-    ctx.save()
-    ctx.beginPath()
-
-    if (this.config.maskMode === 'top') {
-      // Clip from top edge down to curve
-      ctx.moveTo(0, 0)
-
-      for (let i = 0; i < primarySeries.length; i++) {
-        const magnitude = Math.max(0, Math.min(1, primarySeries[i]))
-        const x = this.binScreenX(i, primarySeries.length, width, freqAxis, binFreqs)
-        const y = height - magnitude * height
-        ctx.lineTo(x, y)
-      }
-
-      ctx.lineTo(width, 0)
-      ctx.closePath()
-    } else {
-      // maskMode === 'bottom': Clip from curve down to bottom edge
-      ctx.moveTo(0, height)
-
-      for (let i = 0; i < primarySeries.length; i++) {
-        const magnitude = Math.max(0, Math.min(1, primarySeries[i]))
-        const x = this.binScreenX(i, primarySeries.length, width, freqAxis, binFreqs)
-        const y = height - magnitude * height
-        ctx.lineTo(x, y)
-      }
-
-      ctx.lineTo(width, height)
-      ctx.closePath()
-    }
-
-    ctx.clip()
-
-    this.renderFullHeatmap(ctx, width, height, bins, freqAxis, binFreqs)
-
-    ctx.restore()
-  }
-
-  /** screen X of a bin under the plot's log axis (daemon frequencies
-   * when available, uniform-log fallback otherwise) */
-  private binScreenX(
-    i: number,
-    numBins: number,
-    width: number,
-    freqAxis?: SpectrumFreqAxis,
-    binFreqs?: number[]
-  ): number {
-    if (freqAxis && binFreqs) return binToXWithFreqs(i, binFreqs, width, freqAxis)
-    if (freqAxis) return binToX(i, numBins, width, freqAxis)
-    return (i / Math.max(1, numBins - 1)) * width
   }
 }

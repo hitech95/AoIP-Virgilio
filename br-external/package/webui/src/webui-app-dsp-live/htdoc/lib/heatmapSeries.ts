@@ -1,64 +1,29 @@
 /**
  * Heatmap Series Helpers
- * Logic for selecting primary series for heatmap masking and computing effective settings
- * (ported from CamillaEQ src/dsp/heatmapSeries.ts)
+ * Effective settings for the spectrum pipeline (the series selector made
+ * selectPrimarySeries obsolete: the fill/bars always attach to the SELECTED
+ * series).
  */
 
 import type { SmoothingMode } from './fractionalOctaveSmoothing'
-
-export interface AnalyzerVisibility {
-  showSTA: boolean
-  showLTA: boolean
-  showPeak: boolean
-}
-
-export interface AnalyzerSeriesData {
-  staNorm: number[] | null
-  ltaNorm: number[] | null
-  peakNorm: number[] | null
-}
+import type { SpectrumSeries } from '../rendering/spectrumVizController'
 
 /**
- * Select the primary series for heatmap masking
- * Priority: LTA -> STA -> Peak -> fallback to STA
- */
-export function selectPrimarySeries(
-  visibility: AnalyzerVisibility,
-  series: AnalyzerSeriesData
-): number[] | null {
-  if (visibility.showLTA && series.ltaNorm) {
-    return series.ltaNorm
-  }
-
-  if (visibility.showSTA && series.staNorm) {
-    return series.staNorm
-  }
-
-  if (visibility.showPeak && series.peakNorm) {
-    return series.peakNorm
-  }
-
-  return series.staNorm
-}
-
-/**
- * Get effective smoothing mode for high precision
+ * Precision controls bucket count, not the user's smoothing selection.
  */
 export function getEffectiveSmoothing(
   userSmoothing: SmoothingMode,
-  highPrecision: boolean
+  _highPrecision: boolean
 ): SmoothingMode {
-  if (highPrecision) {
-    return 'off'
-  }
   return userSmoothing
 }
 
 /**
- * Get effective poll interval for high precision
+ * Effective poll interval: RTA mode polls at the daemon's fastest rate
+ * (50 ms = 20 Hz) so the bars feel live; curve modes keep 100 ms.
  */
-export function getEffectivePollInterval(highPrecision: boolean): number {
-  return highPrecision ? 250 : 100 // ms
+export function getEffectivePollInterval(series: SpectrumSeries): number {
+  return series === 'rta' ? 50 : 100 // ms
 }
 
 /**

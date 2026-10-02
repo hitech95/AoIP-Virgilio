@@ -6,8 +6,8 @@
  * LOG-SPACED bins whose span is narrower than the axis (f_lo =
  * one FFT bin .. f_hi = Nyquist - bin/2): when the daemon-reported
  * center frequencies are available they are the authoritative
- * bin -> X mapping; otherwise bins are assumed uniform-log over
- * 0..Nyquist (the legacy linear-in-index drawing stretched that span
+ * bin -> X mapping; the fallback is for linear FFT bins over
+ * 0..Nyquist (the legacy linear-in-index drawing stretched the log span
  * onto the full axis and shifted mid-band content by up to an octave,
  * reading as bogus subsonic activity).
  */
@@ -85,6 +85,8 @@ export function binAtXWithFreqs(
     if (binFreqs[mid] <= freq) lo = mid
     else hi = mid
   }
-  const span = binFreqs[hi] - binFreqs[lo]
-  return span > 0 ? lo + (freq - binFreqs[lo]) / span : lo
+  // Curves connect centers linearly in log-X. Use the same interpolation
+  // for their fill so it does not bow away from the visible curve.
+  const span = Math.log(binFreqs[hi] / binFreqs[lo])
+  return span > 0 ? lo + Math.log(freq / binFreqs[lo]) / span : lo
 }
