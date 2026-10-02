@@ -50,6 +50,27 @@ The DSP > Live page edits the pipeline in real time (EQ bands on the
 plot, RTA spectrum through the DSP); *Save* persists the bands to uci
 (constrained by the locked-config policy, `docs/camilladsp-policy.md`).
 
+## Tested devices
+
+| device | role | image | notes |
+|---|---|---|---|
+| Raspberry Pi Zero 2 W (Rev 1.0) | audio **source**: MPD → camilladsp → inferno TX | `virgilio_rpi02w_defconfig` (32-bit armv7) | RTL8153 USB-Ethernet dongle for the AoIP segment (r8152 + `rtl_nic` firmware, software timestamps); DHCP+zcip combined topology; PTP grand master standalone (`priority1 128`) or rig slave; squashfs read-only root |
+| Raspberry Pi 2 Model B (Rev 1.1) | audio **sink**: inferno RX → camilladsp (protected 2-way xover) → analog jack | `virgilio_rpi2b_defconfig` (32-bit armv7) | validated as hw sink on the bridge rig (`docs/bridge-rig-hw-sink.md`); running on the LAN |
+| QEMU `rk3506qemu` (3× Cortex-A7, virt) | development + rig target | `rk3506qemu_defconfig` | bridge rig, two-guest PTP, memory matrix, lifecycle validation (`docs/bridge-rig.md`) |
+| QEMU `virgilio_srcqemu` | source-role guest | `virgilio_srcqemu_defconfig` | drop-in source for rig subscriptions |
+
+## Current running chain (hardware, captured 2026-10-03)
+
+- **`pi2w-src`** (192.168.1.214, Zero 2 W): MPD → `snd-aloop` →
+  camilladsp (48 kHz · 24-bit · chunk 512) → inferno TX; PTPv2 slave,
+  Locked; source select Mix (L+R)/2; volume 0 dB.
+- **`virgilio`** (192.168.1.234, RPi 2 B): inferno RX →
+  camilladsp (protected 2-way) → analog jack; PTPv2 slave, Locked,
+  0.70 ppm correction; uptime 3 d+.
+- Dante flows carry the uci-advertised depth (24-bit on the source,
+  inferno patch `0003`); subscriptions persist across reboots
+  (`inferno.main.state_dir`).
+
 ## Quickstart
 
 ```sh
