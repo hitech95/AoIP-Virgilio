@@ -16,10 +16,10 @@
                only, so bypassing an EDITABLE block is allowed (verified
                against camilladsp), while filter rows stay gated too -->
           <el-switch :model-value="!!step.bypassed" class="bypass-switch" :disabled="!canEditFilters"
+            :active-text="$t('Bypassed')" :aria-label="$t('Bypassed')"
             @change="v => { step.bypassed = v; $emit('apply') }"/>
         </el-space>
         <el-space>
-          <el-tag v-if="step.bypassed" type="warning">{{ $t('Bypassed') }}</el-tag>
           <el-tag v-if="node.data.kind === 'locked'" type="info">{{ $t('Protected') }}</el-tag>
         </el-space>
       </el-row>
