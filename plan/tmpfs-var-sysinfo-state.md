@@ -1,5 +1,8 @@
 # Plan — tmpfs `/var`, board info and runtime state (OpenWrt parity)
 
+> **Status 2026-08-30**: implemented — tmpfs `/var → /tmp` layout + `/tmp/sysinfo`
+> shipped via `virgilio-base` / `board/common` (`docs/architecture.md`).
+
 Goal: stop writing volatile state to the rootfs (today ext4; on the final RK3506
 hardware = SPI NAND → wear from log/pid/socket/uci-state writes), and provide
 the OpenWrt runtime interfaces `/tmp/sysinfo/{board_name,model}` and
