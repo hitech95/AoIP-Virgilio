@@ -1,8 +1,8 @@
 # Plan — camilladsp-monitor (ucode ubus daemon)
 
-> **SUPERSEDED** by `plan/camilladsp-native-ubus.md`: the ucode daemon
-> was never implemented; camilladsp now provides the `camilladsp` ubus
-> object natively (patch 0004, `ubus-zero`). Consumers keep the same
+> **Status 2026-09-14**: superseded by `plan/camilladsp-native-ubus.md` — the ucode
+> daemon was never implemented; camilladsp now provides the `camilladsp`
+> ubus object natively (patch 0004, `ubus-zero`). Consumers keep the same
 > interface (`ubus call camilladsp status`); only `ubus listen`
 > transition events are still unimplemented — poll `status` instead.
 > The loopback-bind hardening note in §1 remains valid.

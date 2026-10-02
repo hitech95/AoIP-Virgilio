@@ -1,6 +1,6 @@
 # Plan — statime PTPv1 master mode
 
-> **Status 2026-09-14**: steps 1–3 + 5 delivered as
+> **Status 2026-09-14**: implemented (partial) — steps 1–3 + 5 delivered as
 > `br-external/package/statime/0003-ptpv1-master.patch` (fuzz-0 clean on
 > the 244f20a pin, submodule left pristine). Unit level of the test plan
 > done, including an in-process master↔slave exchange through the public

@@ -1,5 +1,8 @@
 # Plan — statime PHC-only mode (#517) + timestamp-source decoupling (#380)
 
+> **Status 2026-09-18**: planned (not started) — statime patch number 0002 is
+> reserved for this work (`docs/patches.md`).
+
 Goal: let statime discipline **only the PTP Hardware Clock** and leave the
 Linux system clock to NTP, with precision-time apps reading `/dev/ptp`
 directly (or the usrvclock export backed by the PHC). Upstream issues:

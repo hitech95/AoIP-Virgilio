@@ -1,5 +1,9 @@
 # Findings — inferno subscription resume vs official Dante behaviour
 
+> **Status 2026-08-30**: historical record — findings snapshot against commit 75d9198
+> + patches 0001/0002; the follow-up work landed via the final-polish
+> tasks and the inferno patch series (0005 teardown race).
+
 Context: T6/X1 rig tests (plan/final-polish.md) + code read of
 `deps/inferno/inferno_aoip/src/device_server/channels_subscriber.rs`
 (commit 75d9198, plus our 0001/0002 patches). No diagnostics run yet —

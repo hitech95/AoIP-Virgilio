@@ -1,5 +1,9 @@
 # Final polish round — task tracker
 
+> **Status 2026-08-30**: completed — all tracked tasks done (per-task rows below);
+> the squashfs task spawned `plan/squashfs-overlay-userdata.md`, itself
+> implemented.
+
 Rig discipline: no builds while audio is being tested; behavior tests first,
 rebuild once at the very end.
 

@@ -1,5 +1,11 @@
 # Plan — production rootfs: squashfs + overlayfs + `/opt/user_data` (UBI/UBIFS)
 
+> **Status 2026-10-02**: implemented on the hw boards (rpi2b + rpi02w):
+> squashfs ro root + ext4 `virgilio-data` partition, preinit pivot in
+> `virgilio-base` (`docs/architecture.md` §Boot chain). Phase B
+> (UBI/UBIFS for the RK3506 SPI-NAND) not started; the QEMU Phase A
+> variant was superseded — dev targets keep a plain rw root.
+
 Goal: move from the ext4-RW monolithic rootfs to an OpenWrt-style
 production layout for the real RK3506 (SPI NAND boot device), and give
 user data (camilladsp configs, FIR files, inferno subscription state) a

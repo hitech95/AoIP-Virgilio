@@ -1,9 +1,9 @@
 # Configurable inferno bit depth, rendered from the camillaDSP config
 
-Status: **implemented (host-side)** — inferno patch 0003, genconf mapping +
-genconf-test depth cases, shipped-uci flips (srcqemu S24_3_LE = wire 24,
-rpi2b S32_LE boundary-only) and docs done; rig validation (§Validation
-2–4) and the on-device manifest flip check (§Work items 3) still pending.
+> **Status 2026-09-28**: implemented (host-side) — inferno patch 0003, genconf mapping +
+> genconf-test depth cases, shipped-uci flips (srcqemu S24_3_LE = wire 24,
+> rpi2b S32_LE boundary-only) and docs done; rig validation (§Validation
+> 2–4) and the on-device manifest flip check (§Work items 3) still pending.
 
 ## Problem
 

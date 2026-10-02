@@ -1,5 +1,10 @@
 # Plan — RK3506 test firmware (ARM Cortex-A7 + NEON) on QEMU
 
+> **Status 2026-10-01**: active (master plan) — M0–M4 done, webui (D18) complete,
+> lifecycle (D19) landed; open items in §11 "Next up" and in the
+> feature-plan headers (each `plan/*.md` carries a
+> `**Status <last-update-date>**: <status>` header).
+
 ## 1. Goal
 
 Create a minimal Linux firmware, bootable with QEMU, compiled for an architecture
@@ -73,7 +78,8 @@ Purpose: a **reproducible test case** (build + run + test) without physical hard
 
 ```
 .
-├── plan/                       # this plan
+├── plan/                       # this plan + feature plans (each carries a
+│                               #  **Status <date>**: header = status + last update)
 ├── buildroot/                  # git submodule: Buildroot 2026.05.2 (rust 1.90, kernel 6.12.x)
 ├── br-external/                # Buildroot external tree
 │   ├── external.desc / external.mk
@@ -87,30 +93,30 @@ Purpose: a **reproducible test case** (build + run + test) without physical hard
 │   ├── package/udebug/         # OpenWrt udebug (required by procd/logd/netifd)
 │   ├── package/procd/          # PID 1 + hotplug
 │   ├── package/netifd/         # network: static IP + DHCP only (udhcpc, ucode proto)
-│   ├── board/rk3506qemu/       # kernel/busybox fragments, rootfs overlay, post-build
-│   │                           #  (modules flat, /var→tmp tmpfs layout, S95mpd purge)
-│   │   ├── linux.fragment      # SND_ALOOP, SND_VIRTIO, PTP_1588_CLOCK, PREEMPT, ...
-│   │   ├── busybox.fragment    # NTPD + FEATURE_AWK_LIBM
-│   │   ├── rootfs-overlay/     # /etc/inittab, OpenWrt init scripts, /etc/config/*
-│   │   └── genimage.cfg / post-image.sh   (optional, ext4 rootfs image)
-│   └── patches/                # patches if needed (kernel/apps)
+│   └── board/rk3506qemu/       # kernel/busybox fragments, rootfs overlay, post-build
+    │                           #  (modules flat, /var→tmp tmpfs layout, S95mpd purge)
+    │   ├── linux.fragment      # SND_ALOOP, SND_VIRTIO, PTP_1588_CLOCK, PREEMPT, ...
+    │   ├── busybox.fragment    # NTPD + FEATURE_AWK_LIBM
+    │   ├── rootfs-overlay/     # /etc/inittab, OpenWrt init scripts, /etc/config/*
+    │   └── genimage.cfg / post-image.sh   (optional, ext4 rootfs image)
 ├── configs/                    # source copies of configs (camilladsp yaml variants, see crossover doc)
 ├── deps/                       # pinned application sources (git submodules)
 │   ├── camilladsp/             # tag v4.1.3 (musl)
 │   ├── inferno/                # branch dev (recursive submodules)
 │   └── statime/                # fork, branch inferno-dev
-├── docs/                       # implementation references
+├── docs/                       # living docs (see README table): components,
+│                               #  rig runbooks, patches.md inventory
 │   ├── camilladsp.md           # DSP engine: package, runtime, UCI (chain nodes), tuning
 │   ├── inferno.md              # Dante stack: statime+inferno, clock chain, UCI (statime+inferno)
 │   ├── alsa.md                 # ALSA: device resolution, inferno plugin settings precedence
 │   ├── crossover-to-camilladsp.md  # SB12 passive crossover → IIR filter analysis
-│   ├── test-two-guests-ptp.md  # M4 rootless two-guest PTPv2 test explained
 │   ├── radio-over-dante.md     # full recipe: MPD web radio (guest internet on
 │   │                           #  eth0) -> camilladsp -> Dante TX -> receiver
 │   ├── bridge-rig.md           # preferred rig: native host statime grand
 │   │                           #  master + taps + NAT (glitch-free, D15)
 │   └── img/                    # plots/configs (crossover)
-├── results/                    # test reports (e.g. memory-matrix.md, see 6.2)
+├── results/                    # dated milestone test reports (test-*.md)
+│   └── test-two-guests-ptp.md  # M4 rootless two-guest PTPv2 test explained
 ├── scripts/
 │   ├── build.sh                # make O=... BR2_EXTERNAL=... (+ host-shim for uutils install)
 │   ├── run-qemu.sh             # --mem, --net user|tap|socket-listen|socket-connect|
@@ -374,7 +380,7 @@ Purpose: a **reproducible test case** (build + run + test) without physical hard
   `-netdev socket` (listen/connect on 127.0.0.1 — L2 pipe, multicast
   included, no root needed): guest B (static 198.18.100.2, priority1=128)
   = PTPv2 GrandMaster, guest A (.1, default 251) = Slave (kalman-locked).
-  Harness: `scripts/test-two-guests.sh` (docs: `docs/test-two-guests-ptp.md`,
+  Harness: `scripts/test-two-guests.sh` (docs: `results/test-two-guests-ptp.md`,
   implementation notes: `docs/inferno.md`).
   **Gotcha**: on the isolated link (no default route) the inferno
   `local_ip_address` autodetect panics (`LocalIpAddressNotFound`) → pass
@@ -388,7 +394,7 @@ Purpose: a **reproducible test case** (build + run + test) without physical hard
   `scripts/dante-l2node.py`, a rootless virtual L2 node on the QEMU mcast
   tunnel (`run-qemu.sh --net socket-mcast`) speaking inferno's ARC protocol
   (opcode 0x3010, UDP 4440) directly; received per-second fingerprints
-  match the source exactly on both channels (docs: `docs/test-audio-flow.md`).
+  match the source exactly on both channels (docs: `results/test-audio-flow.md`).
   `dockerized_trx` still deferred (needs bridging/root).
 - Rootfs grew past the default ext2 size → `BR2_TARGET_ROOTFS_EXT2_SIZE=256M`.
 
@@ -603,7 +609,7 @@ it does.
   (own login app, precondition-guarded unauth RPC), CSP/nosniff/referrer
   headers, exponential login backoff verified (1.2→8.2 s), WS gating
   over wss. User guide `docs/webui.md`, test report
-  `docs/test-webui-m5.md`. All five milestones green; browser-only
+  `results/test-webui-m5.md`. All five milestones green; browser-only
   rendering (curves, drag UX) still needs a human pass.
 - **DONE (D18/M4)**: filters + uploads — genconf extended with uci-native
   user steps on editable slots (allow/max validation, placeholder anchor),
@@ -611,22 +617,23 @@ it does.
   multipart upload to /opt/user_data/filters), webui-app-filters (slot
   editors + live cascade curves, vendored camillaEQ biquad math) +
   webui-app-files. Verified on rig incl. raw-WS attacks on locked chains
-  rejected by the manifest (`docs/test-webui-m4.md`). Next: M5 (TLS,
+  rejected by the manifest (`results/test-webui-m4.md`). Next: M5 (TLS,
   first-boot password, hardening docs).
 - **DONE (D18/M3)**: config pages — webuid uci bridge (write-ACL
   allowlist), webui.set_password (session invalidation), vendored system
   app (hostname/TZ/password/reboot) + network app (dhcp/static,
   lockout warning); apply chain via procd reload triggers verified
-  (`docs/test-webui-m3.md`). Next: M4 filters page + uploads (manifest
+  (`results/test-webui-m3.md`). Next: M4 filters page + uploads (manifest
   schema, genconf validation, /opt/user_data).
 - **DONE (D18/M2)**: webui frontend — vendored OUI shell (deps/oui @
-  386f49e, one login patch) + webui-app-status, built by host-node npm+vite
+  386f49e; the OUI patch stack later grew to 0001–0004, see
+  `docs/patches.md`) + webui-app-status, built by host-node npm+vite
   (460 KB gzipped dist), gzip_static serving, menus/status/logs contract
-  verified end-to-end (`docs/test-webui-m2.md`). Next: M3 config pages
+  verified end-to-end (`results/test-webui-m2.md`). Next: M3 config pages
   (generic uci bridge + system/network apps), M4 filters.
 - **DONE (D18/M1)**: webui skeleton — nginx + webuid (ucode SCGI daemon,
   shadow login, sessions, /_auth, WS gating) verified end-to-end on QEMU
-  (`docs/test-webui-m1.md`). Next: M2 status page (vendored OUI frontend
+  (`results/test-webui-m1.md`). Next: M2 status page (vendored OUI frontend
   + `status.all` wiring), M3 config pages (uci bridge), M4 filters.
 - **DONE (D17)**: camilladsp revents patch landed and verified — decision
   rule met (clean win): sink default is direct `capture='Inferno'` again.
@@ -640,7 +647,7 @@ it does.
   `sudo scripts/qemu-bridge.sh down` (needs interactive sudo).
 
 | D17 | — | **camilladsp revents patch — the spin fixed at the root**: package patch `0001-capture-use-poll-descriptors-revents.patch` (utils.rs `FileDescriptors<'a>` now carries `&alsa::PCM` and `wait()` calls `snd_pcm_poll_descriptors_revents` after `poll()`; both capture constructors plumb `pcmdevice`) | playback was NEVER affected — it uses `alsa::PCM::wait` = `snd_pcm_wait`, which translates revents correctly inside alsa-lib; only the capture `FileDescriptors::wait` raw-polled. With translation, the plugin's PERIOD_POLL machinery finally engages: AlsaCapture 845 R-state → 52 S-state ticks/8 s (FIFO fallback 38), audio identical, subscription CODE_OK. Sink default is again `capture='Inferno'` + S16_LE; `aoip-bridge` service kept in overlay but disabled by default (enable + `RawFile:/tmp/aoip.fifo` if the patch is dropped). Upstream: both patches ready (camilladsp revents call; inferno PERIOD_POLL/throttle/drain series) |
-| D18 | — | **webui = nginx front + ucode gateway + vendored OUI frontend** (full plan: `plan/webui.md`; M1 implemented): options evaluated — LuCI (uhttpd can't proxy WS), OUI stock (MD5 uci users, lighttpd can't session-gate a proxied WS, ~9 lua-eco recipes not in Buildroot), OUI+nginx+auth-patch (Lua fork), Rust gateway (fallback) — chosen: reimplement OUI's tiny closed-world JSON contract (~16 funcs) in a ucode daemon (`webuid`, ptp-monitor pattern: uloop + nonblocking SCGI on `/run/webui.sock`), nginx as the ONLY exposed process (static, scgi, `auth_request /_auth`, WS upgrade proxy to camilladsp loopback), login via `/etc/shadow` + busybox cryptpw, OUI Vue frontend vendored later (M2+). New in image: nginx only (+`UCI_SUPPORT=ON` in ucode, +`CRYPTPW` applet) | the auth-gated WS was the deciding requirement — neither uhttpd nor lighttpd can enforce a session on a proxied websocket, so every framework variant converged on needing a custom gateway anyway; enforcement of the protected pipeline stays in camilladsp (patch 0003) so the proxy can be a dumb auth'd pipe. ucode gotchas (no function hoisting; no argv-form popen in the pinned rev; `json()` parses only, serialize via `sprintf("%J")`) live in `scripts/webui/README.md`. M1 verified on QEMU: real `$6$` login, 401/403 gating, `101 Switching Protocols` through the proxy (`docs/test-webui-m1.md`); host dev-loop harness in `scripts/webui/` |
+| D18 | — | **webui = nginx front + ucode gateway + vendored OUI frontend** (full plan: `plan/webui.md`; M1 implemented): options evaluated — LuCI (uhttpd can't proxy WS), OUI stock (MD5 uci users, lighttpd can't session-gate a proxied WS, ~9 lua-eco recipes not in Buildroot), OUI+nginx+auth-patch (Lua fork), Rust gateway (fallback) — chosen: reimplement OUI's tiny closed-world JSON contract (~16 funcs) in a ucode daemon (`webuid`, ptp-monitor pattern: uloop + nonblocking SCGI on `/run/webui.sock`), nginx as the ONLY exposed process (static, scgi, `auth_request /_auth`, WS upgrade proxy to camilladsp loopback), login via `/etc/shadow` + busybox cryptpw, OUI Vue frontend vendored later (M2+). New in image: nginx only (+`UCI_SUPPORT=ON` in ucode, +`CRYPTPW` applet) | the auth-gated WS was the deciding requirement — neither uhttpd nor lighttpd can enforce a session on a proxied websocket, so every framework variant converged on needing a custom gateway anyway; enforcement of the protected pipeline stays in camilladsp (patch 0003) so the proxy can be a dumb auth'd pipe. ucode gotchas (no function hoisting; no argv-form popen in the pinned rev; `json()` parses only, serialize via `sprintf("%J")`) live in `scripts/webui/README.md`. M1 verified on QEMU: real `$6$` login, 401/403 gating, `101 Switching Protocols` through the proxy (`results/test-webui-m1.md`); host dev-loop harness in `scripts/webui/` |
 | D19 | 60 s drift-restart poll inside the ptp hotplug (commit 2cda580); "this build's netifd does not dispatch iface hotplugs" | **event-driven lifecycle over both hotplug buses** (full plan: `plan/camilladsp-inferno-lifecycle.md`, write-up: `docs/lifecycle.md`), with a **single rendering/decision point**: the camilladsp init's `start_service` seeds the advertised-address baseline at every start and its custom `check` command (rc.common EXTRA_COMMANDS) decides starts (PTP locked + ≥1 IPv4 + not running) and drift restarts; the hotplug handlers are thin gates — iface hotplug `/etc/hotplug.d/iface/60-inferno-net` (netdev-gated: ifdown stops camilladsp, +statime only when the link is really gone and the box is not grandmaster-configured; ifup starts statime then delegates) and ptp hotplug (`locked` → `check`, `lost` → stop) | netifd's dispatch was never broken — verified statically in the pinned source (interface-event.c execs /sbin/hotplug-call iface; interface-ip.c sets IFUPDATE_ADDRESSES only on real address diffs) and live with a probe: the earlier attempt failed on its own script bugs. The iface bus kills the address-drift poll (up to 60 s stale advertisement), stops camilladsp on link loss *before* statime's send-timestamp panic, and closes the lock-first boot crash loop; concentrating rendering+decisions in the init script keeps the service self-managed (one code path for boot, hotplugs and operators: `service camilladsp check`). Validation also caught the protected-config boot being broken by the camilladsp 0003/0005 patch stack (see `docs/lifecycle.md` §"Found along the way") — reported and fixed by the stack owners in `de31c22` |
 General logic that emerged from these:
 

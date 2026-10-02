@@ -1,5 +1,17 @@
 # Plan — locked sub-chain pipeline (driver protection vs user EQ)
 
+> **Status 2026-10-02**: implemented, but **body predates the 2026-09-29
+> placeholder-free rework** (camilladsp 0005 + genconf). Shipped model:
+> every step is a real uci `config pipeline_step` section (no
+> `user_slot_*` placeholder anchors, no `config subchain`/`child`
+> policy — editable steps are `policy 'free'`, attributed by step
+> description; free gaps are slot indexes), user edits persist in uci
+> via webui M4 (no preset daemon), and the `GetPolicy` WS command
+>   exposes the manifest. Current truth: the `camilladsp-genconf` header
+> comment + patch 0005 + shipped `/etc/config/camilladsp`; the policy
+> reference is `docs/camilladsp-policy.md` (rewritten for the new
+> model, 2026-10-02).
+
 Goal: a camilladsp pipeline partitioned into logical **sub chains**
 (groups), each carrying one of three **policies**. The speaker-design
 and driver-protection chain (routing mixer, final crossover + FIR +

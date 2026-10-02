@@ -1,13 +1,13 @@
 # Event-driven lifecycle for inferno/camilladsp (PTP + network hotplug)
 
-Status: **implemented + validated** (slirp/combined, split-topology
-socket rig, and the real-mode bridge rig incl. GM loss/return — see
-`docs/lifecycle.md` §Validation). Remaining hands-on rows: physical
-cable-pull timing, zcip→DHCP address ladder on hardware.
-Supersedes the 60 s drift-restart inside the ptp hotplug (commit
-2cda580) and formalizes the iface hotplug that was attempted and
-shelved during that work. Blocks the Zero 2 W port (WiFi link loss
-exercises this lifecycle constantly).
+> **Status 2026-10-01**: implemented + validated (slirp/combined, split-topology
+> socket rig, and the real-mode bridge rig incl. GM loss/return — see
+> `docs/lifecycle.md` §Validation). Remaining hands-on rows: physical
+> cable-pull timing, zcip→DHCP address ladder on hardware.
+> Supersedes the 60 s drift-restart inside the ptp hotplug (commit
+> 2cda580) and formalizes the iface hotplug that was attempted and
+> shelved during that work. Blocks the Zero 2 W port (WiFi link loss
+> exercises this lifecycle constantly).
 
 ## Problem
 

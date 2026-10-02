@@ -1,9 +1,7 @@
 # Plan — Spectrum graph and heatmap
 
-Updated: **2026-10-02**
-
-Status: **Implemented and deployed, including inset canvas ruler, hidden
-Offset row, switch active labels, and revised filter settings popover.**
+> **Status 2026-10-02**: implemented + deployed — inset canvas ruler, hidden
+> Offset row, switch active labels, revised filter settings popover.
 
 The main source guest was restarted with the latest rebuilt image, including
 the left dBFS ruler, revised controls, peak reset, RTA smoothing bypass,

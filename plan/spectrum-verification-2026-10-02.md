@@ -1,5 +1,8 @@
 # Spectrum regression review — 2026-10-02
 
+> **Status 2026-10-02**: completed (regression review) — confirmed faults fixed by
+> the 2026-10-02 spectrum commits; re-test steps recorded below.
+
 ## Confirmed faults and fixes
 
 - STA/LTA/peak arrays survived 32→128 switches. Old frequency indices were
@@ -116,7 +119,7 @@ verified actual rendered curve direction/position or authenticated Chrome.
 - Chrome/Playwright checks ran against the authenticated full application
   served by that guest, not a component harness: ruler positions, −12/+12
   offset endpoints, reset, tooltip, series switching and heatmap popover.
-  Screenshot: `.playwright-mcp/spectrum-ruler-final.png`.
+   Temporary Playwright screenshots and snapshots were removed after review.
 - The test DSP currently captures the guest ALSA loopback and discards
   playback to `/dev/null`; no continuous test source is left running.
   These UI checks do not claim a new end-to-end audio sweep.
