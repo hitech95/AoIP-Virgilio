@@ -25,7 +25,7 @@ command -v node >/dev/null || { echo "node not found in PATH" >&2; exit 1; }
 NODE_MAJOR="$(node -v | sed 's/v\([0-9]*\).*/\1/')"
 [ "${NODE_MAJOR}" -ge 18 ] || { echo "node >= 18 required (found $(node -v))" >&2; exit 1; }
 
-WORK="$(mktemp -d /tmp/webui-fe.XXXXXX)"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/webui-fe.XXXXXX")"
 trap 'rm -rf "${WORK}"' EXIT
 
 # --- sources: shell + upstream apps we ship + our apps --------------------
