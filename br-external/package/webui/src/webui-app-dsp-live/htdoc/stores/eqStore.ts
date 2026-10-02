@@ -23,7 +23,7 @@ import { debounceCancelable } from '../lib/debounce'
 import * as dsp from '../dsp'
 import { clampFreqHz, clampGainDb, clampQ } from '../lib/eqParamClamp'
 import { disableFilterInStep, enableFilterInStep } from '../lib/filterEnablement'
-import { reconcileSession, loadSession } from '../lib/filterSession'
+import { reconcileSession, loadSession, saveSession, sessionForget } from '../lib/filterSession'
 
 // Upload debounce time (ms)
 const UPLOAD_DEBOUNCE_MS = 200
@@ -428,6 +428,54 @@ export async function toggleBandEnabled(index: number): Promise<void> {
 
 // ─── Band add/remove on the selected block ─────────────────────────────────
 
+/** Rename the definition and every reference together, including muted bands. */
+export async function renameBand(index: number, requestedName: string): Promise<boolean> {
+  const oldName = eq.filterNames[index]
+  const stepIndex = eq.selectedStepIndex
+  const name = requestedName.trim()
+  if (!lastConfig || !oldName || stepIndex === null || !dsp.isConnected()) return false
+  if (!name || name.length > 64) {
+    eq.uploadStatus = { state: 'error', message: 'Enter a filter name (1–64 characters)' }
+    return false
+  }
+  if (name === oldName) return true
+  await flushPendingUpload()
+  if (soloSessionActive) await endSoloEditSession()
+  if (eq.selectedStepIndex !== stepIndex) return false
+  const session = loadSession()
+  if (Object.hasOwn(lastConfig.filters ?? {}, name) || Object.hasOwn(session, name)) {
+    eq.uploadStatus = { state: 'error', message: 'A filter with this name already exists' }
+    return false
+  }
+  const updated = structuredClone(lastConfig)
+  if (Object.hasOwn(updated.filters ?? {}, oldName)) {
+    Object.defineProperty(updated.filters!, name, {
+      value: updated.filters![oldName], enumerable: true, configurable: true, writable: true,
+    })
+    delete updated.filters![oldName]
+  } else if (!session[oldName]) return false
+  for (const step of updated.pipeline ?? []) {
+    if (step.type === 'Filter' && step.names) step.names = step.names.map((n: string) => n === oldName ? name : n)
+  }
+  eq.uploadStatus = { state: 'pending' }
+  if (!(await dsp.uploadConfig(updated))) {
+    eq.uploadStatus = { state: 'error', message: 'Unable to rename filter' }
+    return false
+  }
+  if (Object.hasOwn(session, oldName)) {
+    Object.defineProperty(session, name, {
+      value: session[oldName], enumerable: true, configurable: true, writable: true,
+    })
+    delete session[oldName]
+    saveSession(session)
+  }
+  lastConfig = updated
+  localRevision++
+  extractForSelection()
+  eq.uploadStatus = { state: 'success' }
+  return true
+}
+
 /**
  * Append a new EQ band (biquad) to the selected block and upload it.
  * Policy gating (editable/free stage, max_steps) is done by the caller
@@ -445,7 +493,7 @@ export async function addBand(type: EqBand['type'] = 'Peaking'): Promise<boolean
     await endSoloEditSession()
   }
 
-  const step = lastConfig.pipeline[stepIndex]
+  const step = lastConfig.pipeline?.[stepIndex]
   if (!step || step.type !== 'Filter' || !step.names) {
     return false
   }
@@ -484,13 +532,13 @@ export async function removeBand(index: number): Promise<boolean> {
     await endSoloEditSession()
   }
 
-  const step = lastConfig.pipeline[stepIndex]
+  const step = lastConfig.pipeline?.[stepIndex]
   const filterName = extractedData?.filterNames[index]
   if (!step || step.type !== 'Filter' || !step.names || !filterName) {
     return false
   }
 
-  step.names = step.names.filter((n) => n !== filterName)
+  step.names = step.names.filter((n: string) => n !== filterName)
   if (lastConfig.filters) delete lastConfig.filters[filterName]
   sessionForget(filterName)
 
@@ -517,7 +565,7 @@ export async function addOrphanFilter(filterName: string): Promise<boolean> {
     await endSoloEditSession()
   }
 
-  const step = lastConfig.pipeline[stepIndex]
+  const step = lastConfig.pipeline?.[stepIndex]
   if (!step || step.type !== 'Filter' || !step.names) {
     return false
   }

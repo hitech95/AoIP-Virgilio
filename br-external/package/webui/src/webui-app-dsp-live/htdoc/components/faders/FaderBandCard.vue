@@ -12,18 +12,35 @@
   >
     <template #header>
       <div class="toolbar">
-        <el-popover v-model:visible="deleteVisible" placement="bottom-start" :width="220" trigger="click">
+        <el-popover v-model:visible="settingsVisible" placement="bottom-start" :width="300" trigger="click"
+          :disabled="readOnly" @show="openSettings">
           <template #reference>
-            <button type="button" class="order-btn" :disabled="off"
-              :title="filterName" :aria-label="$t('Delete band')">
+            <button type="button" class="order-btn" :disabled="readOnly"
+              :title="filterName" :aria-label="$t('Filter settings')">
               <BandOrderIcon class="order-icon" :position="orderNumber" :size="24" :color="bandColor" />
             </button>
           </template>
-          <div class="delete-pop">
-            <div class="hint">{{ filterName }}</div>
-            <el-button type="danger" @click="onDelete">
-              {{ $t('Delete band') }}
-            </el-button>
+          <div class="filter-settings">
+            <div class="filter-settings__heading">
+              <BandOrderIcon :position="orderNumber" :size="20" :color="bandColor" />
+              <strong>{{ $t('Filter settings') }}</strong>
+            </div>
+            <el-form label-position="top" @submit.prevent="onRename">
+              <el-form-item :label="$t('Filter name')" :error="nameError ? $t(nameError) : ''">
+                <el-input v-model="nameDraft" maxlength="64" :aria-label="$t('Filter name')"
+                  :disabled="settingsBusy" @input="nameError = ''" @keydown.esc.stop="settingsVisible = false" />
+              </el-form-item>
+              <div class="filter-settings__actions">
+                <el-button size="small" :disabled="settingsBusy" @click="settingsVisible = false">{{ $t('Cancel') }}</el-button>
+                <el-button size="small" type="primary" native-type="submit" :loading="settingsBusy"
+                  :disabled="!nameDraft.trim() || nameDraft.trim() === filterName">{{ $t('Save name') }}</el-button>
+              </div>
+            </el-form>
+            <div class="filter-settings__delete">
+              <el-button size="small" type="danger" plain :disabled="settingsBusy" @click="onDelete">
+                <el-icon><Delete /></el-icon><span>{{ $t('Delete band') }}</span>
+              </el-button>
+            </div>
           </div>
         </el-popover>
         <el-popover v-model:visible="pickerVisible" placement="bottom-start" :width="230" trigger="click"
@@ -90,6 +107,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { Delete } from '@element-plus/icons-vue'
 import FaderCard from '../FaderCard.vue'
 import FilterIcon from '../icons/FilterIcon.vue'
 import BandOrderIcon from '../icons/BandOrderIcon.vue'
@@ -98,6 +116,7 @@ import type { EqBand } from '../../lib/filterResponse.ts'
 import {
   eq,
   removeBand,
+  renameBand,
   setBandGain,
   setBandFreq,
   setBandQ,
@@ -123,15 +142,37 @@ const props = defineProps<{
 const off = computed(() => props.readOnly || !props.band.enabled)
 
 const pickerVisible = ref(false)
-const deleteVisible = ref(false)
+const settingsVisible = ref(false)
+const settingsBusy = ref(false)
+const nameDraft = ref('')
+const nameError = ref('')
+
+function openSettings() {
+  nameDraft.value = props.filterName
+  nameError.value = ''
+}
+
+async function onRename() {
+  if (settingsBusy.value || props.readOnly) return
+  settingsBusy.value = true
+  try {
+    if (await renameBand(props.bandIndex, nameDraft.value)) settingsVisible.value = false
+    else nameError.value = eq.uploadStatus.message || 'Unable to rename filter'
+  } catch {
+    nameError.value = 'Unable to rename filter'
+  } finally {
+    settingsBusy.value = false
+  }
+}
 
 async function onDelete() {
-  deleteVisible.value = false
+  if (props.readOnly || settingsBusy.value) return
+  settingsVisible.value = false
   await removeBand(props.bandIndex)
 }
 const bandColor = `var(--band-${(props.bandIndex % 10) + 1})`
 
-/* the order icon doubles as the delete entry point */
+/* The order icon opens naming and deletion settings. */
 
 // Gain scale dots at every 6 dB inside the ±24 dB range; the labels are
 // hidden in the stylesheet, leaving only the dot marks.
@@ -181,6 +222,17 @@ function onQChange(v: number | undefined) {
 </script>
 
 <style scoped lang="scss">
+.filter-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  &__heading { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-primary); }
+  &__actions { display: flex; justify-content: flex-end; gap: 8px; }
+  &__actions .el-button + .el-button { margin-left: 0; }
+  &__delete { border-top: 1px solid var(--el-border-color-lighter); padding-top: 12px; }
+  &__delete .el-button { width: 100%; gap: 6px; }
+}
 .filter-card {
   &.selected {
     border-color: var(--band-color);
