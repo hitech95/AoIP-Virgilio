@@ -89,18 +89,23 @@ each sync. The helper defaults can be overridden with `EQ_QEMU_CONSOLE_PORT`,
 - `scripts/` — build/run/bridge helpers, `dante-l2node.py` (ARC/Dante
   subscription tool), `statime-gm.toml` (host grand master)
 - `configs/` — reference camilladsp configs (crossover experiments)
-- `results/` — test reports (populated by milestone measurements)
+- `results/` — test reports: dated milestone snapshots (`test-*.md`,
+  rig era of their timestamp, not kept in sync) + measurements
 - `docs/` — runbooks and component docs:
 
 | doc | content |
 |---|---|
 | `docs/architecture.md` | **system overview**: boot chain, service model, stack roles |
 | `docs/lifecycle.md` | **service lifecycle**: hotplug triggers, state table, failure timelines |
+| `docs/patches.md` | **downstream patch inventory**: every patch stack, how each is applied, series discipline |
 | `docs/bridge-rig.md` | **the** rig: host GM + tap bridge, full walkthrough |
+| `docs/bridge-rig-hw-sink.md` | hw-sink rig variant (physical Dante device) |
 | `docs/radio-over-dante.md` | mcast-tunnel rig variant, radio e2e recipe |
 | `docs/camilladsp.md` / `docs/inferno.md` / `docs/alsa.md` | component docs + uci schemas |
+| `docs/camilladsp-policy.md` | locked-config manifest / policy system |
 | `docs/ptp-monitor.md` | usrvclock monitor, ubus object, hotplug policy |
-| `docs/test-*.md` | scripted milestone tests (socket-rig era, still valid) |
+| `docs/webui.md` | webui **user guide** (login, TLS, pages) |
+| `docs/dependency-map.md` | package dependency relations |
 | `docs/crossover-to-camilladsp.md` | speaker DSP crossover background |
 
 ## License
