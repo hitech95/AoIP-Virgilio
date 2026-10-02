@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "build": "vite build",
-    "watch": "vite build --watch"
+    "watch": "vite build --watch",
+    "test:spectrum": "node tests/run-spectrum.mjs"
   },
   "devDependencies": {
     "@intlify/unplugin-vue-i18n": "^4.0.0",
