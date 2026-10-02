@@ -1,5 +1,8 @@
 # test-audio-flow — real Dante source → sync → sink
 
+> **Status 2026-08-30**: historical snapshot — milestone test report of its
+> execution date; rig era of its timestamp, not re-verified since.
+
 `scripts/test-audio-flow.sh` is the (formerly optional) M4 flow test: real
 audio, real flows, real clock sync, no root.
 

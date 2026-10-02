@@ -102,4 +102,4 @@ installed to `/usr/bin/webuid` + `/usr/share/webui/ucode/`.
 
 ## QEMU target test
 
-See `docs/test-webui-m1.md`.
+See `results/test-webui-m1.md`.

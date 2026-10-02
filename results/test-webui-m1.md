@@ -1,5 +1,8 @@
 # Test — webui M1 (skeleton: nginx + webuid + auth contract)
 
+> **Status 2026-09-18**: historical snapshot — milestone test report of its
+> execution date; rig era of its timestamp, not re-verified since.
+
 DoD per `plan/webui.md` §12 M1, executed 2026-09-15 on the bridge-rig
 workflow (simple mode): `./scripts/run-qemu.sh --net user --fwd 18080:80
 --console telnet:5560`, Buildroot image built from `rk3506qemu_defconfig`

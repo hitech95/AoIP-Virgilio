@@ -1,5 +1,11 @@
 # Test — webui M2 (vendored OUI frontend + status page)
 
+> **Status 2026-09-18**: historical snapshot — milestone test report of its
+> execution date; rig era of its timestamp, not re-verified since.
+> The OUI patch stack has since grown to four patches (0002 home-route,
+> 0003 prefs/footer, 0004 english-only locale); "the ONLY OUI fork"
+> below was true at execution time — current inventory: `docs/patches.md`.
+
 DoD per `plan/webui.md` §12 M2, executed 2026-09-15: same simple-mode rig
 as M1 (`--fwd 18080:80`), image rebuilt with the frontend (vendored OUI
 @ 386f49e + one shell patch + `webui-app-status`).

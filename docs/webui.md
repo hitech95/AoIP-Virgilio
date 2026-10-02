@@ -135,4 +135,4 @@ unreachable.
   CamillaDSP.
 
 Architecture, wire contract and design decisions: `plan/webui.md`.
-Test reports: `docs/test-webui-m*.md`.
+Test reports: `results/test-webui-m*.md`.

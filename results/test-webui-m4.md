@@ -1,5 +1,8 @@
 # Test — webui M4 (filters page + uploads, protected-pipeline integration)
 
+> **Status 2026-09-18**: historical snapshot — milestone test report of its
+> execution date; rig era of its timestamp, not re-verified since.
+
 DoD per `plan/webui.md` §12 M4, executed 2026-09-15 on the simple-mode rig
 with the protected 2-way policy active (subchains + user EQ slots, the
 `scripts/genconf-test/protected-2way.uci` tree; vendor FIR coeff stand-in

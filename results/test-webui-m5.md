@@ -1,5 +1,8 @@
 # Test — webui M5 (TLS, first-boot password, hardening)
 
+> **Status 2026-09-18**: historical snapshot — milestone test report of its
+> execution date; rig era of its timestamp, not re-verified since.
+
 DoD per `plan/webui.md` §12 M5, executed 2026-09-15 on the simple-mode
 rig (`--fwd 18080:80 --fwd 18443:443`). Certificates: self-signed pair
 generated on the host, fetched by the guest over slirp
@@ -21,7 +24,8 @@ admin-supplied by design.
   is on.
 - **Own login app** (`webui-app-login`) replaces OUI's: normal login +
   first-boot set-password flow. OUI fork count stays at one (the shell
-  login patch).
+  login patch). *(True at execution time 2026-09-15; the stack is now
+  four patches — see `docs/patches.md`.)*
 
 ## Results
 

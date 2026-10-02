@@ -1,5 +1,8 @@
 # M4 test — two-guest PTPv2 + inferno capture (`scripts/test-two-guests.sh`)
 
+> **Status 2026-08-30**: historical snapshot — milestone test report of its
+> execution date; rig era of its timestamp, not re-verified since.
+
 ## Purpose
 
 Dante (and therefore inferno) cannot exchange media over QEMU's default

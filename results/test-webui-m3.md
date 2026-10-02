@@ -1,5 +1,8 @@
 # Test — webui M3 (config pages: generic uci bridge + system + network)
 
+> **Status 2026-09-18**: historical snapshot — milestone test report of its
+> execution date; rig era of its timestamp, not re-verified since.
+
 DoD per `plan/webui.md` §12 M3, executed 2026-09-15 on the simple-mode
 rig. All flows driven over HTTP exactly as the apps drive them.
 
