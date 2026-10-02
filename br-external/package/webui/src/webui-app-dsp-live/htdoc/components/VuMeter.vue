@@ -16,7 +16,10 @@
       <div class="vu-channels">
         <div v-for="ch in shown" :key="ch" class="vu-channel">
           <div class="vu-track">
-            <div class="vu-fill" :style="{ height: pct(rmsOf(ch)) + '%' }" />
+            <div class="vu-fill" :style="{
+              background: meterGradient,
+              clipPath: `inset(${100 - pct(rmsOf(ch))}% 0 0 0)`
+            }" />
             <div class="vu-peak" :class="{ clipped: peakOf(ch) > 0 }"
               :style="{ bottom: pct(peakOf(ch)) + '%' }" />
             <span class="vu-zero" :style="{ bottom: pct(0) + '%' }" />
@@ -45,6 +48,16 @@ export function levelAsPercent(dbfs: number): number {
   return Math.max(0, Math.min(100, value))
 }
 
+/* Fixed dBFS color positions, revealed by clipping a full-height layer.
+ * Green below -18, amber near -6, orange at -3, red at full scale. */
+const METER_GRADIENT = `linear-gradient(to top,
+  #35a06a 0%,
+  #43b97c ${levelAsPercent(-18)}%,
+  #e6b23c ${levelAsPercent(-6)}%,
+  #e0812f ${levelAsPercent(-3)}%,
+  #d9513c ${levelAsPercent(0)}%,
+  #d9513c 100%)`
+
 export default {
   name: 'VuMeter',
   props: {
@@ -62,6 +75,7 @@ export default {
   },
   computed: {
     ticks() { return TICKS },
+    meterGradient() { return METER_GRADIENT },
     trackH() { return typeof this.height === 'number' ? `${this.height}px` : this.height },
     shown() {
       const n = this.levels.length
@@ -80,6 +94,9 @@ export default {
 
 <style scoped lang="scss">
 .vu-vertical {
+  --vu-label-height: 18px;
+  --vu-label-gap: 3px;
+  box-sizing: border-box;
   display: inline-flex;
   flex-direction: column;
   gap: 4px;
@@ -87,12 +104,6 @@ export default {
   &.is-fluid {
     height: 100%;
     align-self: stretch;
-
-    .vu-body,
-    .vu-channels,
-    .vu-channel {
-      height: 100%;
-    }
 
     .vu-body {
       flex: 1;
@@ -110,6 +121,8 @@ export default {
     position: relative;
     width: 40px;
     flex-shrink: 0;
+    /* Scale percentages must use track height, excluding channel names. */
+    margin-bottom: calc(var(--vu-label-height) + var(--vu-label-gap));
   }
 
   .vu-scale-tick {
@@ -135,6 +148,8 @@ export default {
 }
 
 .vu-body {
+  flex: 1;
+  min-height: 0;
   display: flex;
   gap: 6px;
   align-items: stretch;
@@ -149,7 +164,7 @@ export default {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: var(--vu-label-gap);
 }
 
 .vu-track {
@@ -160,22 +175,14 @@ export default {
   overflow: hidden;
 }
 
-/* gradient REVEALED by the fill height: the color at the bar top is
- * the color of the level it is showing (green -> amber -> red) */
+/* The gradient always spans the track; only its visible area changes. */
 .vu-fill {
   position: absolute;
   left: 0;
   right: 0;
+  top: 0;
   bottom: 0;
-  background: linear-gradient(to top,
-    #35a06a 0%,
-    #43b97c 55%,
-    #8fce5a 72%,
-    #e6b23c 84%,
-    #e0812f 92%,
-    #d9513c 97%,
-    #d9513c 100%);
-  transition: height 90ms linear;
+  transition: clip-path 90ms linear;
 }
 
 /* peak-hold line: dark, red when clipped */
@@ -199,11 +206,15 @@ export default {
   left: 0;
   right: 0;
   height: 1px;
+  margin-bottom: -0.5px;
   background: var(--el-text-color-secondary);
   opacity: 0.6;
 }
 
 .vu-ch-label {
+  height: var(--vu-label-height);
+  line-height: var(--vu-label-height);
+  flex-shrink: 0;
   font-size: var(--el-font-size-base);
   color: var(--el-text-color-secondary);
   max-width: 48px;
