@@ -7,6 +7,11 @@ by camilladsp-genconf). Every case sends a candidate config through the
 websocket SetConfig command (the same path a third-party tool would
 use) and checks that the manifest gate accepts or rejects it.
 
+Placeholder-free model (camilladsp patch 0005): every pipeline step is
+a real step; free steps are identified by their `description` (genconf
+renders the uci section id there) and may relocate only into their
+granted gaps (slot indexes). GetPolicy is sanity-checked first.
+
 Candidates are built by editing the PARSED running config (fetched via
 GetConfig), so the matrix is independent of YAML formatting.
 
@@ -144,9 +149,11 @@ def idx_mixer(cfg):
     return find_step(cfg, lambda s: s["type"] == "Mixer")
 
 
-def idx_ph(cfg, name):
+def idx_free(cfg, name):
+    # free steps carry their uci section id as the step description
+    # (placeholder-free model, camilladsp patch 0005)
     return find_step(
-        cfg, lambda s: s["type"] == "Filter" and s.get("names", [None])[0] == f"user_slot_{name}"
+        cfg, lambda s: s["type"] == "Filter" and s.get("description") == name
     )
 
 
@@ -189,7 +196,7 @@ def cases(base):
     out.append(("locked step bypassed", False, "", variant(bypass)))
 
     def move_locked(c):
-        i, j = idx_ph(c, "user_in0"), idx_mixer(c)
+        i, j = idx_free(c, "user_in0"), idx_mixer(c)
         pl = c["pipeline"]
         pl[i], pl[j] = pl[j], pl[i]
 
@@ -197,7 +204,7 @@ def cases(base):
 
     def move_user_after_mixer(c):
         pl = c["pipeline"]
-        i = idx_ph(c, "user_in0")
+        i = idx_free(c, "user_in0")
         ph = pl.pop(i)
         pl.insert(idx_mixer(c) + 1, ph)
 
@@ -205,13 +212,31 @@ def cases(base):
         ("user slot moved after mixer (position lock)", False, "", variant(move_user_after_mixer))
     )
 
-    def swap_inputs(c):
+    def swap_positions(c):
+        # both free groups are granted gap 0 (before the first anchor):
+        # swapping their order stays inside the granted slot
         pl = c["pipeline"]
-        i, j = idx_ph(c, "user_in0"), idx_ph(c, "user_in1")
+        i, j = idx_free(c, "user_in0"), idx_free(c, "user_in1")
+        pl[i], pl[j] = pl[j], pl[i]
+
+    out.append(("free groups swapped within slot 0", True, "", variant(swap_positions)))
+
+    def cross_channels(c):
+        # each free group's channels are pinned: crossing the contents
+        # puts user_in1's filters on user_in0's group -> rejected
+        pl = c["pipeline"]
+        i, j = idx_free(c, "user_in0"), idx_free(c, "user_in1")
         pl[i]["names"], pl[j]["names"] = pl[j]["names"], pl[i]["names"]
         pl[i]["channels"], pl[j]["channels"] = pl[j]["channels"], pl[i]["channels"]
 
-    out.append(("input slots swapped within slot 0", True, "", variant(swap_inputs)))
+    out.append(
+        (
+            "free group contents crossed to foreign channel",
+            False,
+            "outside its allowed set",
+            variant(cross_channels),
+        )
+    )
 
     def processor_in_slot(c):
         # a Processor step spliced into the user slot (with definition)
@@ -224,7 +249,7 @@ def cases(base):
                 },
             }
         }
-        c["pipeline"].insert(idx_ph(c, "user_in0") + 1, {"type": "Processor", "name": "comp1"})
+        c["pipeline"].insert(idx_free(c, "user_in0") + 1, {"type": "Processor", "name": "comp1"})
 
     out.append(("processor step added in slot", False, "", variant(processor_in_slot)))
 
@@ -250,20 +275,20 @@ def cases(base):
 
     def user_eq(c):
         c["filters"]["user_eq1"] = copy.deepcopy(EQ1)
-        c["pipeline"][idx_ph(c, "user_in0")]["names"].append("user_eq1")
+        c["pipeline"][idx_free(c, "user_in0")]["names"].append("user_eq1")
 
     out.append(("user EQ in slot (legit)", True, "", variant(user_eq)))
 
     def wrong_channel(c):
         c["filters"]["user_eq1"] = copy.deepcopy(EQ1)
-        c["pipeline"][idx_ph(c, "user_in0")]["names"].append("user_eq1")
-        c["pipeline"][idx_ph(c, "user_in0")]["channels"] = [1]
+        c["pipeline"][idx_free(c, "user_in0")]["names"].append("user_eq1")
+        c["pipeline"][idx_free(c, "user_in0")]["channels"] = [1]
 
     out.append(("user EQ on wrong channel", False, "", variant(wrong_channel)))
 
     def limiter_in_slot(c):
         c["filters"]["user_lim"] = copy.deepcopy(LIM)
-        c["pipeline"][idx_ph(c, "user_in0")]["names"].append("user_lim")
+        c["pipeline"][idx_free(c, "user_in0")]["names"].append("user_lim")
 
     out.append(
         ("disallowed filter type in slot (Limiter)", False, "not allowed", variant(limiter_in_slot))
@@ -272,7 +297,7 @@ def cases(base):
     def omitted_channels(c):
         c["filters"]["user_eq1"] = copy.deepcopy(EQ1)
         c["pipeline"].insert(
-            idx_ph(c, "user_in0") + 1, {"type": "Filter", "names": ["user_eq1"]}
+            idx_free(c, "user_in0") + 1, {"type": "Filter", "names": ["user_eq1"]}
         )
 
     out.append(("user step with omitted channels", False, "", variant(omitted_channels)))
@@ -290,6 +315,18 @@ def main():
     print(f"connected, running config: {len(base)} bytes")
 
     failures = 0
+
+    # GetPolicy must report the protected policy with the free groups
+    pol = ws.command("GetPolicy").get("GetPolicy", {})
+    subs = pol.get("value", {}).get("subchains", [])
+    if pol.get("result") == "Ok" and any(
+        sc.get("policy") == "free" and sc.get("name") == "user_in0" for sc in subs
+    ):
+        print("PASS GetPolicy serves the active policy (free group user_in0)")
+    else:
+        print(f"FAIL GetPolicy: {pol}")
+        failures += 1
+
     matrix = cases(base)
     for name, expect_ok, substr, candidate in matrix:
         ok, msg = ws.set_config(candidate)
@@ -313,7 +350,7 @@ def main():
     else:
         print("PASS running config unchanged after the matrix")
 
-    print(f"{len(matrix) + 1 - failures} passed, {failures} failed")
+    print(f"{len(matrix) + 2 - failures} passed, {failures} failed")
     return 1 if failures else 0
 
 
