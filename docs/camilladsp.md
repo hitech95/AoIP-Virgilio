@@ -111,11 +111,13 @@ Use `service camilladsp restart` for a full stop/start (new PID).
 The audio chain is a generic directed pipeline built from uci sections; no
 special modes. With no nodes, capture passes straight to playback.
 
-### `config filter` — one filter node
+### `config filter '<name>'` — one filter node
+
+Named section: the section id is the filter name (referenced from
+steps; must be unique).
 
 | Option | Description |
 |---|---|
-| `name` | Filter name (referenced from steps; must be unique). |
 | `type` | One of the types below. |
 | `f` | Frequency (Hz). |
 | `q` / `order` / `slope` | Shape parameter, per type. |
@@ -136,8 +138,8 @@ special modes. With no nodes, capture passes straight to playback.
 
 ### `config mixer` + `config mixroute` — routing matrix
 
-A `mixer` node (`name`, `in`, `out`) transforms `in` channels into `out`
-channels. `option user_gains '1'` marks the mixer's route **gains as
+A named `config mixer '<name>'` node (`in`, `out`) transforms `in`
+channels into `out` channels. `option user_gains '1'` marks the mixer's route **gains as
 free user state** (source-mix selection via the websocket — 100% ch0 /
 100% ch1 / (ch0+ch1)/2 are just gain presets); without it, or without a
 protected pipeline, the mixer is fully locked by the manifest.
@@ -149,7 +151,7 @@ camilladsp; the web UI disables the corresponding controls.
 UI-only metadata on the mixer section: `list in_label` / `list out_label`
 (human names for the input/output channels, shown by the web UIs —
 `CH{n}` when unset; camilladsp-genconf ignores them). When the mixer is
-referenced by a subchain step, the web UI disables the `in`/`out` counts
+referenced by a locked `pipeline_step`, the web UI disables the `in`/`out` counts
 (the topology is provisioned).
 Each `mixroute` section is one contribution: `option mixer` (which
 mixer), `dest` (output channel), `source` (input channel), `gain`
@@ -207,47 +209,35 @@ Notes:
 - set `option output_channels` in `main` to the mixer `out` when the playback
   channel count differs from the capture count.
 
-### `config step` — pipeline steps
+### `config pipeline` + `config pipeline_step '<name>'` — pipeline steps
+
+`config pipeline` holds the execution **order** (one `list step` entry
+per step, in order). Each named `config pipeline_step` is one step;
+the section id is the step name. Every step is real and renders 1:1 —
+no placeholder anchors.
 
 | Option | Description |
 |---|---|
-| `index` | Execution order (sorted numerically; gaps fine). |
-| `subchain` | Sub chain this step belongs to (required when `subchain` sections exist). For an *editable* slot (policy `child`/`free`) the step is a bare slot declaration — no `type`/`names`: genconf renders a transparent `user_slot_<name>` placeholder there. |
-| `type` | `Filter` or `Mixer` (locked sub chains only). |
+| `policy` | `locked` / `free` — protected-pipeline classification; mandatory in a protected config (see below). |
+| `type` | `Filter` or `Mixer`. |
 | `channels` (list, Filter) | Input channels of the step. Omit = all. |
-| `names` (list, Filter) | Filters applied **in series** to those channels. |
-| `label` | Optional human name for the block (UI-only; genconf ignores it, the policy slot name stays authoritative). |
-| `name` (Mixer) | Which mixer node to apply. |
+| `names` (list, Filter) | Filters applied **in series** to those channels (real `config filter` sections). |
+| `mixer` | Mixer steps: which `config mixer` this step runs. |
+| `label` | Optional human name for the block, rendered as the step `description`. |
 
-### `config subchain` — protected pipeline (sub chains)
+### Protected pipeline (per-step policy)
 
-`config subchain` partitions the pipeline into logical groups, each with
-a policy (full design: `plan/protected-xover-pipeline.md`; working
-example: `configs/camilladsp_protected_2way.*`):
-
-| Option | Values | Description |
-|---|---|---|
-| `name` | string | Unique sub chain name. |
-| `policy` | `locked` / `child` / `free` | `locked`: content + position pinned. `child`: contents editable within constraints, position fixed. `free`: like `child` but the whole run may relocate (`list allowed_after` names locked anchors). |
-| `channels` | `0 1 …` | (editable) bus channels the slot owns. |
-| `allow` | uci filter types | (editable) allowed user filter types (`gain peak hs ls notch ap conv delay …`). |
-| `max_steps` | number | (editable, default 8) max user steps in the slot. |
-
-Rules (genconf refuses to render on violation): every step must be
-classified; sub chains are contiguous by step index; the **last** sub
-chain must be locked (nothing may follow the protection tail); locked
-conv filters must point under `/usr/share/camilladsp/coeffs/` (vendor
-read-only path); editable slots are declared by one bare step and
-render a transparent `user_slot_<name>` Gain-0 dB anchor that user
-effects are spliced after.
-
-Rendering + enforcement chain:
+The locked/free partition is declared per step via `option policy`
+(above) — there are no separate sub-chain sections, and the last
+pipeline entry must be locked. Full reference — policies, allow
+lists, slots/gaps, manifest generation and enforcement:
+[camilladsp-policy](camilladsp-policy.md).
 
 ```
 camilladsp-genconf (uci) ─► /tmp/camilladsp.yml        (plain config)
                           └► /tmp/camilladsp.policy    (partition spec)
 camilladsp /tmp/camilladsp.yml --make-manifest /tmp/camilladsp.policy \
-                          ─► /tmp/camilladsp.manifest  (hashes + anchors)
+                          ─► /tmp/camilladsp.manifest  (hashes + constraints)
 camilladsp /tmp/camilladsp.yml --manifest /tmp/camilladsp.manifest
 ```
 
@@ -255,22 +245,19 @@ With `--manifest` active, **every** config-apply path — startup (abort
 on mismatch: exit non-zero, procd respawns to silence), websocket
 `SetConfig`/`SetConfigJson`/`PatchConfig`/`SetConfigValue`/`Reload`/
 `SetConfigFilePath` (rejected, running config kept), `--check`, SIGHUP —
-validates the candidate against the manifest: locked sub chains and the
-devices section must hash identically; user steps are only
-accepted inside their slot, after the placeholder, from the allow list,
-on owned channels, within `max_steps`. The mixers region is locked as a
-**structure**: route **gains are free user state** — but only for mixers
-marked `user_gains '1'` (source-mix
-selection: 100% ch0 / 100% ch1 / (ch0+ch1)/2 is a pure gain preset) —
-while channels, dests, source routes and their flags stay pinned; mixers
-not marked are fully locked, gains included.
-Without `--manifest` the daemon
-behaves exactly like upstream (feature is opt-in). Runtime user edits
-are memory-only: a uci reload or reboot resets the slots to
-placeholders. `service camilladsp reload` regenerates yml, policy and
-manifest: if the manifest is unchanged the daemon just SIGHUPs (no
-interruption); if the vendor (locked) content changed, the manifest
-changed too and the service restarts to load it.
+validates the candidate against the manifest: locked steps and the
+devices section must hash identically; user filters are only accepted
+inside `free` steps, from the step's allow list, on owned channels,
+within `max_steps`. The mixers region is locked as a **structure**:
+route **gains are free user state** — but only for mixers marked
+`user_gains '1'` — while channels, dests, source routes and their flags
+stay pinned; mixers not marked are fully locked, gains included.
+Without `--manifest` the daemon behaves exactly like upstream (feature
+is opt-in). User edits are real uci filter sections — plain uci
+persistence, nothing memory-only. `service camilladsp reload`
+regenerates yml, policy and manifest: if the manifest is unchanged the
+daemon just SIGHUPs (no interruption); if the vendor (locked) content
+changed, the manifest changed too and the service restarts to load it.
 
 ### Example — 2-way speaker (stereo in → Mix → LR4 crossover @1.8 kHz)
 
@@ -283,7 +270,7 @@ flowchart LR
         PB0["playback ch 0<br/>(woofer out)"]
         PB1["playback ch 1<br/>(tweeter out)"]
     end
-    subgraph MIX["config mixer 'srcmix' — config step index 10 (Mixer)"]
+    subgraph MIX["config mixer 'srcmix' — pipeline_step 'src_sel' (Mixer)"]
         L["in ch 0 (L)"]
         R["in ch 1 (R)"]
         W["Σ dest 0<br/>woofer feed"]
@@ -300,8 +287,8 @@ flowchart LR
     R  -- "mixroute → dest 0, source 1, gain 0.5" --> W
     L  -- "mixroute → dest 1, source 0, gain 0.5" --> T
     R  -- "mixroute → dest 1, source 1, gain 0.5" --> T
-    W ==>|"config step index 20 (Filter, ch 0)"| F1 --> F2 ==> PB0
-    T ==>|"config step index 30 (Filter, ch 1)"| F3 ==> PB1
+    W ==>|"pipeline_step 'wf_tail' (Filter, ch 0)"| F1 --> F2 ==> PB0
+    T ==>|"pipeline_step 'tw_tail' (Filter, ch 1)"| F3 ==> PB1
 ```
 
 Rendered `/etc/config/camilladsp`:
@@ -322,8 +309,7 @@ config camilladsp 'main'
 	option capture 'Alsa:hw:CARD=Loopback,DEV=1'
 	option playback 'Alsa:hw:CARD=Loopback,DEV=0'
 
-config mixer
-	option name 'srcmix'
+config mixer 'srcmix'
 	option in '2'
 	option out '2'
 
@@ -351,40 +337,40 @@ config mixroute
 	option source '1'
 	option gain '0.5'
 
-config filter
-	option name 'woofer_level'
+config filter 'woofer_level'
 	option type 'gain'
 	option gain '-2.0'
 
-config filter
-	option name 'woofer_lp'
+config filter 'woofer_lp'
 	option type 'lrlp'          # Linkwitz-Riley lowpass
 	option f '1800'
 	option order '4'
 
-config filter
-	option name 'tweeter_hp'
+config filter 'tweeter_hp'
 	option type 'lrhp'          # Linkwitz-Riley highpass
 	option f '1800'
 	option order '4'
 
-config step
-	option index '10'
+config pipeline_step 'src_sel'
 	option type 'Mixer'
-	option name 'srcmix'
+	option mixer 'srcmix'
 
-config step
-	option index '20'
+config pipeline_step 'wf_tail'
 	option type 'Filter'
 	list channels '0'
 	list names 'woofer_level'
 	list names 'woofer_lp'
 
-config step
-	option index '30'
+config pipeline_step 'tw_tail'
 	option type 'Filter'
 	list channels '1'
 	list names 'tweeter_hp'
+
+# pipeline order
+config pipeline
+	list step 'src_sel'
+	list step 'wf_tail'
+	list step 'tw_tail'
 ```
 
 Apply changes: edit the file (or use `uci`), then `service camilladsp reload`.
@@ -499,34 +485,34 @@ option capture  'WavFile:/opt/user_data/test.wav'
 option playback 'File:/tmp/out.wav'
 option format   'F32_LE'
 
-config filter
-	option name 'gain_all'
+config filter 'gain_all'
 	option type 'gain'
 	option gain '-3.0'
-config filter
-	option name 'fir_1'
+config filter 'fir_1'
 	option type 'conv'
 	option filename '/opt/user_data/fir.txt'
-config filter
-	option name 'fir_2'
+config filter 'fir_2'
 	option type 'conv'
 	option filename '/opt/user_data/fir.txt'
-config step
-	option index '10'
+config pipeline_step 'pre'
 	option type 'Filter'
 	list channels '0'
 	list channels '1'
 	list names 'gain_all'
-config step
-	option index '20'
+config pipeline_step 'fir_ch0'
 	option type 'Filter'
 	list channels '0'
 	list names 'fir_1'
-config step
-	option index '30'
+config pipeline_step 'fir_ch1'
 	option type 'Filter'
 	list channels '1'
 	list names 'fir_2'
+
+# pipeline order
+config pipeline
+	list step 'pre'
+	list step 'fir_ch0'
+	list step 'fir_ch1'
 ```
 
 ALSA loopback soak (aloop→aloop):
