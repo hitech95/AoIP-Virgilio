@@ -57,7 +57,7 @@ const smoothLevel = computed(() => {
 <style scoped lang="scss">
 .viz-section {
   /* the stacked Oct buttons need less width than 220 */
-  --expandedWidth: 170px;
+  --expandedWidth: 190px;
 
   .gSmooth {
     fill: none;
