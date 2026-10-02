@@ -120,11 +120,14 @@ into `/tmp/statime.toml` by `/etc/init.d/statime` at every start):
   [UCI configuration](#uci-configuration).
 - `/etc/init.d/statime` (S60, before inferno): procd service, respawn,
   logs to logd.
-- **PTPv1 vs PTPv2**: the fork does not implement *acting as master* in
-  PTPv1. With only our own instances on the wire we use **PTPv2**
-  (master and slave both implemented). PTPv1 remains available via
-  `option protocol 'PTPv1'` for real Dante networks — Dante devices speak
-  PTPv1 (or dual-mode) and will provide the clock.
+- **PTPv1 vs PTPv2**: both are implemented, including *acting as
+  master* in PTPv1 (patch
+  `statime/0003-ptpv1-master.patch` — see `docs/patches.md`). With only
+  our own instances on the wire we use **PTPv2**. PTPv1 via
+  `option protocol 'PTPv1'` targets real Dante networks — Dante devices
+  speak PTPv1 (or dual-mode); our instances can slave to them *or*
+  provide the clock themselves (rig/hardware validation of the latter
+  still open, `plan/statime-ptpv1-master.md`).
 
 ### inferno (`package/inferno`)
 
@@ -257,7 +260,7 @@ Single-port setup — one `[[port]]` section is generated.
 | `interface` | `eth1` | `port.interface` | Port interface name. |
 | `network_mode` | `ipv4` | `port.network-mode` | `ipv4` / `ipv6` / `ethernet`. |
 | `hardware_clock` | `auto` | `port.hardware-clock` | `auto` / `required` / `none` / PHC index. virtio-net has no PHC → keep `auto`. |
-| `protocol` | `PTPv2` | `port.protocol-version` | `PTPv1` or `PTPv2`. The fork cannot *act as master* in PTPv1, so a PTPv1 network requires real Dante devices to provide the clock. |
+| `protocol` | `PTPv2` | `port.protocol-version` | `PTPv1` or `PTPv2`. PTPv1 includes master mode via `statime/0003-ptpv1-master.patch`; rig/hardware validation against real Dante gear still open. |
 | `virtual_system_clock` | `1` | `virtual-system-clock` | Virtual (non-wall) media clock — required for the usrvclock export. |
 | `virtual_system_clock_base` | `monotonic_raw` | `virtual-system-clock-base` | `TAI` / `monotonic` / `monotonic_raw` / `monotonic_coarse`. |
 | `usrvclock_export` | `1` | `usrvclock-export` | Export the clock on the usrvclock socket (what inferno consumes). |
@@ -407,14 +410,14 @@ and simply records network silence to the null playback.
   for boot/service testing only.
 - **QEMU socket link (rootless)**: two instances share an L2 segment via
   `-netdev socket,listen|connect=127.0.0.1:12345`; multicast works; this is
-  what the M4 test uses — see `docs/test-two-guests-ptp.md`.
+  what the M4 test uses — see `results/test-two-guests-ptp.md`.
 - **tap/bridge (needs root)**: for real Dante networks or the
   `dockerized_trx` container suite (`scripts/qemu-bridge.sh`, D15).
 
 ## Testing
 
 - `scripts/test-two-guests.sh` → described in
-  [docs/test-two-guests-ptp.md](test-two-guests-ptp.md).
+  [results/test-two-guests-ptp.md](test-two-guests-ptp.md).
 - Quick single-guest checks (slirp): `pidof statime`, `ls
   /tmp/ptp-usrvclock`, `logread | grep statime`, `arecord -L | grep -A1
   inferno`, `service inferno enable && service inferno start`.

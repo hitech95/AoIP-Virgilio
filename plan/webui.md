@@ -1,12 +1,16 @@
 # Plan — webui (nginx front + ucode gateway + vendored OUI frontend)
 
-Status: **COMPLETE — M1..M5 implemented and verified on the rig**
-(2026-09-15). Reports: `docs/test-webui-m1..m5.md`, user guide
-`docs/webui.md`. Deviations from this plan (all improvements):
-user filter steps are uci-native via a genconf extension instead of a
-preset daemon (M4); the login view is our own app instead of a second
-OUI fork (M5); camillagui under /diag deferred (decision in
-`docs/test-webui-m5.md`).
+> **Status 2026-10-02**: COMPLETE — M1..M5 implemented and verified on the rig
+> (2026-09-15). Reports: `results/test-webui-m1..m5.md`, user guide
+> `docs/webui.md`. Deviations from this plan (all improvements):
+> user filter steps are uci-native via a genconf extension instead of a
+> preset daemon (M4); the login view is our own app instead of a second
+> OUI fork (M5); camillagui under /diag deferred (decision in
+> `results/test-webui-m5.md`). Post-plan growth: the OUI patch stack grew
+> beyond the single login patch described below (now 0001–0004: home
+>  route, prefs/footer, english-only locale) — inventory in
+>  `docs/patches.md`; "the only forked OUI file" statements below reflect
+>  the plan-time scope.
 
 Goal: a minimal, modern web UI for the speaker: linux-credentials login,
 camilladsp websocket reachable **only after auth**, basic uci administration,
@@ -366,7 +370,7 @@ The manifest (`--make-manifest`, e.g.
   real shadow password → sid; `alive` keeps it; `/_auth` 204 with cookie /
   403 without; `websocat` through `--fwd` to `/ws` succeeds only with
   cookie; wrong password → 401 + measurable sleep. DoD: scripted in
-  `docs/test-webui-m1.md`-style checklist, green twice.
+  `results/test-webui-m1.md`-style checklist, green twice.
 - **M2 — status**: on the two-guest bridge rig, `/status` tabs show real
   ptp-monitor lock/offset, camilladsp state + volume slider, inferno
   subscription table; 1 request/tick verified (nginx access log).
@@ -389,7 +393,7 @@ The manifest (`--make-manifest`, e.g.
 
 ```
 br-external/package/webui/{Config.in,webui.mk,webuid.uc,rpc/*.uc,
-    src/webui-app-*/*,patches/0001-login-password-post.patch,
+    src/webui-app-*/*,patches/0001-oui-login-plaintext-post.patch,
     rootfs-overlay/etc/{init.d/webui,nginx/conf.d/webui.conf,config/webui,
     uci-defaults/50-webui}}
 br-external/package/ucode/ucode.mk          (UCI_SUPPORT=ON)
@@ -397,7 +401,7 @@ br-external/board/rk3506qemu/busybox-fragment  (CRYPTPW)
 configs/*_defconfig                          (nginx, webui, host-nodejs)
 deps/oui                                     (submodule, pinned)
 plan/plan.md                                 (D18 + next-up)
-docs/webui.md, docs/test-webui-*.md
+docs/webui.md, results/test-webui-*.md
 ```
 
 Estimated effort: M1–M3 ≈ 2 weeks, M4 ≈ 1–2 weeks (filters page is the

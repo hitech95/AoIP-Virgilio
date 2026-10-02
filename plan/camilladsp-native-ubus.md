@@ -1,7 +1,7 @@
 # Plan — camilladsp native ubus status object
 
-> **IMPLEMENTED** (patch `0004-add-ubus-status-object.patch`, feature
-> `ubus`). Deviations discovered during implementation:
+> **Status 2026-10-02**: implemented — patch `0004-add-ubus-status-object.patch`,
+> feature `ubus`. Deviations discovered during implementation:
 > - **Socket discovery** instead of a fixed default: buildroot's ubusd
 >   listens on `/var/run/ubus/ubus.sock`, OpenWrt's on
 >   `/var/run/ubus.sock` — `--ubus-socket` (no default) probes
@@ -134,8 +134,9 @@ Returns the new state so callers don't need a follow-up `status`.
 ## 3. Implementation steps
 
 Dev workflow: edit the `deps/camilladsp` submodule working tree (which
-already carries patches 0001–0003 uncommitted), then export the delta
-as a new patch file — same as the existing patches.
+carries patches 0001–0003 uncommitted; the shipped stack later grew to
+0001–0005, see `docs/patches.md`), then export the delta as a new patch
+file — same as the existing patches.
 
 ### 3.1 Cargo.toml
 
@@ -269,4 +270,4 @@ Notes:
 - **Upstreamability**: patch carries `cfg(target_os="linux")` + feature
   gate + default-off, so it is offerable to HEnquist/camilladsp later
   (general interest for OpenWrt users); if refused, it stays a
-  downstream patch like 0001–0003.
+  downstream patch like the rest of the stack (0001–0005).
