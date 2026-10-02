@@ -66,8 +66,11 @@ define WEBUI_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0644 $(WEBUI_PKGDIR)/files/zoneinfo.json \
 		$(TARGET_DIR)/usr/share/webui/zoneinfo.json
 
-	# frontend (built in WEBUI_BUILD_CMDS): shell + views + menus
+	# frontend (built in WEBUI_BUILD_CMDS): shell + views + menus.
+	# Replace (not merge): hashed Vite assets must not accumulate stale
+	# bundles across rebuilds.
 	$(INSTALL) -d -m 0755 $(TARGET_DIR)/usr/share/webui
+	rm -rf $(TARGET_DIR)/usr/share/webui/ui $(TARGET_DIR)/usr/share/webui/menu.d
 	cp -a $(@D)/frontend-staging/ui $(TARGET_DIR)/usr/share/webui/
 	cp -a $(@D)/frontend-staging/menu.d $(TARGET_DIR)/usr/share/webui/
 

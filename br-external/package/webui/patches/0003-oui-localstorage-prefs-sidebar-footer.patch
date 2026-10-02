@@ -78,17 +78,25 @@ index 0a1479c..b8e7f6d 100644
    color: var(--el-color-primary);
    cursor: pointer;
 diff --git a/oui-ui-core/htdoc/src/oui/index.js b/oui-ui-core/htdoc/src/oui/index.js
-index 3faf903..f5a4694 100644
+index 3faf903..25345c0 100644
 --- a/oui-ui-core/htdoc/src/oui/index.js
 +++ b/oui-ui-core/htdoc/src/oui/index.js
-@@ -10,7 +10,25 @@ import axios from 'axios'
+@@ -3,14 +3,54 @@
+  * Author: Jianhui Zhao <zhaojh329@gmail.com>
+  */
+ 
+-import { computed, reactive } from 'vue'
+-import { useDark } from '@vueuse/core'
++import { computed, reactive, ref, watchEffect } from 'vue'
++import { usePreferredDark } from '@vueuse/core'
+ import * as Vue from 'vue'
+ import axios from 'axios'
  import md5 from 'js-md5'
  import i18n from '../i18n'
  
 -const isDark = useDark()
 +const THEME_STORAGE_KEY = 'oui.theme'
 +const LOCALE_STORAGE_KEY = 'oui.locale'
-+const isDark = useDark({ storageKey: THEME_STORAGE_KEY })
 +
 +function readPreference(key) {
 +  try {
@@ -105,21 +113,46 @@ index 3faf903..f5a4694 100644
 +    // Browser privacy settings can deny storage; keep the session behavior.
 +  }
 +}
++
++/* Theme persistence, deterministic on purpose: vueuse useDark is NOT used
++ * because its 'auto' storage mode races with explicit choices here (it can
++ * write 'auto' over a saved 'light'/'dark' and resolve the wrong mode after
++ * a reload, resetting the user's selection). Precedence instead:
++ *   1. this browser's explicit choice, saved in localStorage
++ *   2. the device default delivered by the get_theme RPC (UCI)
++ *   3. the OS color-scheme preference */
++const prefersDark = usePreferredDark()
++const savedTheme = ref(readPreference(THEME_STORAGE_KEY))
++const deviceTheme = ref(null)
++
++const isDark = computed(() => {
++  if (savedTheme.value === 'dark' || savedTheme.value === 'light')
++    return savedTheme.value === 'dark'
++  if (deviceTheme.value === 'dark' || deviceTheme.value === 'light')
++    return deviceTheme.value === 'dark'
++  return prefersDark.value
++})
++
++watchEffect(() => {
++  document.documentElement.classList.toggle('dark', isDark.value)
++})
  
  function mergeLocaleMessage(key, locales) {
    for (const locale in locales) {
-@@ -43,9 +61,7 @@ class Oui {
+@@ -42,10 +82,8 @@ class Oui {
+         return isDark.value
        },
        set: dark => {
-         isDark.value = dark
+-        isDark.value = dark
 -        const theme = dark ? 'dark' : 'light'
 -        if (this.inited)
 -          this.call('uci', 'set', { config: 'oui', section: 'global', values: { theme }})
-+        writePreference(THEME_STORAGE_KEY, dark ? 'dark' : 'light')
++        savedTheme.value = dark ? 'dark' : 'light'
++        writePreference(THEME_STORAGE_KEY, savedTheme.value)
        }
      })
  
-@@ -59,7 +75,9 @@ class Oui {
+@@ -59,7 +97,9 @@ class Oui {
        p.push(this.rpc('alive', { sid }))
  
      Promise.all(p).then(results => {
@@ -130,17 +163,18 @@ index 3faf903..f5a4694 100644
        if (!locale)
          locale = 'auto'
  
-@@ -70,7 +88,8 @@ class Oui {
+@@ -70,7 +110,9 @@ class Oui {
        else
          i18n.global.locale = locale
  
 -      this.state.isDark = results[1].theme === 'dark'
-+      const theme = readPreference(THEME_STORAGE_KEY) || results[1].theme
-+      this.state.isDark = theme === 'dark'
++      // device default for browsers that never made an explicit choice; a
++      // saved browser choice wins (see the isDark computed above)
++      deviceTheme.value = results[1]?.theme ?? null
  
        if (sid) {
          const alive = results[2].alive
-@@ -232,7 +251,7 @@ class Oui {
+@@ -232,7 +274,7 @@ class Oui {
      if (locale !== 'auto' && !i18n.global.availableLocales.includes(locale))
        return
  

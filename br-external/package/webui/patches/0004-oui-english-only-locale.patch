@@ -1,0 +1,143 @@
+diff --git a/applications/oui-app-layout/htdoc/index.vue b/applications/oui-app-layout/htdoc/index.vue
+index b8e7f6d..6fa35e4 100644
+--- a/applications/oui-app-layout/htdoc/index.vue
++++ b/applications/oui-app-layout/htdoc/index.vue
+@@ -103,10 +103,7 @@ export default {
+   computed: {
+     localeOptions() {
+       const titles = {
+-        'en': 'English',
+-        'ja-JP': '日本語',
+-        'zh-CN': '简体中文',
+-        'zh-TW': '繁體中文'
++        'en': 'English'
+       }
+ 
+       const options = this.$i18n.availableLocales.map(locale => {
+diff --git a/applications/oui-app-layout/htdoc/locale.json b/applications/oui-app-layout/htdoc/locale.json
+index e2aed87..0ebb255 100644
+--- a/applications/oui-app-layout/htdoc/locale.json
++++ b/applications/oui-app-layout/htdoc/locale.json
+@@ -8,35 +8,5 @@
+         "RebootConfirm": "Are you sure you want to restart the device?",
+         "OK": "OK",
+         "Rebooting": "Rebooting"
+-    },
+-    "zh-CN": {
+-        "Auto": "自动",
+-        "Light theme": "浅色主题",
+-        "Dark theme": "深色主题",
+-        "Logout": "退出",
+-        "Reboot": "重启",
+-        "RebootConfirm": "你确定要重启设备吗？",
+-        "OK": "确定",
+-        "Rebooting": "正在重启"
+-    },
+-    "zh-TW": {
+-        "Auto": "自動",
+-        "Light theme": "淺色主題",
+-        "Dark theme": "深色主題",
+-        "Logout": "退出",
+-        "Reboot": "重啟",
+-        "RebootConfirm": "你確定要重啓設備嗎？",
+-        "OK": "確定",
+-        "Rebooting": "正在重啓"
+-    },
+-    "ja-JP": {
+-        "Auto": "自動",
+-        "Light theme": "明るい色のテーマ",
+-        "Dark theme": "暗いテーマ",
+-        "Logout": "ログアウト",
+-        "Reboot": "リブート",
+-        "RebootConfirm": "あなたは、デバイスを再起動したいですか？",
+-        "OK": "を選択して、",
+-        "Rebooting": "再起動中"
+     }
+ }
+diff --git a/oui-ui-core/files/menu.json b/oui-ui-core/files/menu.json
+index ca7a1e3..e69d02e 100644
+--- a/oui-ui-core/files/menu.json
++++ b/oui-ui-core/files/menu.json
+@@ -4,9 +4,7 @@
+         "icon": "md-stats",
+         "index": 10,
+         "locales": {
+-            "en": "Status",
+-            "zh-CN": "状态",
+-            "zh-TW": "狀態"
++            "en": "Status"
+         },
+         "svg":{"-xmlns":"http://www.w3.org/2000/svg","-xmlns:xlink":"http://www.w3.org/1999/xlink","-viewBox":"0 0 24 24","path":{"-d":"M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z","-fill":"currentColor"}}
+     },
+@@ -15,9 +13,7 @@
+         "icon": "md-settings",
+         "index": 20,
+         "locales": {
+-            "en": "System",
+-            "zh-CN": "系统",
+-            "zh-TW": "系統"
++            "en": "System"
+         },
+         "svg":{"-xmlns":"http://www.w3.org/2000/svg","-xmlns:xlink":"http://www.w3.org/1999/xlink","-viewBox":"0 0 24 24","g":{"-fill":"none","path":{"-d":"M4.946 5h14.108C20.678 5 22 6.304 22 7.92v8.16c0 1.616-1.322 2.92-2.946 2.92H4.946C3.322 19 2 17.696 2 16.08V7.92C2 6.304 3.322 5 4.946 5zm0 2A.933.933 0 0 0 4 7.92v8.16c0 .505.42.92.946.92h14.108a.933.933 0 0 0 .946-.92V7.92c0-.505-.42-.92-.946-.92H4.946z","-fill":"currentColor"}}}
+     },
+@@ -26,9 +22,7 @@
+         "icon": "md-git-network",
+         "index": 30,
+         "locales": {
+-            "en": "Network",
+-            "zh-CN": "网络",
+-            "zh-TW": "網絡"
++            "en": "Network"
+         },
+         "svg":{"-xmlns":"http://www.w3.org/2000/svg","-xmlns:xlink":"http://www.w3.org/1999/xlink","-viewBox":"0 0 640 512","path":{"-d":"M640 264v-16c0-8.84-7.16-16-16-16H344v-40h72c17.67 0 32-14.33 32-32V32c0-17.67-14.33-32-32-32H224c-17.67 0-32 14.33-32 32v128c0 17.67 14.33 32 32 32h72v40H16c-8.84 0-16 7.16-16 16v16c0 8.84 7.16 16 16 16h104v40H64c-17.67 0-32 14.33-32 32v128c0 17.67 14.33 32 32 32h160c17.67 0 32-14.33 32-32V352c0-17.67-14.33-32-32-32h-56v-40h304v40h-56c-17.67 0-32 14.33-32 32v128c0 17.67 14.33 32 32 32h160c17.67 0 32-14.33 32-32V352c0-17.67-14.33-32-32-32h-56v-40h104c8.84 0 16-7.16 16-16zM256 128V64h128v64H256zm-64 320H96v-64h96v64zm352 0h-96v-64h96v64z","-fill":"currentColor"}}
+     }
+diff --git a/oui-ui-core/htdoc/src/element-plus/index.js b/oui-ui-core/htdoc/src/element-plus/index.js
+index 41f5e1d..65aa004 100644
+--- a/oui-ui-core/htdoc/src/element-plus/index.js
++++ b/oui-ui-core/htdoc/src/element-plus/index.js
+@@ -2,19 +2,13 @@ import ElementPlus from 'element-plus'
+ import 'element-plus/dist/index.css'
+ import 'element-plus/theme-chalk/dark/css-vars.css'
+ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+-import zhCN from 'element-plus/es/locale/lang/zh-cn'
+-import zhTW from 'element-plus/es/locale/lang/zh-tw'
+-import jaJP from 'element-plus/es/locale/lang/ja'
+ import en from 'element-plus/es/locale/lang/en'
+ 
+ import { computed } from 'vue'
+ import oui from '../oui'
+ 
+ const locales = {
+-  'en': en,
+-  'zh-CN': zhCN,
+-  'zh-TW': zhTW,
+-  'ja-JP': jaJP
++  'en': en
+ }
+ 
+ function globalLocale() {
+@@ -24,7 +18,7 @@ function globalLocale() {
+     return oui.state.locale
+ }
+ 
+-export const locale = computed(() => locales[globalLocale()])
++export const locale = computed(() => locales[globalLocale()] ?? en)
+ 
+ export default {
+   install(app) {
+diff --git a/oui-ui-core/htdoc/src/i18n/index.js b/oui-ui-core/htdoc/src/i18n/index.js
+index c2d86cd..f8c8344 100644
+--- a/oui-ui-core/htdoc/src/i18n/index.js
++++ b/oui-ui-core/htdoc/src/i18n/index.js
+@@ -11,10 +11,7 @@ const i18n = createI18n({
+   silentTranslationWarn: true,
+   silentFallbackWarn: true,
+   messages: {
+-    'en': {},
+-    'zh-CN': {},
+-    'zh-TW': {},
+-    'ja-JP': {}
++    'en': {}
+   }
+ })
+ 

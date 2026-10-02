@@ -70,6 +70,7 @@ export HOME="${HOME:-$(mktemp -d)}"
 # --- shell ----------------------------------------------------------------
 install_app "${WORK}/oui-ui-core/htdoc"
 build_app "${WORK}/oui-ui-core/htdoc" ui-core
+rm -rf "${OUT}/ui"
 mkdir -p "${OUT}/ui"
 cp -a "${WORK}/oui-ui-core/htdoc/dist/." "${OUT}/ui/"
 
@@ -82,13 +83,16 @@ if [ -f "${SKIN}" ]; then
 fi
 
 # --- shell menu (top-level entries with icons) ----------------------------
+# from ${WORK}: the patches (e.g. english-only locales) must reach the menu
+rm -rf "${OUT}/menu.d"
 mkdir -p "${OUT}/menu.d"
-cp "${OUI}/oui-ui-core/files/menu.json" "${OUT}/menu.d/00-core.json"
+cp "${WORK}/oui-ui-core/files/menu.json" "${OUT}/menu.d/00-core.json"
 
 # --- apps: UMD bundles -> ui/views/, menus -> menu.d/ ----------------------
 # A module may register MULTIPLE pages: every htdoc/pages/<x>.vue becomes
 # its own view bundle named "<app>-<x>" (Vite empties dist per build, so
 # harvest it after each page). No pages/ dir -> single index.vue view.
+rm -rf "${OUT}/ui/views"
 mkdir -p "${OUT}/ui/views"
 for appdir in "${WORK}/applications"/*; do
 	[ -d "${appdir}/htdoc" ] || continue
