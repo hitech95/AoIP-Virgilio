@@ -7,46 +7,61 @@
     "sha256": "987b9724af1436454f1335d886921001f0e6a39492d9c396d9e54f3c00ee0002",
     "user_gains": [
       "srcmix"
-    ]
+    ],
+    "allow": {
+      "srcmix": [
+        "gain"
+      ]
+    }
   },
   "subchains": [
     {
-      "policy": "child",
+      "policy": "free",
       "name": "user_in0",
-      "slot": 0,
+      "gaps": [
+        0
+      ],
       "channels": [
         0
       ],
       "allow": [
         "Gain",
+        "Volume",
         "Biquad",
         "Biquad",
         "Biquad",
         "Biquad",
         "Biquad",
-        "Conv",
-        "Delay"
+        "Biquad",
+        "Biquad",
+        "Biquad",
+        "Conv"
       ],
-      "max_steps": 8
+      "max_steps": 9
     },
     {
-      "policy": "child",
+      "policy": "free",
       "name": "user_in1",
-      "slot": 0,
+      "gaps": [
+        0
+      ],
       "channels": [
         1
       ],
       "allow": [
         "Gain",
+        "Volume",
         "Biquad",
         "Biquad",
         "Biquad",
         "Biquad",
         "Biquad",
-        "Conv",
-        "Delay"
+        "Biquad",
+        "Biquad",
+        "Biquad",
+        "Conv"
       ],
-      "max_steps": 8
+      "max_steps": 9
     },
     {
       "policy": "locked",
