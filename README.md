@@ -27,6 +27,29 @@ both slaved to a native host-side PTP grand master. See `plan/plan.md`
 (§10 decision log) for the full trail, including the fixed camilladsp
 capture busy-poll (D16/D17).
 
+## Screenshots
+
+Running on hardware: a **source** (RPi Zero 2 W, `pi2w-src` — MPD →
+camilladsp → inferno TX) and a **sink** (RPi 2 B, `virgilio` — inferno RX →
+camilladsp → I2S). The built-in webui (nginx + ucode gateway + vendored
+OUI frontend, see `docs/webui.md`):
+
+| source — status | source — DSP live EQ + spectrum |
+|---|---|
+| ![source overview](docs/img/webui-src-overview.png) | ![source EQ + spectrum](docs/img/webui-src-eq-spectrum.png) |
+
+| sink — status | sink — Dante RX meters + source select |
+|---|---|
+| ![sink overview](docs/img/webui-sink-overview.png) | ![sink volume](docs/img/webui-sink-volume.png) |
+
+| source — DSP configuration | sink — PTP slave status |
+|---|---|
+| ![source dsp config](docs/img/webui-src-dsp-config.png) | ![sink ptp](docs/img/webui-sink-ptp.png) |
+
+The DSP > Live page edits the pipeline in real time (EQ bands on the
+plot, RTA spectrum through the DSP); *Save* persists the bands to uci
+(constrained by the locked-config policy, `docs/camilladsp-policy.md`).
+
 ## Quickstart
 
 ```sh
@@ -107,6 +130,22 @@ each sync. The helper defaults can be overridden with `EQ_QEMU_CONSOLE_PORT`,
 | `docs/webui.md` | webui **user guide** (login, TLS, pages) |
 | `docs/dependency-map.md` | package dependency relations |
 | `docs/crossover-to-camilladsp.md` | speaker DSP crossover background |
+
+## Credits
+
+This firmware stands on the shoulders of:
+
+| project | role here |
+|---|---|
+| [OpenWrt](https://openwrt.org/) | the system stack: procd (PID 1 + hotplug), ubus, uci, netifd, ubox/logd, ucode — carried patchless where possible (`br-external/package/`) |
+| [Buildroot](https://buildroot.org/) | cross-build framework (git submodule, 2025.02.x) |
+| [CamillaDSP](https://github.com/HEnquist/camilladsp) | the DSP engine (crossovers, FIR, limiters) — carried as a patch stack (manifest policy, ubus, spectrum) |
+| [inferno](https://github.com/teodly/inferno) | the unofficial Dante/AES67 AoIP implementation (TX/RX, ARC subscriptions) |
+| [statime](https://github.com/teodly/statime) (fork of [pendulum-project/statime](https://github.com/pendulum-project/statime)) | PTP daemon + usrvclock media-clock export |
+| [OUI](https://github.com/zhaojh329/oui) | the webui frontend shell (vendored + patched: shadow login, english-only, theme persistence); Vue + Element Plus underneath |
+| [CamillaEQ](https://github.com/AlfredJKwack/camillaEQ) | biquad math reference for the live EQ editor (`filterResponse`, fractional-octave smoothing) |
+| [ubus-zero](https://github.com/pawelchcki/ubus-zero) | Rust ubus client used by the camilladsp ubus integration |
+| [MPD](https://www.musicpd.org/), [nginx](https://nginx.org/), [ALSA](https://www.alsa-project.org/), [busybox](https://busybox.net/) | audio source, web front, sound + core userland |
 
 ## License
 
