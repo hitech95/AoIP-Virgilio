@@ -11,6 +11,12 @@ export interface AnalyzerState {
   ltaDb: number[] | null
   peakDb: number[] | null
   peakLastHitMs: number[] | null
+  /** peak envelopes of the averaged series (the RTA crest can ride the
+   * SELECTED series, not only the raw frame) */
+  peakStaDb: number[] | null
+  peakLtaDb: number[] | null
+  peakStaLastHitMs: number[] | null
+  peakLtaLastHitMs: number[] | null
   lastUpdateMs: number
   initialized: boolean
 }
@@ -32,6 +38,7 @@ const DEFAULT_CONFIG: AnalyzerConfig = {
 export class SpectrumAnalyzer {
   private state: AnalyzerState
   private config: AnalyzerConfig
+  private latestPeakFrame: number[] = []
 
   constructor(config: Partial<AnalyzerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config }
@@ -41,6 +48,10 @@ export class SpectrumAnalyzer {
       ltaDb: null,
       peakDb: null,
       peakLastHitMs: null,
+      peakStaDb: null,
+      peakLtaDb: null,
+      peakStaLastHitMs: null,
+      peakLtaLastHitMs: null,
       lastUpdateMs: 0,
       initialized: false,
     }
@@ -58,13 +69,20 @@ export class SpectrumAnalyzer {
   update(liveDbFrame: number[], nowMs: number, peakFrame?: number[]): void {
     const numBins = liveDbFrame.length
     const peaks = peakFrame ?? liveDbFrame
+    this.latestPeakFrame = [...peaks]
 
-    if (!this.state.initialized) {
+    // Bin indices change meaning when precision changes. Reseed averages
+    // and every peak/timestamp buffer together instead of mixing grids.
+    if (!this.state.initialized || this.state.liveDb.length !== numBins) {
       this.state.liveDb = [...liveDbFrame]
       this.state.staDb = [...liveDbFrame]
       this.state.ltaDb = [...liveDbFrame]
       this.state.peakDb = [...peaks]
+      this.state.peakStaDb = [...liveDbFrame]
+      this.state.peakLtaDb = [...liveDbFrame]
       this.state.peakLastHitMs = Array(numBins).fill(nowMs)
+      this.state.peakStaLastHitMs = Array(numBins).fill(nowMs)
+      this.state.peakLtaLastHitMs = Array(numBins).fill(nowMs)
       this.state.lastUpdateMs = nowMs
       this.state.initialized = true
       return
@@ -90,37 +108,73 @@ export class SpectrumAnalyzer {
     }
 
     // Update Peak Hold - per-bin max with hold and decay, fed by the raw
-    // (unsmoothed) frame so real transients register
-    for (let i = 0; i < numBins; i++) {
-      const currentPeak = this.state.peakDb![i]
-      const liveVal = peaks[i]
-
-      if (liveVal >= currentPeak) {
-        this.state.peakDb![i] = liveVal
-        this.state.peakLastHitMs![i] = nowMs
-      } else {
-        const timeSinceHit = nowMs - this.state.peakLastHitMs![i]
-
-        if (timeSinceHit > this.config.holdTimeMs) {
-          const decayDb = this.config.decayRateDbPerSec * dtSec
-          const decayedPeak = currentPeak - decayDb
-          this.state.peakDb![i] = Math.max(liveVal, decayedPeak)
-        }
-      }
-    }
+    // (unsmoothed) frame so real transients register; the averaged series
+    // keep their own envelopes (the crest rides the SELECTED series)
+    this.applyPeak(this.state.peakDb!, this.state.peakLastHitMs!, peaks, nowMs, dtSec)
+    this.applyPeak(this.state.peakStaDb!, this.state.peakStaLastHitMs!, this.state.staDb!, nowMs, dtSec)
+    this.applyPeak(this.state.peakLtaDb!, this.state.peakLtaLastHitMs!, this.state.ltaDb!, nowMs, dtSec)
 
     this.state.lastUpdateMs = nowMs
   }
 
   /**
-   * Reset averages to current live frame
+   * Per-bin peak hold with hold-time and decay over one series.
+   */
+  private applyPeak(
+    peakDb: number[],
+    lastHitMs: number[],
+    values: number[],
+    nowMs: number,
+    dtSec: number
+  ): void {
+    for (let i = 0; i < values.length; i++) {
+      const currentPeak = peakDb[i]
+      const v = values[i]
+
+      if (v >= currentPeak) {
+        peakDb[i] = v
+        lastHitMs[i] = nowMs
+      } else {
+        const timeSinceHit = nowMs - lastHitMs[i]
+        if (timeSinceHit > this.config.holdTimeMs) {
+          const decayDb = this.config.decayRateDbPerSec * dtSec
+          peakDb[i] = Math.max(v, currentPeak - decayDb)
+        }
+      }
+    }
+  }
+
+  /**
+   * Reset averages and every peak envelope to the current frame.
    */
   resetAverages(): void {
     if (this.state.initialized) {
       this.state.staDb = [...this.state.liveDb]
       this.state.ltaDb = [...this.state.liveDb]
-      // Note: Peak hold is NOT reset (per spec)
+      this.state.peakDb = [...this.latestPeakFrame]
+      this.state.peakStaDb = [...this.state.liveDb]
+      this.state.peakLtaDb = [...this.state.liveDb]
+      const hits = Array(this.state.liveDb.length).fill(this.state.lastUpdateMs)
+      this.state.peakLastHitMs = [...hits]
+      this.state.peakStaLastHitMs = [...hits]
+      this.state.peakLtaLastHitMs = [...hits]
     }
+  }
+
+  /** Invalidate history when the source or frequency grid changes. */
+  reset(): void {
+    this.state.initialized = false
+    this.latestPeakFrame = []
+    this.state.liveDb = []
+    this.state.staDb = null
+    this.state.ltaDb = null
+    this.state.peakDb = null
+    this.state.peakStaDb = null
+    this.state.peakLtaDb = null
+    this.state.peakLastHitMs = null
+    this.state.peakStaLastHitMs = null
+    this.state.peakLtaLastHitMs = null
+    this.state.lastUpdateMs = 0
   }
 
   getState(): Readonly<AnalyzerState> {

@@ -138,6 +138,9 @@ const lanes = new Map<string, Promise<unknown>>()
 /**
  * Send a command and wait for the matching response. Same-name requests
  * are serialized per command; different commands may interleave.
+ *
+ * Use object form, including {"Cmd": null} for valueless commands. The
+ * daemon also accepts correctly JSON-quoted strings for those commands.
  */
 export function request<T = any>(command: string, value?: unknown): Promise<T> {
   const run = () =>
@@ -152,7 +155,7 @@ export function request<T = any>(command: string, value?: unknown): Promise<T> {
         reject(new Error(`${command} timed out`))
       }, 5000)
       pending.set(seq, { command, resolve, reject, timer })
-      ws!.send(JSON.stringify(value === undefined ? command : { [command]: value }))
+      ws!.send(JSON.stringify({ [command]: value ?? null }))
     })
 
   const prev = lanes.get(command) ?? Promise.resolve()
@@ -188,10 +191,6 @@ export async function uploadConfig(next: CamillaDSPConfig): Promise<boolean> {
  */
 export async function setSpectrumEnabled(on: boolean): Promise<void> {
   await request('SetSpectrumEnabled', on)
-  if (on) {
-    await request('SetSpectrumInterval', 100)
-    await setSpectrumTap(spectrumTap)
-  }
 }
 
 /**
@@ -204,6 +203,60 @@ export async function setSpectrumTap(tap: SpectrumTap): Promise<void> {
     await request('SetSpectrumChannel', [tap, 0])
   } catch (e: any) {
     console.warn('Unable to select FFT tap:', e?.value ?? e)
+  }
+}
+
+/**
+ * Number of log-spaced output buckets the analyzer returns (8..256).
+ */
+export async function setSpectrumBins(n: number): Promise<void> {
+  try {
+    await request('SetSpectrumBins', n)
+  } catch (e: any) {
+    console.warn('Unable to set spectrum bins:', e?.value ?? e)
+  }
+}
+
+/**
+ * FFT size (1024..8192). Derived from the sample rate: smallest power of
+ * two with sr/fft <= 15 Hz base target (44.1/48k -> 4096, 96k -> 8192) so
+ * the first bin covers the 10 Hz start of the display axis on all FS.
+ */
+export async function setSpectrumFftSize(n: number): Promise<void> {
+  try {
+    await request('SetSpectrumFftSize', n)
+  } catch (e: any) {
+    console.warn('Unable to set spectrum FFT size:', e?.value ?? e)
+  }
+}
+
+export function fftForSampleRate(sr: number): number {
+  let fft = 1024
+  while (fft < 8192 && sr / fft > 15) fft *= 2
+  return fft
+}
+
+/**
+ * Analyzer update interval in ms (50..1000; 50 = 20 Hz).
+ */
+export async function setSpectrumInterval(ms: number): Promise<void> {
+  try {
+    await request('SetSpectrumInterval', ms)
+  } catch (e: any) {
+    console.warn('Unable to set spectrum interval:', e?.value ?? e)
+  }
+}
+
+/**
+ * Daemon-side EMA smoothing factor (0..0.99). RTA mode uses a lower factor
+ * (0.45): at the default 0.7 the transients are crushed and the bars read
+ * as a slow average.
+ */
+export async function setSpectrumSmoothing(factor: number): Promise<void> {
+  try {
+    await request('SetSpectrumSmoothing', factor)
+  } catch (e: any) {
+    console.warn('Unable to set spectrum smoothing:', e?.value ?? e)
   }
 }
 
