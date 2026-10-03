@@ -57,7 +57,11 @@ On the **host** (`modulus`), as a native x86 process bound to `br-dante`:
   **enslaved to br-dante**: this merges the rig LAN with the home LAN
   192.168.1.0/24 at L2, so the LAN-attached RPi2 is L2-adjacent to the guest.
 - **bridge multicast_snooping = 0** (critical, see gotchas).
-- Host management/internet via WiFi `wlp1s0` (192.168.1.231).
+- Host management/internet via WiFi `wlp1s0` (192.168.1.231): the
+  **host's** home-LAN attachment is wireless — the rig's Dante/PTP path
+  does not traverse it (guest → tap → br-dante → dongle → router →
+  RPi2, all wired). This is why unmanaging the dongle can take the WiFi
+  routes down with it (gotcha 5).
 - Guest runs in tmux session `srcguest`, telnet console on `127.0.0.1:5556`.
 
 **Source guest** (`rk3506-source`, image `output/rk3506qemu`)
