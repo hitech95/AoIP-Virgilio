@@ -1,9 +1,10 @@
-# Bridge rig with a real-hardware sink (RPi2 over WiFi)
+# Bridge rig with a real-hardware sink (RPi2 on the home LAN)
 
 Test rig used on 2026-09-28: a QEMU **source guest** streaming MPD web radio
-as Dante flows to a **real RPi2** ("virgilio") connected over WiFi, for
-validating the protected DSP pipeline on real silicon. Timing quality is
-WiFi-bound (PTP over the AP) — fine for DSP-functionality tests, not for
+as Dante flows to a **real RPi2** ("virgilio") wired to the home LAN (the
+Pi 2 B has no WiFi hardware), for validating the protected DSP pipeline on
+real silicon. Timing quality is bound by the home-network path (host dongle
+→ router → RPi2) — fine for DSP-functionality tests, not for
 glitch/latency measurements (use the all-QEMU rig in `bridge-rig.md` for
 those).
 
@@ -23,7 +24,7 @@ flowchart LR
     end
 
     RTR["home router/AP 192.168.1.0/24"]
-    subgraph RPI["RPi2 virgilio (WiFi, 192.168.1.234)"]
+    subgraph RPI["RPi2 virgilio (home LAN, 192.168.1.234)"]
         RX["inferno RX"] --> CS2["camilladsp<br/>2-way xover (tunable)"] --> JK["analog jack"]
     end
 
@@ -54,7 +55,7 @@ On the **host** (`modulus`), as a native x86 process bound to `br-dante`:
   (`scripts/qemu-bridge.sh up`).
 - USB-Ethernet dongle `enx0c37963a7764` (RTL8153), NetworkManager-unmanaged,
   **enslaved to br-dante**: this merges the rig LAN with the home LAN
-  192.168.1.0/24 at L2, so the WiFi-attached RPi2 is L2-adjacent to the guest.
+  192.168.1.0/24 at L2, so the LAN-attached RPi2 is L2-adjacent to the guest.
 - **bridge multicast_snooping = 0** (critical, see gotchas).
 - Host management/internet via WiFi `wlp1s0` (192.168.1.231).
 - Guest runs in tmux session `srcguest`, telnet console on `127.0.0.1:5556`.
@@ -72,7 +73,7 @@ On the **host** (`modulus`), as a native x86 process bound to `br-dante`:
   QEMU image), playing `https://ice1.somafm.com/groovesalad-128-mp3`,
   `mpc repeat on`.
 
-**RPi2 sink** (`virgilio`, 192.168.1.234 via DHCP on WiFi)
+**RPi2 sink** (`virgilio`, 192.168.1.234 via DHCP on the LAN)
 - Single-NIC dual role: `lan` (dhcp) + `aoip` (proto none) both on eth0.
 - On-link route (NOT persistent, re-add after every reboot):
   `ip route add 198.18.100.0/24 dev eth0`
