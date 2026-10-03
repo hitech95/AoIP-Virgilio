@@ -1,6 +1,6 @@
 # Plan — RK3506 test firmware (ARM Cortex-A7 + NEON) on QEMU
 
-> **Status 2026-10-01**: active (master plan) — M0–M4 done, webui (D18) complete,
+> **Status 2026-10-03**: active (master plan) — M0–M4.5 done, webui (D18) complete,
 > lifecycle (D19) landed; open items in §11 "Next up" and in the
 > feature-plan headers (each `plan/*.md` carries a
 > `**Status <last-update-date>**: <status>` header).
@@ -398,13 +398,22 @@ Purpose: a **reproducible test case** (build + run + test) without physical hard
   `dockerized_trx` still deferred (needs bridging/root).
 - Rootfs grew past the default ext2 size → `BR2_TARGET_ROOTFS_EXT2_SIZE=256M`.
 
-### M4.5 — Audio in the guest (0.5 d) — late, after the applications
+### M4.5 — Audio in the guest (0.5 d) — **DONE** (via the M3/D12–D15 rigs)
 - Kernel fragment + `alsa-lib`/`alsa-utils` in the rootfs; `snd-aloop` and `virtio-snd`.
 - Run script with audio backends `driver=none` and `driver=wav` (host capture).
 - **DoD**: `aplay -l` lists the cards (aloop and virtio-snd); playing a wav to the
   virtio-snd device with the `wav` backend produces an audio file on the host;
   ping from the host via user-net; websocket port forwarding (e.g. 5000) verified
   with `nc`.
+- **Verified**: both cards ship and load (`/etc/modules.d/audio`: snd-aloop +
+  virtio_snd; M2 DoD grep); `run-qemu.sh --audio none|aloop|virtio-snd|
+  virtio-snd-wav|virtio-snd-pa`; full local chains green end-to-end — M3
+  aloop→aloop soak, D12/D13 MPD → aloop → camilladsp → WAV (host capture),
+  D15 bridge-rig sink `inferno RX → camilladsp → virtio-snd` (card0 RUNNING,
+  docs/bridge-rig.md, docs/radio-over-dante.md). NB: under TCG emulation the
+  chain needs **large buffers** — camilladsp `chunksize 2048` (D14) — that is
+  emulation latency, not a stack limitation (the constraint disappears on
+  real hardware).
 
 ### M5 — Integration and documentation (1 d)
 - Both applications active at the same time (e.g. camilladsp capturing from the
