@@ -102,7 +102,10 @@ class Console:
         return None
 
     def send(self, line):
-        self.sock.sendall(line.encode("latin-1") + b"\n")
+        try:
+            self.sock.sendall(line.encode("latin-1") + b"\n")
+        except OSError as e:
+            raise SystemExit(f"qemu_console: console closed (QEMU/guest died?): {e}")
 
     def run(self, name, cmd, timeout):
         self._exec_n = getattr(self, "_exec_n", 0) + 1

@@ -134,7 +134,10 @@ jobs:
       - name: Install QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-arm
+          # ipxe-qemu: virtio-net-pci option ROMs (qemu-system-arm does not
+          # pull them in; without efi-virtio.rom the rig fails at startup)
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-arm ipxe-qemu
           qemu-system-arm --version | head -1
 
       - name: Fetch images
