@@ -1,6 +1,8 @@
 # Plan — RK3506 test firmware (ARM Cortex-A7 + NEON) on QEMU
 
-> **Status 2026-10-03**: active (master plan) — M0–M4.5 done, webui (D18) complete,
+> **Status 2026-10-04**: active (master plan) — M0–M5.5 done, M6 closed as
+> "CI done, latency items suspended until real hardware" (§5 M6); webui (D18)
+> complete,
 > lifecycle (D19) landed; open items in §11 "Next up" and in the
 > feature-plan headers (each `plan/*.md` carries a
 > `**Status <last-update-date>**: <status>` header).
@@ -77,10 +79,10 @@ Purpose: a **reproducible test case** (build + run + test) without physical hard
 ## 3. Repository layout
 
 ```
-.
-├── plan/                       # this plan + feature plans (each carries a
-│                               #  **Status <date>**: header = status + last update)
-├── buildroot/                  # git submodule: Buildroot 2026.05.2 (rust 1.90, kernel 6.12.x)
+ .
+ ├── plan/                       # this plan
+ ├── .github/workflows/ci.yml    # M6 CI: build + M1–M4 DoD boot test
+ ├── buildroot/                  # git submodule: Buildroot 2026.05.2 (rust 1.90, kernel 6.12.x)
 ├── br-external/                # Buildroot external tree
 │   ├── external.desc / external.mk
 │   ├── configs/rk3506qemu_defconfig
@@ -127,6 +129,11 @@ Purpose: a **reproducible test case** (build + run + test) without physical hard
 │   │                           #  guest port on the host, e.g. camilladsp ws on 5000)
 │   ├── test-two-guests.sh      # M4 harness: PTPv2 master/slave + inferno capture
 │   ├── test-audio-flow.sh      # M4 real-flow test: B TX -> Dante flow -> A RX
+│   ├── test.sh                 # M5 DoD: automated M1-M4 checks on one guest
+│   │                           #  (telnet-console expect via qemu_console.py)
+│   ├── qemu_console.py         # rootless expect driver for --console telnet
+│   ├── memory-matrix.sh        # M5.5: 128/256/512 MB profiles + virtio-snd wav
+│   │                           #  run -> results/memory-matrix.md
 │   ├── dante-l2node.py         # host rootless L2 node on the mcast tunnel; speaks
 │   │                           #  inferno's ARC protocol (subscriptions, UDP 4440);
 │   │                           #  --direct SRC_IP = plain-UDP mode for the bridge rig
@@ -415,14 +422,30 @@ Purpose: a **reproducible test case** (build + run + test) without physical hard
   emulation latency, not a stack limitation (the constraint disappears on
   real hardware).
 
-### M5 — Integration and documentation (1 d)
+### M5 — Integration and documentation (1 d) — **DONE** (2026-10-04)
 - Both applications active at the same time (e.g. camilladsp capturing from the
   inferno PCM via aloop); automated test script (`scripts/test.sh`) running the
   M1–M4 DoD checks; README with quickstart; license notes (GPLv3/AGPLv3 inferno —
   incl. Audinate patent notice; GPLv3/MPL2 camilladsp).
 - **DoD**: from scratch: `./scripts/build.sh && ./scripts/run-qemu.sh && ./scripts/test.sh` green.
+- **Implemented**: `scripts/test.sh` + `scripts/qemu_console.py` (expect-style
+  telnet-console driver for `run-qemu.sh --console telnet:PORT`; rootless,
+  marker/sentinel protocol, CR normalization, two-phase run so host-side
+  checks happen while the guest lives). Checks: M1 (NEON/VFPv4 features,
+  clean `reboot: Power down`), M2 (procd=PID1, ubus objects via
+  `ubus -t wait_for`, slirp eth0 10.0.2.15 + default route + resolv.conf,
+  netifd `kill -9` respawn + lan up), M3 (features websocket+32bit,
+  genconf'd config `--check`, daemon Running via the native ubus object,
+  WS `101 Switching Protocols` through the :5000 hostfwd), M4 (lone-PTPv2
+  GM: `ptp locked:true`, `/tmp/ptp-usrvclock`, statime pid,
+  `arecord -L` lists the inferno PCM).
+  **Verified 2026-10-04: 20/20 PASS, "M5 DoD: GREEN"** (boot→checks→poweroff
+  ≈ 4 min under TCG). Timing lessons: the console shell appears before
+  rcS finishes — every early check needs a guest-side wait loop (DHCP,
+  `ubus wait_for`, ptp settle), and the WS handshake must run before the
+  poweroff phase.
 
-### M5.5 — Memory matrix and full pipeline (1 d)
+### M5.5 — Memory matrix and full pipeline (1 d) — **DONE** (2026-10-04)
 - Run the M3/M5 tests on the **128/256/512 MB** RAM profiles (`run-qemu.sh --mem`).
 - Full pipeline with virtio-snd (see 6.3) + wav capture on the host.
 - Measurements per profile: `MemAvailable`/`MemFree` at idle, RSS of processes
@@ -432,11 +455,49 @@ Purpose: a **reproducible test case** (build + run + test) without physical hard
   and actual threshold); virtio-snd→camilladsp→wav pipeline verified on at least
   one profile; complete memory table with a minimum RAM recommendation for the
   final hardware.
+- **Implemented**: `scripts/memory-matrix.sh` (same console driver; per-profile
+  boot → ptp-lock + camilladsp wait → meminfo/RSS/OOM/XRUN collection →
+  `results/memory-matrix.md`; `--report-only` regenerates the report from the
+  raw blocks in `/tmp/opencode/mem-matrix/`). Fourth run binds playback to the
+  virtio-snd card (`Alsa:hw:CARD=N` via uci + service restart) and verifies
+  host `/tmp/guest-out.wav` (RIFF parse) + guest `/proc/asound` RUNNING.
+- **Results** (full table: `results/memory-matrix.md`): all three profiles
+  green — 128 MB boots with PTP locked + camilladsp Running + webui, 0 OOM,
+  0 XRUN, MemAvailable ≈ 31 MB; camilladsp RSS ≈ 9.1 MB (protected 2-way
+  pipeline, placeholder FIR), statime ≈ 2.9 MB, procd/netifd/ubusd/logd
+  ≈ 3.2 MB. virtio-snd→camilladsp→wav verified on 512 MB (card0 RUNNING,
+  53 s host capture). **Recommendation: 128 MB suffices for the sink role;
+  256 MB for the product** (real FIR banks, mlockall, MPD source role).
 
-### M6 — Optional extensions
+### M6 — Optional extensions — **CI done; rest SUSPENDED** (2026-10-04)
 - PREEMPT_RT + cyclictest (latency), NEON benchmarks (camilladsp FFT with/without
   `+neon`), zram as a swap variant, read-only rootfs, CI (GitLab/GitHub Actions)
   with build+boot tests.
+- **Status**:
+  - **CI — DONE**: `.github/workflows/ci.yml` — build matrix over the
+    variants: `rk3506qemu` (QEMU rig, boot-tested) and `virgilio_rpi2b`
+    (hardware **receiver** — flashable `sdcard.img` artifact: boot.vfat +
+    squashfs root + data ext4; no QEMU boot test, the raspi2b machine is
+    not our rig — receiver validation is the physical bridge rig,
+    docs/bridge-rig-hw-sink.md; srcqemu/rpi02w stay local builds). Build
+    job: submodules `buildroot` + `deps/oui` only, the app packages fetch
+    their own pins; output + `BR2_DL_DIR` on the big runner disk; ~2.4 GB
+    per-variant download cache via actions/cache; node 22 for the webui
+    frontend. Test job: `qemu-system-arm` from apt runs the M5
+    `scripts/test.sh` DoD suite against the built QEMU images via
+    `VIRGILIO_IMAGES`. Triggers: push/PR + manual; concurrency-cancel per
+    ref. Full build ≈ 1.5–3 h per variant on a 4-vCPU runner (Rust
+    cross-builds dominate; variants build in parallel).
+  - **read-only rootfs — superseded**: shipped on the hw boards via the
+    squashfs + overlay + data-partition prod layout
+    (plan/squashfs-overlay-userdata.md).
+  - **PREEMPT_RT/cyclictest, NEON benchmarks, zram — SUSPENDED**: TCG
+    emulation dominates any guest latency/scheduling measurement (D14/D15:
+    ±1 ms timestamp noise traced to translated-guest software timestamps;
+    the emulation ceiling disappears on silicon), so these numbers would
+    measure QEMU, not the target. Re-open on real hardware (RPi2b/RPi02W
+    rigs or the RK3506 board), where kernel HW RX timestamps are µs-class
+    under load and a PTP-capable MAC makes them load-independent.
 
 ## 6. QEMU virtual hardware
 
