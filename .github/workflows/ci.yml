@@ -72,8 +72,12 @@ jobs:
 
       - name: Move output to the big disk
         run: |
+          # /mnt is root-owned on GitHub runners; claim it for the build user
+          sudo mkdir -p /mnt/virgilio
+          sudo chown -R "$(id -u):$(id -g)" /mnt/virgilio
           mkdir -p /mnt/virgilio/dl /mnt/virgilio/output
           ln -s /mnt/virgilio/output output
+          : > /mnt/virgilio/build.log
           df -h / /mnt
 
       - name: Buildroot download cache
